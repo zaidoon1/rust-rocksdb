@@ -214,7 +214,7 @@ fn build_rocksdb() {
     config.define("ROCKSDB_SUPPORT_THREAD_LOCAL", None);
 
     if cfg!(feature = "jemalloc") {
-        config.define("WITH_JEMALLOC", "ON");
+        config.define("WITH_JEMALLOC", Some("1"));
     }
 
     #[cfg(feature = "io-uring")]

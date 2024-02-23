@@ -214,7 +214,8 @@ fn build_rocksdb() {
     config.define("ROCKSDB_SUPPORT_THREAD_LOCAL", None);
 
     if cfg!(feature = "jemalloc") {
-        config.define("ROCKSDB_JEMALLOC", Some("1"));
+        config.define("WITH_JEMALLOC", "ON");
+        println!("cargo:rustc-link-lib=static=jemalloc");
     }
 
     #[cfg(feature = "io-uring")]

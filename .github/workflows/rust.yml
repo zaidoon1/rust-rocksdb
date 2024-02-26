@@ -121,3 +121,7 @@ jobs:
       - name: Run rocksdb tests (jemalloc)
         if: runner.os != 'Windows'
         run: cargo test --all --features jemalloc
+
+      - name: Run rocksdb tests (malloc-usable-size)
+        if: runner.os == 'Linux'
+        run: cargo test --all --features malloc-usable-size

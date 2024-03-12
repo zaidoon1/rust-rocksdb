@@ -299,6 +299,7 @@ mod test {
         is_sync::<PlainTableFactoryOptions>();
         is_sync::<UnboundColumnFamily>();
         is_sync::<ColumnFamilyDescriptor>();
+        is_sync::<ColumnFamily>();
         is_sync::<SstFileWriter>();
         is_sync::<Cache>();
         is_sync::<CacheWrapper>();

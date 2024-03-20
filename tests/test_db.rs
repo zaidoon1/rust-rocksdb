@@ -1601,3 +1601,51 @@ fn ratelimiter_with_mode_test() {
         db.wait_for_compact(&wait_for_compact_opts).unwrap()
     }
 }
+
+#[test]
+fn set_stderr_logger_test() {
+    let path = DBPath::new("_rust_rocksdb_set_stderr_logger_test");
+    {
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        opts.create_missing_column_families(true);
+        opts.set_stderr_logger(rust_rocksdb::LogLevel::Info, Some("db"));
+
+        let cfs = vec!["cf1"];
+        let db = DB::open_cf(&opts, &path, cfs).unwrap();
+        let cf1 = db.cf_handle("cf1").unwrap();
+        db.put_cf(&cf1, b"k1", b"v1").unwrap();
+        db.put_cf(&cf1, b"k2", b"v2").unwrap();
+        db.put_cf(&cf1, b"k3", b"v3").unwrap();
+        db.put_cf(&cf1, b"k4", b"v4").unwrap();
+        db.put_cf(&cf1, b"k5", b"v5").unwrap();
+
+        db.put(b"k1", b"v1").unwrap();
+        db.put(b"k2", b"v2").unwrap();
+        db.put(b"k3", b"v3").unwrap();
+        db.put(b"k4", b"v4").unwrap();
+        db.put(b"k5", b"v5").unwrap();
+    }
+
+    {
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        opts.create_missing_column_families(true);
+        opts.set_stderr_logger(rust_rocksdb::LogLevel::Info, None::<&str>);
+
+        let cfs = vec!["cf1"];
+        let db = DB::open_cf(&opts, &path, cfs).unwrap();
+        let cf1 = db.cf_handle("cf1").unwrap();
+        db.put_cf(&cf1, b"k1", b"v1").unwrap();
+        db.put_cf(&cf1, b"k2", b"v2").unwrap();
+        db.put_cf(&cf1, b"k3", b"v3").unwrap();
+        db.put_cf(&cf1, b"k4", b"v4").unwrap();
+        db.put_cf(&cf1, b"k5", b"v5").unwrap();
+
+        db.put(b"k1", b"v1").unwrap();
+        db.put(b"k2", b"v2").unwrap();
+        db.put(b"k3", b"v3").unwrap();
+        db.put(b"k4", b"v4").unwrap();
+        db.put(b"k5", b"v5").unwrap();
+    }
+}

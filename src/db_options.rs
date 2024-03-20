@@ -3260,6 +3260,17 @@ impl Options {
         }
     }
 
+    /// Prints logs to stderr for faster debugging
+    /// See official [wiki](https://github.com/facebook/rocksdb/wiki/Logger) for more information.
+    pub fn set_stderr_logger(&mut self, log_level: LogLevel, prefix: impl CStrLike) {
+        let p = prefix.into_c_string().unwrap();
+
+        unsafe {
+            let logger = ffi::rocksdb_logger_create_stderr_logger(log_level as c_int, p.as_ptr());
+            ffi::rocksdb_options_set_info_log(self.inner, logger);
+        }
+    }
+
     /// Sets the threshold at which all writes will be slowed down to at least delayed_write_rate if estimated
     /// bytes needed to be compaction exceed this threshold.
     ///

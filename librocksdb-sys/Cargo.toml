@@ -1,6 +1,6 @@
 [package]
 name = "rust-librocksdb-sys"
-version = "0.18.1+8.11.3"
+version = "0.19.0+9.0.0"
 edition = "2021"
 rust-version = "1.75.0"
 authors = [
@@ -31,6 +31,7 @@ exclude = [
 default = ["static"]
 jemalloc = ["tikv-jemalloc-sys"]
 static = ["libz-sys?/static", "bzip2-sys?/static"]
+mt_static = []
 io-uring = ["pkg-config"]
 snappy = []
 lz4 = ["lz4-sys"]

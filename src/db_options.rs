@@ -217,16 +217,13 @@ pub(crate) struct OptionsMustOutliveDB {
 impl OptionsMustOutliveDB {
     pub(crate) fn clone(&self) -> Self {
         Self {
-            env: self.env.as_ref().map(Env::clone),
-            row_cache: self.row_cache.as_ref().map(Cache::clone),
+            env: self.env.clone(),
+            row_cache: self.row_cache.clone(),
             block_based: self
                 .block_based
                 .as_ref()
                 .map(BlockBasedOptionsMustOutliveDB::clone),
-            write_buffer_manager: self
-                .write_buffer_manager
-                .as_ref()
-                .map(WriteBufferManager::clone),
+            write_buffer_manager: self.write_buffer_manager.clone(),
         }
     }
 }
@@ -239,7 +236,7 @@ struct BlockBasedOptionsMustOutliveDB {
 impl BlockBasedOptionsMustOutliveDB {
     fn clone(&self) -> Self {
         Self {
-            block_cache: self.block_cache.as_ref().map(Cache::clone),
+            block_cache: self.block_cache.clone(),
         }
     }
 }

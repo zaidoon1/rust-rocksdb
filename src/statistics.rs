@@ -495,8 +495,6 @@ iterable_named_enum! {
 
         /// The counters for error handler, not that, bg_io_error is the subset of
         /// bg_error and bg_retryable_io_error is the subset of bg_io_error.
-        /// The misspelled versions are deprecated and only kept for compatibility.
-        /// ToDO: remove the misspelled tickers in the next major release.
         ErrorHandlerBgErrorCount("rocksdb.error.handler.bg.error.count"),
         ErrorHandlerBgIoErrorCount("rocksdb.error.handler.bg.io.error.count"),
         ErrorHandlerBgRetryableIoErrorCount("rocksdb.error.handler.bg.retryable.io.error.count"),

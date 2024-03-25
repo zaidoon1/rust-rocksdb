@@ -643,16 +643,21 @@ iterable_named_enum! {
         FileReadDbIteratorMicros("rocksdb.file.read.db.iterator.micros"),
         FileReadVerifyDbChecksumMicros("rocksdb.file.read.verify.db.checksum.micros"),
         FileReadVerifyFileChecksumsMicros("rocksdb.file.read.verify.file.checksums.micros"),
+
+        // Time spent in writing SST files
+        SstWriteMicros("rocksdb.sst.write.micros"),
+        // Time spent in writing SST table (currently only block-based table) or
+        // blob file for flush, compaction or db open
+        FileWriteFlushMicros("rocksdb.file.write.flush.micros"),
+        FileWriteCompactionMicros("rocksdb.file.write.compaction.micros"),
+        FileWriteDbOpenMicros("rocksdb.file.write.db.open.micros"),
+
         /// The number of subcompactions actually scheduled during a compaction
         NumSubcompactionsScheduled("rocksdb.num.subcompactions.scheduled"),
         /// Value size distribution in each operation
         BytesPerRead("rocksdb.bytes.per.read"),
         BytesPerWrite("rocksdb.bytes.per.write"),
         BytesPerMultiget("rocksdb.bytes.per.multiget"),
-        BytesCompressed("rocksdb.bytes.compressed"),
-        /// DEPRECATED / unused (see BytesCompressed{From,To})
-        BytesDecompressed("rocksdb.bytes.decompressed"),
-        /// DEPRECATED / unused (see BytesDecompressed{From,To})
         CompressionTimesNanos("rocksdb.compression.times.nanos"),
         DecompressionTimesNanos("rocksdb.decompression.times.nanos"),
         /// Number of merge operands passed to the merge operator in user read
@@ -783,5 +788,5 @@ fn sanity_checks() {
 
     // assert enum lengths
     assert_eq!(Ticker::iter().count(), 211 /* TICKER_ENUM_MAX */);
-    assert_eq!(Histogram::iter().count(), 60 /* HISTOGRAM_ENUM_MAX */);
+    assert_eq!(Histogram::iter().count(), 62 /* HISTOGRAM_ENUM_MAX */);
 }

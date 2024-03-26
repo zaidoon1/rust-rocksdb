@@ -943,6 +943,37 @@ impl Options {
         column_descriptors
     }
 
+    /// Updates DBOptions with values parsed from a string.
+    ///
+    /// See official [wiki](
+    /// https://github.com/facebook/rocksdb/wiki/Option-String-and-Option-Map#option-string)
+    /// for more information.
+    pub fn set_options_from_string(&mut self, string: impl CStrLike) -> Result<&mut Self, Error> {
+        let c_string = string.into_c_string().unwrap();
+        let mut err_p: *mut i8 = std::ptr::null::<i8>().cast_mut();
+        unsafe {
+            ffi::rocksdb_get_options_from_string(
+                self.inner,
+                c_string.as_ptr(),
+                self.inner,
+                &mut err_p,
+            );
+        }
+
+        if err_p.is_null() {
+            Ok(self)
+        } else {
+            let err: String;
+            unsafe {
+                err = CStr::from_ptr(err_p).to_str().unwrap().to_owned();
+                ffi::rocksdb_free(err_p as *mut c_void);
+            }
+            Err(Error::new(format!(
+                "Could not set options from string: {err}",
+            )))
+        }
+    }
+
     /// By default, RocksDB uses only one background thread for flush and
     /// compaction. Calling this function will set it up such that total of
     /// `total_threads` is used. Good value for `total_threads` is the number of

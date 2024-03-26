@@ -289,3 +289,28 @@ fn test_set_ttl() {
         let _db = DB::open(&opts, &path).unwrap();
     }
 }
+
+#[test]
+fn test_set_options_from_string() {
+    let path = DBPath::new("_set_options_from_string");
+    {
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        opts.set_options_from_string("compaction_pri=kOldestSmallestSeqFirst")
+            .expect("option compaction_pri is set");
+        let _db = DB::open(&opts, &path).unwrap();
+    }
+}
+
+#[test]
+#[should_panic(expected = "Could not set options from string: ")]
+fn test_set_options_from_string_failure() {
+    let path = DBPath::new("_set_options_from_string");
+    {
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        opts.set_options_from_string("compaction_prikOldestSmallestSeqFirst")
+            .unwrap();
+        let _db = DB::open(&opts, &path).unwrap();
+    }
+}

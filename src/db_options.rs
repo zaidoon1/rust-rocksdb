@@ -950,26 +950,23 @@ impl Options {
     /// for more information.
     pub fn set_options_from_string(&mut self, string: impl CStrLike) -> Result<&mut Self, Error> {
         let c_string = string.into_c_string().unwrap();
-        let mut err_p: *mut i8 = std::ptr::null::<i8>().cast_mut();
+        let mut err: *mut c_char = null_mut();
+        let err_ptr: *mut *mut c_char = &mut err;
         unsafe {
             ffi::rocksdb_get_options_from_string(
                 self.inner,
                 c_string.as_ptr(),
                 self.inner,
-                &mut err_p,
+                err_ptr,
             );
         }
 
-        if err_p.is_null() {
+        if err.is_null() {
             Ok(self)
         } else {
-            let err: String;
-            unsafe {
-                err = CStr::from_ptr(err_p).to_str().unwrap().to_owned();
-                ffi::rocksdb_free(err_p as *mut c_void);
-            }
             Err(Error::new(format!(
-                "Could not set options from string: {err}",
+                "Could not set options from string: {}",
+                crate::ffi_util::error_message(err)
             )))
         }
     }

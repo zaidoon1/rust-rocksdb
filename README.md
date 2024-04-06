@@ -37,7 +37,9 @@ compression submodules:
 git submodule update --init --recursive
 ```
 
-## Compression Support
+## Features
+
+### Compression Support
 
 By default, support for [Snappy](https://github.com/google/snappy),
 [LZ4](https://github.com/lz4/lz4), [Zstd](https://github.com/facebook/zstd),
@@ -53,7 +55,7 @@ default-features = false
 features = ["lz4"]
 ```
 
-## Multithreaded ColumnFamily alternation
+### Multithreaded ColumnFamily alternation
 
 RocksDB allows column families to be created and dropped
 from multiple threads concurrently, but this crate doesn't allow it by default
@@ -62,9 +64,36 @@ the crate feature `multi-threaded-cf`, which makes this binding's
 data structures use `RwLock` by default. Alternatively, you can directly create
 `DBWithThreadMode<MultiThreaded>` without enabling the crate feature.
 
-## Switch between /MT or /MD run time library (Only for Windows)
+### Switch between /MT or /MD run time library (Only for Windows)
 
 The feature `mt_static` will request the library to be built with [/MT](https://learn.microsoft.com/en-us/cpp/build/reference/md-mt-ld-use-run-time-library?view=msvc-170)
 flag, which results in library using the static version of the run-time library.
 *This can be useful in case there's a conflict in the dependecy tree between different
 run-time versions.*
+
+### Jemalloc
+
+The feature `jemalloc` will enable the
+`unprefixed_malloc_on_supported_platforms` feature of `tikv-jemalloc-sys`,
+hooking the actual malloc and free, so jemalloc is used to allocate memory. On
+Supported platforms such as Linux, Rocksdb will also be properly informed that
+Jemalloc is enabled so that it can apply internal optimizations gated behind
+Jemalloc being enabled. On [unsupported
+platforms](https://github.com/zaidoon1/rust-rocksdb/blob/master/librocksdb-sys/build.rs#L4-L7),
+Rocksdb won't be properly
+informed that Jemalloc is being used so some internal optimizations are skipped
+BUT you will still get the benefits of Jemalloc memory allocation. Note that by
+default, Rust uses libc malloc on Linux which is known to have more memory
+fragmentation than Jemalloc especially with Rocksdb. See [github
+issue](https://github.com/facebook/rocksdb/issues/12364) for more information.
+In general, I highly suggest enabling Jemalloc unless there is a specific reason
+not to (your system doesn't support it, etc.)
+
+### Malloc Usable Size
+
+The feature `malloc-usable-size` will inform Rocksdb that malloc_usable_size is
+supported by the platform and is necessary if you want to use the
+`optimize_filters_for_memory` rocksdb feature as this feature is gated behind
+malloc_usable_size being available. See
+[rocksdb](https://github.com/facebook/rocksdb/blob/v9.0.0/include/rocksdb/table.h#L401-L434)
+for more information on the feature.

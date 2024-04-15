@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::ffi::CStr;
+use std::panic::{catch_unwind, AssertUnwindSafe, RefUnwindSafe};
 use std::path::Path;
 use std::ptr::{null_mut, NonNull};
 use std::slice;
@@ -3455,6 +3456,51 @@ impl Options {
         unsafe {
             let logger = ffi::rocksdb_logger_create_stderr_logger(log_level as c_int, p.as_ptr());
             ffi::rocksdb_options_set_info_log(self.inner, logger);
+        }
+    }
+
+    /// Invokes callback with log messages.
+    ///
+    /// # Examples
+    /// ```
+    /// use rust_rocksdb::{LogLevel, Options};
+    ///
+    /// let mut options = Options::default();
+    /// options.set_callback_logger(LogLevel::Debug, &|level, msg| println!("{level:?} {msg}"));
+    /// ```
+    pub fn set_callback_logger<'a, F>(&mut self, log_level: LogLevel, func: &'a F)
+    where
+        F: for<'b> FnMut(LogLevel, &'b str) + RefUnwindSafe + Send + Sync + 'a,
+    {
+        let func = func as *const F;
+        let func = func.cast::<c_void>();
+        unsafe {
+            let logger = ffi::rocksdb_logger_create_callback_logger(
+                log_level as c_int,
+                Some(Self::logger_callback::<'a, F>),
+                func.cast_mut(),
+            );
+            ffi::rocksdb_options_set_info_log(self.inner, logger);
+        }
+    }
+
+    extern "C" fn logger_callback<'a, F>(
+        func: *mut c_void,
+        level: u32,
+        msg: *mut c_char,
+        len: usize,
+    ) where
+        F: for<'b> FnMut(LogLevel, &'b str) + RefUnwindSafe + Send + Sync + 'a,
+    {
+        use std::{mem, process, str};
+
+        let level = unsafe { mem::transmute::<u32, LogLevel>(level) };
+        let slice = unsafe { slice::from_raw_parts_mut(msg.cast::<u8>(), len) };
+        let msg = unsafe { str::from_utf8_unchecked(slice) };
+        let func = unsafe { &mut *func.cast::<F>() };
+        let mut func = AssertUnwindSafe(func);
+        if catch_unwind(move || func(level, msg)).is_err() {
+            process::abort();
         }
     }
 

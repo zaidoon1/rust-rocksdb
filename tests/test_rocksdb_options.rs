@@ -314,3 +314,20 @@ fn test_set_options_from_string_failure() {
         let _db = DB::open(&opts, &path).unwrap();
     }
 }
+
+#[test]
+fn test_set_callback_logger() {
+    use rust_rocksdb::LogLevel::Debug;
+    let path = DBPath::new("_set_callback_logger");
+    let mut msgs = 0;
+    {
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        opts.set_callback_logger(Debug, &mut |_lev, _msg| {
+            msgs += 1;
+        });
+
+        let _db = DB::open(&opts, &path).unwrap();
+    }
+    assert!(msgs > 0, "callback logger produced no messages!");
+}

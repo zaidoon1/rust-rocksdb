@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::ffi::CStr;
+use std::panic::{catch_unwind, AssertUnwindSafe, RefUnwindSafe};
 use std::path::Path;
 use std::ptr::{null_mut, NonNull};
 use std::slice;
@@ -3293,6 +3294,38 @@ impl Options {
         unsafe {
             let logger = ffi::rocksdb_logger_create_stderr_logger(log_level as c_int, p.as_ptr());
             ffi::rocksdb_options_set_info_log(self.inner, logger);
+        }
+    }
+
+    /// Invokes callback with log message.
+    pub fn set_callback_logger<F>(&mut self, log_level: LogLevel, func: &F)
+    where
+        F: for<'a> FnMut(LogLevel, &'a str) + RefUnwindSafe + Send + Sync + 'static,
+    {
+        let opaque = std::ptr::from_ref(func).cast::<c_void>();
+        unsafe {
+            let logger = ffi::rocksdb_logger_create_callback_logger(
+                log_level as c_int,
+                Some(Self::logger_callback::<F>),
+                opaque.cast_mut(),
+            );
+            ffi::rocksdb_options_set_info_log(self.inner, logger);
+        }
+    }
+
+    extern "C" fn logger_callback<F>(func: *mut c_void, level: u32, msg: *mut c_char, len: usize)
+    where
+        F: for<'a> FnMut(LogLevel, &'a str) + RefUnwindSafe + Send + Sync + 'static,
+    {
+        use std::{mem, process, str};
+
+        let level = unsafe { mem::transmute::<u32, LogLevel>(level) };
+        let slice = unsafe { slice::from_raw_parts_mut(msg.cast::<u8>(), len) };
+        let msg = unsafe { str::from_utf8_unchecked(slice) };
+        let func = unsafe { &mut *func.cast::<F>() };
+        let mut func = AssertUnwindSafe(func);
+        if catch_unwind(move || func(level, msg)).is_err() {
+            process::abort();
         }
     }
 

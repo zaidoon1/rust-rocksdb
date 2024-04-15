@@ -3296,6 +3296,34 @@ impl Options {
         }
     }
 
+    /// Invokes callback with log message.
+    pub fn set_callback_logger<F>(&mut self, log_level: LogLevel, func: &F)
+    where
+        F: for<'a> FnMut(LogLevel, &'a str),
+    {
+        let opaque = std::ptr::from_ref(func).cast::<c_void>();
+        unsafe {
+            let logger = ffi::rocksdb_logger_create_callback_logger(
+                log_level as c_int,
+                Some(Self::logger_callback::<F>),
+                opaque.cast_mut(),
+            );
+            ffi::rocksdb_options_set_info_log(self.inner, logger);
+        }
+    }
+
+    extern "C" fn logger_callback<F>(opaque: *mut c_void, level: u32, msg: *mut c_char, len: usize)
+    where
+        F: for<'a> FnMut(LogLevel, &'a str),
+    {
+        let opaque = opaque.cast::<F>();
+        let func = unsafe { &mut *opaque };
+        let level = unsafe { std::mem::transmute::<u32, LogLevel>(level) };
+        let slice = unsafe { slice::from_raw_parts_mut(msg.cast::<u8>(), len) };
+        let msg = unsafe { std::str::from_utf8_unchecked(slice) };
+        func(level, msg);
+    }
+
     /// Sets the threshold at which all writes will be slowed down to at least delayed_write_rate if estimated
     /// bytes needed to be compaction exceed this threshold.
     ///

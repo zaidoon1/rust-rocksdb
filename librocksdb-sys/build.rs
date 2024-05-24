@@ -1,6 +1,11 @@
 use std::path::Path;
 use std::{env, fs, path::PathBuf, process::Command};
 
+// On these platforms jemalloc-sys will use a prefixed jemalloc which cannot be linked together
+// with RocksDB.
+// See https://github.com/tikv/jemallocator/blob/tikv-jemalloc-sys-0.5.3/jemalloc-sys/src/env.rs#L25
+const NO_JEMALLOC_TARGETS: &[&str] = &["android", "dragonfly", "musl", "darwin"];
+
 fn link(name: &str, bundled: bool) {
     use std::env::var;
     let target = var("TARGET").unwrap();
@@ -218,18 +223,11 @@ fn build_rocksdb() {
 
     config.define("ROCKSDB_SUPPORT_THREAD_LOCAL", None);
 
-    #[cfg(feature = "jemalloc")]
-    {
-        if target.contains("linux") {
-            pkg_config::probe_library("jemalloc")
-                .expect("The jemalloc feature was requested but jemalloc is not installed");
-            config.define("ROCKSDB_JEMALLOC", Some("1"));
-            config.define("JEMALLOC_NO_DEMANGLE", Some("1"));
-        } else {
-            // this doesn't actually enable jemalloc, but mac/windows needs more
-            // work to make it work (statically link tikv-jemalloc). For now,
-            // I'll keep this as is.
-            config.define("WITH_JEMALLOC", "ON");
+    if cfg!(feature = "jemalloc") && NO_JEMALLOC_TARGETS.iter().all(|i| !target.contains(i)) {
+        config.define("ROCKSDB_JEMALLOC", Some("1"));
+        config.define("JEMALLOC_NO_DEMANGLE", Some("1"));
+        if let Some(jemalloc_root) = env::var_os("DEP_JEMALLOC_ROOT") {
+            config.include(Path::new(&jemalloc_root).join("include"));
         }
     }
 
@@ -246,6 +244,9 @@ fn build_rocksdb() {
     }
 
     if target.contains("msvc") {
+        if cfg!(feature = "mt_static") {
+            config.static_crt(true);
+        }
         config.flag("-EHsc");
         config.flag("-std:c++17");
     } else {
@@ -261,7 +262,10 @@ fn build_rocksdb() {
         config.flag("-Wno-strict-aliasing");
         config.flag("-Wno-invalid-offsetof");
     }
-
+    if target.contains("riscv64gc") {
+        // link libatomic required to build for riscv64gc
+        println!("cargo:rustc-link-lib=atomic");
+    }
     for file in lib_sources {
         config.file(format!("rocksdb/{file}"));
     }
@@ -285,6 +289,9 @@ fn build_snappy() {
 
     if target.contains("msvc") {
         config.flag("-EHsc");
+        if cfg!(feature = "mt_static") {
+            config.static_crt(true);
+        }
     } else {
         // Snappy requires C++11.
         // See: https://github.com/google/snappy/blob/master/CMakeLists.txt#L32-L38

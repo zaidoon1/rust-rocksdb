@@ -110,6 +110,8 @@ fn test_block_based_options() {
 fn test_read_options() {
     let mut read_opts = ReadOptions::default();
     read_opts.set_verify_checksums(false);
+    read_opts.set_deadline(121);
+    read_opts.set_io_timeout(343);
 }
 
 #[test]
@@ -284,6 +286,31 @@ fn test_set_ttl() {
         let mut opts = Options::default();
         opts.create_if_missing(true);
         opts.set_ttl(5);
+        let _db = DB::open(&opts, &path).unwrap();
+    }
+}
+
+#[test]
+fn test_set_options_from_string() {
+    let path = DBPath::new("_set_options_from_string");
+    {
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        opts.set_options_from_string("compaction_pri=kOldestSmallestSeqFirst")
+            .expect("option compaction_pri is set");
+        let _db = DB::open(&opts, &path).unwrap();
+    }
+}
+
+#[test]
+#[should_panic(expected = "Could not set options from string: ")]
+fn test_set_options_from_string_failure() {
+    let path = DBPath::new("_set_options_from_string");
+    {
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        opts.set_options_from_string("compaction_prikOldestSmallestSeqFirst")
+            .unwrap();
         let _db = DB::open(&opts, &path).unwrap();
     }
 }

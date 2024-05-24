@@ -217,16 +217,13 @@ pub(crate) struct OptionsMustOutliveDB {
 impl OptionsMustOutliveDB {
     pub(crate) fn clone(&self) -> Self {
         Self {
-            env: self.env.as_ref().map(Env::clone),
-            row_cache: self.row_cache.as_ref().map(Cache::clone),
+            env: self.env.clone(),
+            row_cache: self.row_cache.clone(),
             block_based: self
                 .block_based
                 .as_ref()
                 .map(BlockBasedOptionsMustOutliveDB::clone),
-            write_buffer_manager: self
-                .write_buffer_manager
-                .as_ref()
-                .map(WriteBufferManager::clone),
+            write_buffer_manager: self.write_buffer_manager.clone(),
         }
     }
 }
@@ -239,7 +236,7 @@ struct BlockBasedOptionsMustOutliveDB {
 impl BlockBasedOptionsMustOutliveDB {
     fn clone(&self) -> Self {
         Self {
-            block_cache: self.block_cache.as_ref().map(Cache::clone),
+            block_cache: self.block_cache.clone(),
         }
     }
 }
@@ -668,7 +665,7 @@ impl BlockBasedOptions {
     /// See full [list](https://github.com/facebook/rocksdb/blob/v8.6.7/include/rocksdb/table.h#L493-L521)
     /// of the supported versions.
     ///
-    /// Default: 5.
+    /// Default: 6.
     pub fn set_format_version(&mut self, version: i32) {
         unsafe {
             ffi::rocksdb_block_based_options_set_format_version(self.inner, version);
@@ -944,6 +941,34 @@ impl Options {
         ffi::rocksdb_free(column_family_names as *mut c_void);
         ffi::rocksdb_free(column_family_options as *mut c_void);
         column_descriptors
+    }
+
+    /// Updates DBOptions with values parsed from a string.
+    ///
+    /// See official [wiki](
+    /// https://github.com/facebook/rocksdb/wiki/Option-String-and-Option-Map#option-string)
+    /// for more information.
+    pub fn set_options_from_string(&mut self, string: impl CStrLike) -> Result<&mut Self, Error> {
+        let c_string = string.into_c_string().unwrap();
+        let mut err: *mut c_char = null_mut();
+        let err_ptr: *mut *mut c_char = &mut err;
+        unsafe {
+            ffi::rocksdb_get_options_from_string(
+                self.inner,
+                c_string.as_ptr(),
+                self.inner,
+                err_ptr,
+            );
+        }
+
+        if err.is_null() {
+            Ok(self)
+        } else {
+            Err(Error::new(format!(
+                "Could not set options from string: {}",
+                crate::ffi_util::error_message(err)
+            )))
+        }
     }
 
     /// By default, RocksDB uses only one background thread for flush and
@@ -2886,17 +2911,6 @@ impl Options {
         }
     }
 
-    /// Specifies the file access pattern once a compaction is started.
-    ///
-    /// It will be applied to all input files of a compaction.
-    ///
-    /// Default: Normal
-    pub fn set_access_hint_on_compaction_start(&mut self, pattern: AccessHint) {
-        unsafe {
-            ffi::rocksdb_options_set_access_hint_on_compaction_start(self.inner, pattern as c_int);
-        }
-    }
-
     /// Enable/disable adaptive mutex, which spins in the user space before resorting to kernel.
     ///
     /// This could reduce context switch when the mutex is not
@@ -3165,6 +3179,55 @@ impl Options {
         }
     }
 
+    /// Create a RateLimiter object, which can be shared among RocksDB instances to
+    /// control write rate of flush and compaction.
+    ///
+    /// rate_bytes_per_sec: this is the only parameter you want to set most of the
+    /// time. It controls the total write rate of compaction and flush in bytes per
+    /// second. Currently, RocksDB does not enforce rate limit for anything other
+    /// than flush and compaction, e.g. write to WAL.
+    ///
+    /// refill_period_us: this controls how often tokens are refilled. For example,
+    /// when rate_bytes_per_sec is set to 10MB/s and refill_period_us is set to
+    /// 100ms, then 1MB is refilled every 100ms internally. Larger value can lead to
+    /// burstier writes while smaller value introduces more CPU overhead.
+    /// The default should work for most cases.
+    ///
+    /// fairness: RateLimiter accepts high-pri requests and low-pri requests.
+    /// A low-pri request is usually blocked in favor of hi-pri request. Currently,
+    /// RocksDB assigns low-pri to request from compaction and high-pri to request
+    /// from flush. Low-pri requests can get blocked if flush requests come in
+    /// continuously. This fairness parameter grants low-pri requests permission by
+    /// 1/fairness chance even though high-pri requests exist to avoid starvation.
+    /// You should be good by leaving it at default 10.
+    ///
+    /// mode: Mode indicates which types of operations count against the limit.
+    ///
+    /// auto_tuned: Enables dynamic adjustment of rate limit within the range
+    ///              `[rate_bytes_per_sec / 20, rate_bytes_per_sec]`, according to
+    ///              the recent demand for background I/O.
+    pub fn set_ratelimiter_with_mode(
+        &mut self,
+        rate_bytes_per_sec: i64,
+        refill_period_us: i64,
+        fairness: i32,
+        mode: RateLimiterMode,
+        auto_tuned: bool,
+    ) {
+        unsafe {
+            let ratelimiter = ffi::rocksdb_ratelimiter_create_with_mode(
+                rate_bytes_per_sec,
+                refill_period_us,
+                fairness,
+                mode as c_int,
+                auto_tuned,
+            );
+            // Since limiter is wrapped in shared_ptr, we don't need to
+            // call rocksdb_ratelimiter_destroy explicitly.
+            ffi::rocksdb_options_set_ratelimiter(self.inner, ratelimiter);
+        }
+    }
+
     /// Sets the maximal size of the info log file.
     ///
     /// If the log file is larger than `max_log_file_size`, a new info log file
@@ -3219,6 +3282,17 @@ impl Options {
     pub fn set_recycle_log_file_num(&mut self, num: usize) {
         unsafe {
             ffi::rocksdb_options_set_recycle_log_file_num(self.inner, num);
+        }
+    }
+
+    /// Prints logs to stderr for faster debugging
+    /// See official [wiki](https://github.com/facebook/rocksdb/wiki/Logger) for more information.
+    pub fn set_stderr_logger(&mut self, log_level: LogLevel, prefix: impl CStrLike) {
+        let p = prefix.into_c_string().unwrap();
+
+        unsafe {
+            let logger = ffi::rocksdb_logger_create_stderr_logger(log_level as c_int, p.as_ptr());
+            ffi::rocksdb_options_set_info_log(self.inner, logger);
         }
     }
 
@@ -3831,6 +3905,30 @@ impl ReadOptions {
             ffi::rocksdb_readoptions_set_async_io(self.inner, c_uchar::from(v));
         }
     }
+
+    /// Deadline for completing an API call (Get/MultiGet/Seek/Next for now)
+    /// in microseconds.
+    /// It should be set to microseconds since epoch, i.e, gettimeofday or
+    /// equivalent plus allowed duration in microseconds.
+    /// This is best effort. The call may exceed the deadline if there is IO
+    /// involved and the file system doesn't support deadlines, or due to
+    /// checking for deadline periodically rather than for every key if
+    /// processing a batch
+    pub fn set_deadline(&mut self, microseconds: u64) {
+        unsafe {
+            ffi::rocksdb_readoptions_set_deadline(self.inner, microseconds);
+        }
+    }
+
+    /// A timeout in microseconds to be passed to the underlying FileSystem for
+    /// reads. As opposed to deadline, this determines the timeout for each
+    /// individual file read request. If a MultiGet/Get/Seek/Next etc call
+    /// results in multiple reads, each read can last up to io_timeout us.
+    pub fn set_io_timeout(&mut self, microseconds: u64) {
+        unsafe {
+            ffi::rocksdb_readoptions_set_io_timeout(self.inner, microseconds);
+        }
+    }
 }
 
 impl Default for ReadOptions {
@@ -4023,15 +4121,12 @@ pub enum DBRecoveryMode {
     SkipAnyCorruptedRecord = ffi::rocksdb_skip_any_corrupted_records_recovery as isize,
 }
 
-/// File access pattern once a compaction has started
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde1", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]
-pub enum AccessHint {
-    None = 0,
-    Normal,
-    Sequential,
-    WillNeed,
+pub enum RateLimiterMode {
+    KReadsOnly = 0,
+    KWritesOnly = 1,
+    KAllIo = 2,
 }
 
 pub struct FifoCompactOptions {

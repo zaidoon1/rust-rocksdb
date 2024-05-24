@@ -118,7 +118,7 @@ pub use crate::{
         CompactOptions, CuckooTableOptions, DBCompactionStyle, DBCompressionType, DBPath,
         DBRecoveryMode, DataBlockIndexType, FifoCompactOptions, FlushOptions,
         IngestExternalFileOptions, KeyEncodingType, LogLevel, MemtableFactory, Options,
-        PlainTableFactoryOptions, ReadOptions, ReadTier, UniversalCompactOptions,
+        PlainTableFactoryOptions, RateLimiterMode, ReadOptions, ReadTier, UniversalCompactOptions,
         UniversalCompactionStopStyle, WaitForCompactOptions, WriteBufferManager, WriteOptions,
     },
     db_pinnable_slice::DBPinnableSlice,
@@ -299,6 +299,7 @@ mod test {
         is_sync::<PlainTableFactoryOptions>();
         is_sync::<UnboundColumnFamily>();
         is_sync::<ColumnFamilyDescriptor>();
+        is_sync::<ColumnFamily>();
         is_sync::<SstFileWriter>();
         is_sync::<Cache>();
         is_sync::<CacheWrapper>();

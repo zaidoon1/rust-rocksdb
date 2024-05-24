@@ -1,6 +1,6 @@
 [package]
 name = "rust-librocksdb-sys"
-version = "0.18.0+8.11.3"
+version = "0.22.0+9.2.1"
 edition = "2021"
 rust-version = "1.75.0"
 authors = [
@@ -29,8 +29,9 @@ exclude = [
 
 [features]
 default = ["static"]
-jemalloc = ["tikv-jemalloc-sys", "pkg-config"]
+jemalloc = ["tikv-jemalloc-sys"]
 static = ["libz-sys?/static", "bzip2-sys?/static"]
+mt_static = []
 io-uring = ["pkg-config"]
 snappy = []
 lz4 = ["lz4-sys"]
@@ -51,7 +52,7 @@ libz-sys = { version = "1.1", default-features = false, optional = true }
 bzip2-sys = { version = "0.1", default-features = false, optional = true }
 
 [dev-dependencies]
-const-cstr = "0.3"
+const-str = "0.5"
 uuid = { version = "1", features = ["v4"] }
 
 [build-dependencies]

@@ -21,6 +21,12 @@ control and be able to create regular releases.
 
 - Clang and LLVM
 
+## Rust version
+
+rust-rocksdb keeps a rolling MSRV (minimum supported Rust version) policy of 6 months. This means we will accept PRs that upgrade the MSRV as long as the new Rust version used is at least 6 months old.
+
+Our current MSRV is 1.75.
+
 ## Contributing
 
 Feedback and pull requests welcome! If a particular feature of RocksDB is

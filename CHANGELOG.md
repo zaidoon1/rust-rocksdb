@@ -1,8 +1,65 @@
 # Changelog
 
-## [Unreleased]
-* Document that `default` column family doesn't inherit open options of db (
-  0xdeafbeef)
+## 0.26.0 (2024-04-24)
+
+* Add delete_range to OptimisticTransactionDB (vadim-su)
+* Bump snappy to 1.2.0 (aleksuss)
+* docs: document that default cf doesn't inherit db open options (0xdeafbeef)
+* upgrade to RocksDB 9.2.1 (zaidoon1)
+
+## 0.25.0 (2024-04-23)
+
+* Update to RocksDB 9.1.1 (zaidoon1)
+
+## 0.24.0 (2024-04-18)
+
+* update README to document the various crate features that can be enabled  (zaidoon1)
+* Update to RocksDB 9.1.0 (zaidoon1)
+
+## 0.23.2 (2024-03-30)
+
+* fix set_options_from_string binding (zaidoon1)
+
+## 0.23.1 (2024-03-28)
+
+* make ColumnFamily Sync (zaidoon1)
+* fix histogram stats after enum re-shuffle introduced in rocksdb v9.0 (zaidoon1)
+* Add linking libatomic command to build.rs to allow building for riscv64gc-unknown-linux-gnu target (willemolding)
+* Make BackupEngine Send (widagdos)
+* Add readme for mt_static feature (spector-9)
+* Add method to set DBOptions from string (jevolk)
+
+## 0.23.0 (2024-03-20)
+
+* Update to RocksDB 9.0.0 (zaidoon1)
+* Expose rate limiter with mode feature (zaidoon1)
+* Revert portable feature (zaidoon1)
+
+## 0.22.8 (2024-03-15)
+
+* Expose io-timeout/deadline read options (zaidoon1)
+* modernize CI and other CI related clean (zaidoon1)
+* replace unmaintained dev dependency (zaidoon1)
+* more ci clean up (zaidoon1)
+* fix: ptr::copy requires both ptrs to be non-null (ruanpetterson)
+* Feat: Adds crt_static method (spector-9)
+* Add portable feature for RocksDB build (sujayakar)
+* Update README.md with a new section for the portable feature (sujayakar)
+
+## 0.22.7 (2024-03-02)
+
+* don't use system jemalloc (zaidoon1)
+
+## 0.22.6 (2024-02-27)
+
+* Update to RocksDB 8.11.3 (zaidoon1)
+* Expose set_ttl  (zaidoon1)
+
+## 0.22.5 (2024-02-26)
+
+* add feature flag to enable malloc-usable-size used by optimize_filtes_for_memory feature (zaidoon1)
+* gate malloc-usable-size to linux only (zaidoon1)
+* actually enable jemalloc when feature is used on linux (zaidoon1)
 
 ## 0.22.4 (2024-02-20)
 

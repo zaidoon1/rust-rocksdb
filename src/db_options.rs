@@ -3243,9 +3243,8 @@ impl Options {
                 mode as c_int,
                 auto_tuned,
             );
-            // Since limiter is wrapped in shared_ptr, we don't need to
-            // call rocksdb_ratelimiter_destroy explicitly.
             ffi::rocksdb_options_set_ratelimiter(self.inner, ratelimiter);
+            ffi::rocksdb_ratelimiter_destroy(ratelimiter);
         }
     }
 

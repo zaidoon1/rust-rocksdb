@@ -2,7 +2,7 @@
 name = "rust-librocksdb-sys"
 version = "0.22.0+9.2.1"
 edition = "2021"
-rust-version = "1.75.0"
+rust-version = "1.78.0"
 authors = [
     "Karl Hobley <karlhobley10@gmail.com>",
     "Arkadiy Paronyan <arkadiy@ethcore.io>",

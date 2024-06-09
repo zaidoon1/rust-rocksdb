@@ -3,7 +3,7 @@ name = "rust-rocksdb"
 description = "Rust wrapper for Facebook's RocksDB embeddable database"
 version = "0.26.0"
 edition = "2021"
-rust-version = "1.75.0"
+rust-version = "1.78.0"
 authors = [
     "Tyler Neely <t@jujit.su>",
     "David Greenberg <dsg123456789@gmail.com>",

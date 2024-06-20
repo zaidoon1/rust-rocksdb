@@ -29,6 +29,7 @@ use crate::{
 use crate::column_family::ColumnFamilyTtl;
 use crate::ffi_util::CSlice;
 use libc::{self, c_char, c_int, c_uchar, c_void, size_t};
+use parking_lot::RwLock;
 use std::collections::BTreeMap;
 use std::ffi::{CStr, CString};
 use std::fmt;
@@ -40,7 +41,6 @@ use std::ptr;
 use std::slice;
 use std::str;
 use std::sync::Arc;
-use std::sync::RwLock;
 use std::time::Duration;
 
 /// A range of keys, `start_key` is included, but not `end_key`.
@@ -128,7 +128,7 @@ impl ThreadMode for MultiThreaded {
 
     fn drop_all_cfs_internal(&mut self) {
         // Cause all UnboundColumnFamily objects to be Drop::drop()-ed.
-        self.cfs.write().unwrap().clear();
+        self.cfs.write().clear();
     }
 }
 
@@ -2604,7 +2604,7 @@ impl<I: DBInner> DBCommon<MultiThreaded, I> {
     pub fn create_cf<N: AsRef<str>>(&self, name: N, opts: &Options) -> Result<(), Error> {
         // Note that we acquire the cfs lock before inserting: otherwise we might race
         // another caller who observed the handle as missing.
-        let mut cfs = self.cfs.cfs.write().unwrap();
+        let mut cfs = self.cfs.cfs.write();
         let inner = self.create_inner_cf_handle(name.as_ref(), opts)?;
         cfs.insert(
             name.as_ref().to_string(),
@@ -2616,7 +2616,7 @@ impl<I: DBInner> DBCommon<MultiThreaded, I> {
     /// Drops the column family with the given name by internally locking the inner column
     /// family map. This avoids needing `&mut self` reference
     pub fn drop_cf(&self, name: &str) -> Result<(), Error> {
-        match self.cfs.cfs.write().unwrap().remove(name) {
+        match self.cfs.cfs.write().remove(name) {
             Some(cf) => self.drop_column_family(cf.inner, cf),
             _ => Err(Error::new(format!("Invalid column family: {name}"))),
         }
@@ -2627,7 +2627,6 @@ impl<I: DBInner> DBCommon<MultiThreaded, I> {
         self.cfs
             .cfs
             .read()
-            .unwrap()
             .get(name)
             .cloned()
             .map(UnboundColumnFamily::bound_column_family)

@@ -1002,7 +1002,7 @@ impl TransactionDB<MultiThreaded> {
     pub fn create_cf<N: AsRef<str>>(&self, name: N, opts: &Options) -> Result<(), Error> {
         // Note that we acquire the cfs lock before inserting: otherwise we might race
         // another caller who observed the handle as missing.
-        let mut cfs = self.cfs.cfs.write().unwrap();
+        let mut cfs = self.cfs.cfs.write();
         let inner = self.create_inner_cf_handle(name.as_ref(), opts)?;
         cfs.insert(
             name.as_ref().to_string(),
@@ -1016,7 +1016,6 @@ impl TransactionDB<MultiThreaded> {
         self.cfs
             .cfs
             .read()
-            .unwrap()
             .get(name)
             .cloned()
             .map(UnboundColumnFamily::bound_column_family)
@@ -1025,7 +1024,7 @@ impl TransactionDB<MultiThreaded> {
     /// Drops the column family with the given name by internally locking the inner column
     /// family map. This avoids needing `&mut self` reference
     pub fn drop_cf(&self, name: &str) -> Result<(), Error> {
-        if let Some(cf) = self.cfs.cfs.write().unwrap().remove(name) {
+        if let Some(cf) = self.cfs.cfs.write().remove(name) {
             self.drop_column_family(cf.inner, cf)
         } else {
             Err(Error::new(format!("Invalid column family: {name}")))

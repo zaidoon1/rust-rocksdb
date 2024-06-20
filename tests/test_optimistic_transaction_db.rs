@@ -218,7 +218,7 @@ fn writebatch() {
             assert_eq!(batch.len(), 3);
             assert!(!batch.is_empty());
             assert!(db.get(b"k1").unwrap().is_none());
-            let p = db.write(batch);
+            let p = db.write(&batch);
             assert!(p.is_ok());
             let r: Result<Option<Vec<u8>>, Error> = db.get(b"k1");
             assert_eq!(r.unwrap().unwrap(), b"v1111");
@@ -229,7 +229,7 @@ fn writebatch() {
             batch.delete(b"k1");
             assert_eq!(batch.len(), 1);
             assert!(!batch.is_empty());
-            let p = db.write(batch);
+            let p = db.write(&batch);
             assert!(p.is_ok());
             assert!(db.get(b"k1").unwrap().is_none());
         }

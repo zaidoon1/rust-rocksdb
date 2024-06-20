@@ -122,7 +122,7 @@ fn test_write_batch_put_log_data() {
     batch.put(b"k1", b"v11111111");
     batch.put_log_data(b"log_data_value");
 
-    let p = db.write(batch);
+    let p = db.write(&batch);
     assert!(p.is_ok());
 
     let r: Result<Option<Vec<u8>>, Error> = db.get(b"k1");

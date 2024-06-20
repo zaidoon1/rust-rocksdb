@@ -101,7 +101,7 @@ fn writebatch_works() {
             assert_eq!(batch.len(), 3);
             assert!(!batch.is_empty());
             assert!(db.get(b"k1").unwrap().is_none());
-            let p = db.write(batch);
+            let p = db.write(&batch);
             assert!(p.is_ok());
             let r: Result<Option<Vec<u8>>, Error> = db.get(b"k1");
             assert_eq!(r.unwrap().unwrap(), b"v1111");
@@ -112,7 +112,7 @@ fn writebatch_works() {
             batch.delete(b"k1");
             assert_eq!(batch.len(), 1);
             assert!(!batch.is_empty());
-            let p = db.write(batch);
+            let p = db.write(&batch);
             assert!(p.is_ok());
             assert!(db.get(b"k1").unwrap().is_none());
         }
@@ -122,7 +122,7 @@ fn writebatch_works() {
             batch.delete_range(b"k2", b"k4");
             assert_eq!(batch.len(), 1);
             assert!(!batch.is_empty());
-            let p = db.write(batch);
+            let p = db.write(&batch);
             assert!(p.is_ok());
             assert!(db.get(b"k2").unwrap().is_none());
             assert!(db.get(b"k3").unwrap().is_none());
@@ -547,7 +547,7 @@ fn test_get_updates_since_one_batch() {
         assert_eq!(seq1, 1);
         batch.put(b"key1", b"value1");
         batch.delete(b"key2");
-        db.write(batch).unwrap();
+        db.write(&batch).unwrap();
         assert_eq!(db.latest_sequence_number(), 3);
         let mut iter = db.get_updates_since(seq1).unwrap();
         let mut counts = OperationCounts {
@@ -573,13 +573,13 @@ fn test_get_updates_since_batches() {
     let mut batch = WriteBatch::default();
     batch.put(b"key1", b"value1");
     batch.delete(b"key2");
-    db.write(batch).unwrap();
+    db.write(&batch).unwrap();
     let seq2 = db.latest_sequence_number();
     assert_eq!(seq2, 3);
     let mut batch = WriteBatch::default();
     batch.put(b"key3", b"value1");
     batch.put(b"key4", b"value1");
-    db.write(batch).unwrap();
+    db.write(&batch).unwrap();
     assert_eq!(db.latest_sequence_number(), 5);
     let mut iter = db.get_updates_since(seq2).unwrap();
     let mut counts = OperationCounts {
@@ -1040,7 +1040,7 @@ fn get_with_cache_and_bulkload_test() {
             for i in 0..10_000 {
                 batch.put(format!("{i:0>4}").as_bytes(), b"v");
             }
-            assert!(db.write(batch).is_ok());
+            assert!(db.write(&batch).is_ok());
 
             // flush memory table to sst and manual compaction
             assert!(db.flush().is_ok());
@@ -1177,7 +1177,7 @@ fn get_with_cache_and_bulkload_and_blobs_test() {
         for i in 0..10_000 {
             batch.put(format!("{i:0>4}").as_bytes(), b"v");
         }
-        assert!(db.write(batch).is_ok());
+        assert!(db.write(&batch).is_ok());
 
         // flush memory table to sst and manual compaction
         assert!(db.flush().is_ok());

@@ -702,13 +702,13 @@ impl<T: ThreadMode> TransactionDB<T> {
         Ok(())
     }
 
-    pub fn write(&self, batch: WriteBatchWithTransaction<true>) -> Result<(), Error> {
+    pub fn write(&self, batch: &WriteBatchWithTransaction<true>) -> Result<(), Error> {
         self.write_opt(batch, &WriteOptions::default())
     }
 
     pub fn write_opt(
         &self,
-        batch: WriteBatchWithTransaction<true>,
+        batch: &WriteBatchWithTransaction<true>,
         writeopts: &WriteOptions,
     ) -> Result<(), Error> {
         unsafe {

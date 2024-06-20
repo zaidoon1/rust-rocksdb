@@ -43,7 +43,7 @@ pub type WriteBatch = WriteBatchWithTransaction<false>;
 ///     // delete_range is supported when use without transaction
 ///     batch.delete_range(b"key2", b"key3");
 ///
-///     db.write(batch); // Atomically commits the batch
+///     db.write(&batch); // Atomically commits the batch
 /// }
 /// let _ = DB::destroy(&Options::default(), path);
 /// ```

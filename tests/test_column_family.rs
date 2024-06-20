@@ -462,7 +462,7 @@ fn test_no_leaked_column_family() {
             for key_index in 0..100 {
                 batch.put_cf(&cf, format!("k{key_index}"), &large_blob);
             }
-            db.write_opt(batch, &write_options).unwrap();
+            db.write_opt(&batch, &write_options).unwrap();
 
             // force create an SST file
             db.flush_cf(&cf).unwrap();

@@ -777,6 +777,81 @@ impl BlockBasedOptions {
             );
         }
     }
+
+    /// The tier of block-based tables whose top-level index into metadata
+    /// partitions will be pinned. Currently indexes and filters may be
+    /// partitioned.
+    ///
+    /// Note `cache_index_and_filter_blocks` must be true for this option to have
+    /// any effect. Otherwise any top-level index into metadata partitions would be
+    /// held in table reader memory, outside the block cache.
+    ///
+    /// Default: `BlockBasedPinningTier:Fallback`
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use rust_rocksdb::{BlockBasedOptions, BlockBasedPinningTier, Options};
+    ///
+    /// let mut opts = Options::default();
+    /// let mut block_opts = BlockBasedOptions::default();
+    /// block_opts.set_top_level_index_pinning_tier(BlockBasedPinningTier::FlushAndSimilar);
+    /// ```
+    pub fn set_top_level_index_pinning_tier(&mut self, tier: BlockBasedPinningTier) {
+        unsafe {
+            ffi::rocksdb_block_based_options_set_top_level_index_pinning_tier(
+                self.inner,
+                tier as c_int,
+            );
+        }
+    }
+
+    /// The tier of block-based tables whose metadata partitions will be pinned.
+    /// Currently indexes and filters may be partitioned.
+    ///
+    /// Default: `BlockBasedPinningTier:Fallback`
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use rust_rocksdb::{BlockBasedOptions, BlockBasedPinningTier, Options};
+    ///
+    /// let mut opts = Options::default();
+    /// let mut block_opts = BlockBasedOptions::default();
+    /// block_opts.set_partition_pinning_tier(BlockBasedPinningTier::FlushAndSimilar);
+    /// ```
+    pub fn set_partition_pinning_tier(&mut self, tier: BlockBasedPinningTier) {
+        unsafe {
+            ffi::rocksdb_block_based_options_set_partition_pinning_tier(self.inner, tier as c_int);
+        }
+    }
+
+    /// The tier of block-based tables whose unpartitioned metadata blocks will be
+    /// pinned.
+    ///
+    /// Note `cache_index_and_filter_blocks` must be true for this option to have
+    /// any effect. Otherwise the unpartitioned meta-blocks would be held in table
+    /// reader memory, outside the block cache.
+    ///
+    /// Default: `BlockBasedPinningTier:Fallback`
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use rust_rocksdb::{BlockBasedOptions, BlockBasedPinningTier, Options};
+    ///
+    /// let mut opts = Options::default();
+    /// let mut block_opts = BlockBasedOptions::default();
+    /// block_opts.set_unpartitioned_pinning_tier(BlockBasedPinningTier::FlushAndSimilar);
+    /// ```
+    pub fn set_unpartitioned_pinning_tier(&mut self, tier: BlockBasedPinningTier) {
+        unsafe {
+            ffi::rocksdb_block_based_options_set_unpartitioned_pinning_tier(
+                self.inner,
+                tier as c_int,
+            );
+        }
+    }
 }
 
 impl Default for BlockBasedOptions {
@@ -4196,6 +4271,15 @@ pub enum DBCompactionPri {
     OldestSmallestSeqFirst = ffi::rocksdb_k_oldest_smallest_seq_first_compaction_pri as isize,
     MinOverlappingRatio = ffi::rocksdb_k_min_overlapping_ratio_compaction_pri as isize,
     RoundRobin = ffi::rocksdb_k_round_robin_compaction_pri as isize,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde1", derive(serde::Serialize, serde::Deserialize))]
+pub enum BlockBasedPinningTier {
+    Fallback = ffi::rocksdb_block_based_k_fallback_pinning_tier as isize,
+    None = ffi::rocksdb_block_based_k_none_pinning_tier as isize,
+    FlushAndSimilar = ffi::rocksdb_block_based_k_flush_and_similar_pinning_tier as isize,
+    All = ffi::rocksdb_block_based_k_all_pinning_tier as isize,
 }
 
 pub struct FifoCompactOptions {

@@ -3529,6 +3529,28 @@ impl Options {
             ffi::rocksdb_options_set_avoid_unnecessary_blocking_io(self.inner, u8::from(val));
         }
     }
+
+    /// Sets the compaction priority.
+    ///
+    /// If level compaction_style =
+    /// kCompactionStyleLevel, for each level, which files are prioritized to be
+    /// picked to compact.
+    ///
+    /// Default: `DBCompactionPri::MinOverlappingRatio`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_rocksdb::{Options, DBCompactionPri};
+    ///
+    /// let mut opts = Options::default();
+    /// opts.set_compaction_pri(DBCompactionPri::RoundRobin);
+    /// ```
+    pub fn set_compaction_pri(&mut self, pri: DBCompactionPri) {
+        unsafe {
+            ffi::rocksdb_options_set_compaction_pri(self.inner, pri as c_int);
+        }
+    }
 }
 
 impl Default for Options {
@@ -4164,6 +4186,16 @@ pub enum RateLimiterMode {
     KReadsOnly = 0,
     KWritesOnly = 1,
     KAllIo = 2,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde1", derive(serde::Serialize, serde::Deserialize))]
+pub enum DBCompactionPri {
+    ByCompensatedSize = ffi::rocksdb_k_by_compensated_size_compaction_pri as isize,
+    OldestLargestSeqFirst = ffi::rocksdb_k_oldest_largest_seq_first_compaction_pri as isize,
+    OldestSmallestSeqFirst = ffi::rocksdb_k_oldest_smallest_seq_first_compaction_pri as isize,
+    MinOverlappingRatio = ffi::rocksdb_k_min_overlapping_ratio_compaction_pri as isize,
+    RoundRobin = ffi::rocksdb_k_round_robin_compaction_pri as isize,
 }
 
 pub struct FifoCompactOptions {

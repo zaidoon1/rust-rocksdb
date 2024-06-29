@@ -17,8 +17,8 @@ mod util;
 use std::{fs, io::Read as _};
 
 use rust_rocksdb::{
-    BlockBasedOptions, Cache, DBCompactionPri, DBCompressionType, DataBlockIndexType, Env, Options,
-    ReadOptions, DB,
+    BlockBasedOptions, BlockBasedPinningTier, Cache, DBCompactionPri, DBCompressionType,
+    DataBlockIndexType, Env, Options, ReadOptions, DB,
 };
 use util::DBPath;
 
@@ -89,6 +89,9 @@ fn test_block_based_options() {
         block_opts.set_pin_l0_filter_and_index_blocks_in_cache(true);
         block_opts.set_format_version(4);
         block_opts.set_index_block_restart_interval(16);
+        block_opts.set_top_level_index_pinning_tier(BlockBasedPinningTier::All);
+        block_opts.set_partition_pinning_tier(BlockBasedPinningTier::All);
+        block_opts.set_unpartitioned_pinning_tier(BlockBasedPinningTier::All);
 
         opts.set_block_based_table_factory(&block_opts);
         let _db = DB::open(&opts, &n).unwrap();
@@ -104,6 +107,20 @@ fn test_block_based_options() {
         assert!(settings.contains("pin_l0_filter_and_index_blocks_in_cache: 1"));
         assert!(settings.contains("format_version: 4"));
         assert!(settings.contains("index_block_restart_interval: 16"));
+    }
+
+    {
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+
+        let mut block_opts = BlockBasedOptions::default();
+        block_opts.set_cache_index_and_filter_blocks(true);
+        block_opts.set_top_level_index_pinning_tier(BlockBasedPinningTier::FlushAndSimilar);
+        block_opts.set_partition_pinning_tier(BlockBasedPinningTier::All);
+        block_opts.set_unpartitioned_pinning_tier(BlockBasedPinningTier::None);
+
+        opts.set_block_based_table_factory(&block_opts);
+        let _db = DB::open(&opts, &n).unwrap();
     }
 }
 

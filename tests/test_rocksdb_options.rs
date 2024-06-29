@@ -17,7 +17,8 @@ mod util;
 use std::{fs, io::Read as _};
 
 use rust_rocksdb::{
-    BlockBasedOptions, Cache, DBCompressionType, DataBlockIndexType, Env, Options, ReadOptions, DB,
+    BlockBasedOptions, Cache, DBCompactionPri, DBCompressionType, DataBlockIndexType, Env, Options,
+    ReadOptions, DB,
 };
 use util::DBPath;
 
@@ -349,5 +350,16 @@ fn test_set_ratelimiter() {
 
         let _ = db.put(b"k2", b"a");
         assert_eq!(&*db.get(b"k2").unwrap().unwrap(), b"a");
+    }
+}
+
+#[test]
+fn test_set_compaction_pri() {
+    let path = DBPath::new("_set_compaction_pri");
+    {
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        opts.set_compaction_pri(DBCompactionPri::RoundRobin);
+        let _db = DB::open(&opts, &path).unwrap();
     }
 }

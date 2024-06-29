@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.27.0 (2024-06-29)
+
+* Add option set_avoid_unnecessary_blocking_io (w41ter)
+* add option to enable auto tuned ratelimiter (w41ter)
+* clean up rate limiter object properly for set_ratelimiter_with_mode (zaidoon1)
+* upgrade to RocksDB 9.3.1 (zaidoon1)
+* Add option set_compaction_pri (zaidoon1)
+
 ## 0.26.0 (2024-04-24)
 
 * Add delete_range to OptimisticTransactionDB (vadim-su)

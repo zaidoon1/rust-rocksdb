@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.27.1 (2024-07-07)
+
+* Add block based metadata cache options (zaidoon1)
+* add feature flag to enable ZSTD_STATIC_LINKING_ONLY (zaidoon1)
+* fix stats comments (zaidoon1)
+* enable experimental feature in zstd-sys (zaidoon1)
+
 ## 0.27.0 (2024-06-29)
 
 * Add option set_avoid_unnecessary_blocking_io (w41ter)

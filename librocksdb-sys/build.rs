@@ -75,6 +75,10 @@ fn build_rocksdb() {
         if let Some(path) = env::var_os("DEP_ZSTD_INCLUDE") {
             config.include(path);
         }
+
+        if cfg!(feature = "zstd-static-linking-only") {
+            config.define("ZSTD_STATIC_LINKING_ONLY", Some("1"));
+        }
     }
 
     if cfg!(feature = "zlib") {

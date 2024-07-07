@@ -152,27 +152,31 @@ iterable_named_enum! {
         BlockCacheCompressionDictBytesInsert("rocksdb.block.cache.compression.dict.bytes.insert"),
 
         /// # of blocks redundantly inserted into block cache.
-        /// REQUIRES: BLOCK_CACHE_ADD_REDUNDANT <= BLOCK_CACHE_ADD
+        /// REQUIRES: BlockCacheAddRedundant <= BlockCacheAdd
         BlockCacheAddRedundant("rocksdb.block.cache.add.redundant"),
         /// # of index blocks redundantly inserted into block cache.
-        /// REQUIRES: BLOCK_CACHE_INDEX_ADD_REDUNDANT <= BLOCK_CACHE_INDEX_ADD
+        /// REQUIRES: BlockCacheIndexAddRedundant <= BlockCacheIndexAdd
         BlockCacheIndexAddRedundant("rocksdb.block.cache.index.add.redundant"),
         /// # of filter blocks redundantly inserted into block cache.
-        /// REQUIRES: BLOCK_CACHE_FILTER_ADD_REDUNDANT <= BLOCK_CACHE_FILTER_ADD
+        /// REQUIRES: BlockCacheFilterAddRedundant <= BlockCacheFilterAdd
         BlockCacheFilterAddRedundant("rocksdb.block.cache.filter.add.redundant"),
         /// # of data blocks redundantly inserted into block cache.
-        /// REQUIRES: BLOCK_CACHE_DATA_ADD_REDUNDANT <= BLOCK_CACHE_DATA_ADD
+        /// REQUIRES: BlockCacheDataAddRedundant <= BlockCacheDataAdd
         BlockCacheDataAddRedundant("rocksdb.block.cache.data.add.redundant"),
-        // # of dict blocks redundantly inserted into block cache.
-        // REQUIRES: BLOCK_CACHE_COMPRESSION_DICT_ADD_REDUNDANT
-        //           <= BLOCK_CACHE_COMPRESSION_DICT_ADD
+        /// # of dict blocks redundantly inserted into block cache.
+        /// REQUIRES: BlockCacheCompressionDictAddRedundant
+        ///           <= BlockCacheCompressionDictAdd
         BlockCacheCompressionDictAddRedundant("rocksdb.block.cache.compression.dict.add.redundant"),
 
+        /// Secondary cache statistics
         SecondaryCacheHits("rocksdb.secondary.cache.hits"),
+
+        /// Fine grained secondary cache stats
         SecondaryCacheFilterHits("rocksdb.secondary.cache.filter.hits"),
         SecondaryCacheIndexHits("rocksdb.secondary.cache.index.hits"),
         SecondaryCacheDataHits("rocksdb.secondary.cache.data.hits"),
 
+        /// Compressed secondary cache related stats
         CompressedSecondaryCacheDummyHits("rocksdb.compressed.secondary.cache.dummy.hits"),
         CompressedSecondaryCacheHits("rocksdb.compressed.secondary.cache.hits"),
         CompressedSecondaryCachePromotions("rocksdb.compressed.secondary.cache.promotions"),
@@ -218,21 +222,21 @@ iterable_named_enum! {
         /// # of Get() queries served by L2 and up
         GetHitL2AndUp("rocksdb.l2andup.hit"),
 
-        /**
-         * Compaction_KeyDrop* count the reasons for key drop during compaction
-         * There are 4 reasons currently.
-         */
-        CompactionKeyDropNewerEntry("rocksdb.compaction.key.drop.new"),
+        ///
+        /// Compaction_KeyDrop* count the reasons for key drop during compaction
+        /// There are 4 reasons currently.
+        ///
         /// key was written with a newer value.
         /// Also includes keys dropped for range del.
-        CompactionKeyDropObsolete("rocksdb.compaction.key.drop.obsolete"),
+        CompactionKeyDropNewerEntry("rocksdb.compaction.key.drop.new"),
         /// The key is obsolete.
-        CompactionKeyDropRangeDel("rocksdb.compaction.key.drop.range_del"),
+        CompactionKeyDropObsolete("rocksdb.compaction.key.drop.obsolete"),
         /// key was covered by a range tombstone.
-        CompactionKeyDropUser("rocksdb.compaction.key.drop.user"),
+        CompactionKeyDropRangeDel("rocksdb.compaction.key.drop.range_del"),
         /// user compaction function has dropped the key.
-        CompactionRangeDelDropObsolete("rocksdb.compaction.range_del.drop.obsolete"),
+        CompactionKeyDropUser("rocksdb.compaction.key.drop.user"),
         /// all keys in range were deleted.
+        CompactionRangeDelDropObsolete("rocksdb.compaction.range_del.drop.obsolete"),
         /// Deletions obsoleted before bottom level due to file gap optimization.
         CompactionOptimizedDelDropObsolete("rocksdb.compaction.optimized.del.drop.obsolete"),
         /// If a compaction was canceled in sfm to prevent ENOSPC
@@ -269,8 +273,9 @@ iterable_named_enum! {
         /// over large number of keys with same userkey.
         NumberOfReseeksInIteration("rocksdb.number.reseeks.iteration"),
 
-        NoIteratorCreated("rocksdb.num.iterator.created"),
         /// number of iterators created
+        NoIteratorCreated("rocksdb.num.iterator.created"),
+        /// number of iterators deleted
         NoIteratorDeleted("rocksdb.num.iterator.deleted"),
 
         NoFileOpens("rocksdb.no.file.opens"),
@@ -285,6 +290,9 @@ iterable_named_enum! {
         NumberMultigetCalls("rocksdb.number.multiget.get"),
         NumberMultigetKeysRead("rocksdb.number.multiget.keys.read"),
         NumberMultigetBytesRead("rocksdb.number.multiget.bytes.read"),
+        /// Number of keys actually found in MultiGet calls (vs number requested by
+        /// caller)
+        /// NumberMultigetKeys_Read gives the number requested by caller
         NumberMultigetKeysFound("rocksdb.number.multiget.keys.found"),
 
         NumberMergeFailures("rocksdb.number.merge.failures"),
@@ -300,16 +308,17 @@ iterable_named_enum! {
         /// Writes can be processed by requesting thread or by the thread at the
         /// head of the writers queue.
         WriteDoneBySelf("rocksdb.write.self"),
-        WriteDoneByOther("rocksdb.write.other"),
         /// Equivalent to writes done for others
-        WriteWithWal("rocksdb.write.wal"),
+        WriteDoneByOther("rocksdb.write.other"),
         /// Number of Write calls that request WAL
-        CompactReadBytes("rocksdb.compact.read.bytes"),
+        WriteWithWal("rocksdb.write.wal"),
         /// Bytes read during compaction
-        CompactWriteBytes("rocksdb.compact.write.bytes"),
+        CompactReadBytes("rocksdb.compact.read.bytes"),
         /// Bytes written during compaction
-        FlushWriteBytes("rocksdb.flush.write.bytes"),
+        CompactWriteBytes("rocksdb.compact.write.bytes"),
         /// Bytes written during flush
+        FlushWriteBytes("rocksdb.flush.write.bytes"),
+
 
         /// Compaction read and write statistics broken down by CompactionReason
         CompactReadBytesMarked("rocksdb.compact.read.marked.bytes"),
@@ -329,6 +338,7 @@ iterable_named_enum! {
         /// # of compressions/decompressions executed
         NumberBlockCompressed("rocksdb.number.block.compressed"),
         NumberBlockDecompressed("rocksdb.number.block.decompressed"),
+
         /// Number of input bytes (uncompressed) to compression for SST blocks that
         /// are stored compressed.
         BytesCompressedFrom("rocksdb.bytes.compressed.from"),
@@ -346,10 +356,12 @@ iterable_named_enum! {
         /// CompressionOptions::max_compressed_bytes_per_kb) or found invalid by the
         /// `verify_compression` option.
         BytesCompressionRejected("rocksdb.bytes.compression.rejected"),
+
         /// Like BytesCompressionBypassed but counting number of blocks
         NumberBlockCompressionBypassed("rocksdb.number.block_compression_bypassed"),
         /// Like BytesCompressionRejected but counting number of blocks
         NumberBlockCompressionRejected("rocksdb.number.block_compression_rejected"),
+
         /// Number of input bytes (compressed) to decompression in reading compressed
         /// SST blocks from storage.
         BytesDecompressedFrom("rocksdb.bytes.decompressed.from"),
@@ -371,10 +383,11 @@ iterable_named_enum! {
         /// (ReadAMP_ToTAL_ReadBytes / Read_AMP_Estimate_UsefulBytes)
         //
         /// REQUIRES: ReadOptions::read_amp_bytes_per_bit to be enabled
-        ReadAmpEstimateUsefulBytes("rocksdb.read.amp.estimate.useful.bytes"),
         /// Estimate of total bytes actually used.
-        ReadAmpTotalReadBytes("rocksdb.read.amp.total.read.bytes"),
+        ReadAmpEstimateUsefulBytes("rocksdb.read.amp.estimate.useful.bytes"),
         /// Total size of loaded data blocks.
+        ReadAmpTotalReadBytes("rocksdb.read.amp.total.read.bytes"),
+
 
         /// Number of refill intervals where rate limiter's bytes are fully consumed.
         NumberRateLimiterDrains("rocksdb.number.rate_limiter.drains"),
@@ -646,8 +659,8 @@ iterable_named_enum! {
 
         // Time spent in writing SST files
         SstWriteMicros("rocksdb.sst.write.micros"),
-        // Time spent in writing SST table (currently only block-based table) or
-        // blob file for flush, compaction or db open
+        // Time spent in writing SST table (currently only block-based table) or blob
+        // file for flush, compaction or db open
         FileWriteFlushMicros("rocksdb.file.write.flush.micros"),
         FileWriteCompactionMicros("rocksdb.file.write.compaction.micros"),
         FileWriteDbOpenMicros("rocksdb.file.write.db.open.micros"),
@@ -658,6 +671,7 @@ iterable_named_enum! {
         BytesPerRead("rocksdb.bytes.per.read"),
         BytesPerWrite("rocksdb.bytes.per.write"),
         BytesPerMultiget("rocksdb.bytes.per.multiget"),
+
         CompressionTimesNanos("rocksdb.compression.times.nanos"),
         DecompressionTimesNanos("rocksdb.decompression.times.nanos"),
         /// Number of merge operands passed to the merge operator in user read

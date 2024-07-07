@@ -103,3 +103,12 @@ supported by the platform and is necessary if you want to use the
 malloc_usable_size being available. See
 [rocksdb](https://github.com/facebook/rocksdb/blob/v9.0.0/include/rocksdb/table.h#L401-L434)
 for more information on the feature.
+
+### ZSTD Static Linking Only
+
+The feature `zstd-static-linking-only` in combination with enabling zstd
+compression will cause Rocksdb to hold digested dictionaries in block cache to
+save repetitive deserialization overhead. This saves a lot of CPU for read-heavy
+workloads. This feature is gated behind a flag in Rocksdb because one of the
+digested dictionary APIs used is marked as experimental. However, this feature
+is still used at facebook in production per the [Preset Dictionary Compression Blog Post](https://rocksdb.org/blog/2021/05/31/dictionary-compression.html).

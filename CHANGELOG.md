@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.28.0 (2024-07-13)
+
+* Add support for enabling blob cache (exabytes18)
+* upgrade to RocksDB 9.4.0 (zaidoon1)
+
 ## 0.27.1 (2024-07-07)
 
 * Add block based metadata cache options (zaidoon1)

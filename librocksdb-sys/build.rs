@@ -3,8 +3,8 @@ use std::{env, fs, path::PathBuf, process::Command};
 
 // On these platforms jemalloc-sys will use a prefixed jemalloc which cannot be linked together
 // with RocksDB.
-// See https://github.com/tikv/jemallocator/blob/tikv-jemalloc-sys-0.5.3/jemalloc-sys/src/env.rs#L25
-const NO_JEMALLOC_TARGETS: &[&str] = &["android", "dragonfly", "musl", "darwin"];
+// See https://github.com/tikv/jemallocator/blob/f7adfca5aff272b43fd3ad896252b57fbbd9c72a/jemalloc-sys/src/env.rs#L24
+const NO_JEMALLOC_TARGETS: &[&str] = &["android", "dragonfly", "darwin"];
 
 fn link(name: &str, bundled: bool) {
     use std::env::var;

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.28.1 (2024-07-26)
+
+* allow unprefixed musl jemalloc targets (girlbossceo)
+* bump tikv-jemalloc-sys to 0.6 (girlbossceo)
+* fix: android build in 32-bit devices (LucasXu0)
+* Support user defined timestamp in rust bindings (siyuan0322)
+* Bump lz4 1.10 (agourlay)
+* feat: Properties for TransactionDB #899 (4TT1L4)
+* Improvements to user defined timestamp (larry0x)
+
+
 ## 0.28.0 (2024-07-13)
 
 * Add support for enabling blob cache (exabytes18)

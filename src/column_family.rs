@@ -150,3 +150,4 @@ unsafe impl Sync for ColumnFamily {}
 unsafe impl Send for UnboundColumnFamily {}
 unsafe impl Sync for UnboundColumnFamily {}
 unsafe impl<'a> Send for BoundColumnFamily<'a> {}
+unsafe impl<'a> Sync for BoundColumnFamily<'a> {}

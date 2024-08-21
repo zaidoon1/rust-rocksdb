@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.29.0 (2024-08-21)
+
+* Implement Sync for BoundColumnFamily (jhpratt)
+* use the provided system rocksdb prebuilt on freebsd (girlbossceo)
+* TransactionDB support in MemoryUsageBuilder (4TT1L4)
+* upgrade to RocksDB 9.5.2 (zaidoon1)
+
 ## 0.28.1 (2024-07-26)
 
 * allow unprefixed musl jemalloc targets (girlbossceo)

@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use rust_rocksdb::{Error, Options, DB};
+use rust_rocksdb::{DBAccess, DBRawIteratorWithThreadMode, Error, Options, DB};
 
 /// Temporary database path which calls DB::Destroy when DBPath is dropped.
 pub struct DBPath {
@@ -173,4 +173,22 @@ fn extract_timestamp_from_user_key(key: &[u8]) -> &[u8] {
 
 fn strip_timestamp_from_user_key(key: &[u8]) -> &[u8] {
     &key[..(key.len() - U64Timestamp::SIZE)]
+}
+
+pub fn assert_item<D: DBAccess>(
+    iter: &DBRawIteratorWithThreadMode<'_, D>,
+    key: &[u8],
+    value: &[u8],
+) {
+    assert!(iter.valid());
+    pretty_assertions::assert_eq!(iter.key(), Some(key));
+    pretty_assertions::assert_eq!(iter.value(), Some(value));
+    pretty_assertions::assert_eq!(iter.item(), Some((key, value)));
+}
+
+pub fn assert_no_item<D: DBAccess>(iter: &DBRawIteratorWithThreadMode<'_, D>) {
+    assert!(!iter.valid());
+    pretty_assertions::assert_eq!(iter.key(), None);
+    pretty_assertions::assert_eq!(iter.value(), None);
+    pretty_assertions::assert_eq!(iter.item(), None);
 }

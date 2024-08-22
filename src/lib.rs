@@ -108,6 +108,7 @@ mod sst_file_writer;
 pub mod statistics;
 mod transactions;
 mod write_batch;
+mod write_batch_with_index;
 mod write_buffer_manager;
 
 pub use crate::{
@@ -150,6 +151,7 @@ pub use crate::{
     write_batch::{
         WriteBatch, WriteBatchIterator, WriteBatchIteratorCf, WriteBatchWithTransaction,
     },
+    write_batch_with_index::WriteBatchWithIndex,
     write_buffer_manager::WriteBufferManager,
 };
 

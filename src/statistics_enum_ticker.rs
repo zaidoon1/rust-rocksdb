@@ -216,5 +216,8 @@ iterable_named_enum! {
         PrefetchBytes("rocksdb.prefetch.bytes"),
         PrefetchBytesUseful("rocksdb.prefetch.bytes.useful"),
         PrefetchHits("rocksdb.prefetch.hits"),
+        SstFooterCorruptionCount("rocksdb.footer.corruption.count"),
+        FileReadCorruptionRetryCount("rocksdb.file.read.corruption.retry.count"),
+        FileReadCorruptionRetrySuccessCount("rocksdb.file.read.corruption.retry.success.count"),
     }
 }

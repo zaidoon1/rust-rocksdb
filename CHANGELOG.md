@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.30.0 (2024-09-06)
+
+* Improve statistics by auto gen enum Ticker & enum Histogram (rockeet)
+* upgrade to RocksDB 9.6.1 (zaidoon1)
+
 ## 0.29.0 (2024-08-21)
 
 * Implement Sync for BoundColumnFamily (jhpratt)

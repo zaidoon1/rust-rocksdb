@@ -17,7 +17,8 @@
 //!
 //! [1]: https://github.com/facebook/rocksdb/wiki/Checkpoints
 
-use crate::{db::DBInner, ffi, ffi_util::to_cpath, DBCommon, Error, ThreadMode};
+use crate::db::{DBInner, ExportImportFilesMetaData};
+use crate::{ffi, ffi_util::to_cpath, AsColumnFamilyRef, DBCommon, Error, ThreadMode};
 use std::{marker::PhantomData, path::Path};
 
 /// Undocumented parameter for `ffi::rocksdb_checkpoint_create` function. Zero by default.
@@ -54,15 +55,57 @@ impl<'db> Checkpoint<'db> {
 
     /// Creates new physical DB checkpoint in directory specified by `path`.
     pub fn create_checkpoint<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
-        let cpath = to_cpath(path)?;
+        let c_path = to_cpath(path)?;
         unsafe {
             ffi_try!(ffi::rocksdb_checkpoint_create(
                 self.inner,
-                cpath.as_ptr(),
+                c_path.as_ptr(),
                 LOG_SIZE_FOR_FLUSH,
             ));
         }
         Ok(())
+    }
+
+    /// Export a specified Column Family
+    ///
+    /// Creates copies of the live SST files at the specified export path.
+    ///
+    /// - SST files will be created as hard links when the directory specified
+    ///   is in the same partition as the db directory, copied otherwise.
+    /// - the path must not yet exist - a new directory will be created as part of the export.
+    /// - Always triggers a flush.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rust_rocksdb::{DB, checkpoint::Checkpoint};
+    ///
+    /// fn export_column_family(db: &DB, column_family_name: &str, export_path: &str) {
+    ///    let cp = Checkpoint::new(&db).unwrap();
+    ///    let cf = db.cf_handle(column_family_name).unwrap();
+    ///
+    ///    let export_metadata = cp.export_column_family(&cf, export_path).unwrap();
+    ///
+    ///    assert!(export_metadata.get_files().len() > 0);
+    /// }
+    /// ```
+    ///
+    /// See also: [`DB::create_column_family_with_import`](crate::DB::create_column_family_with_import).
+    pub fn export_column_family<P: AsRef<Path>>(
+        &self,
+        column_family: &impl AsColumnFamilyRef,
+        path: P,
+    ) -> Result<ExportImportFilesMetaData, Error> {
+        let c_path = to_cpath(path)?;
+        let column_family_handle = column_family.inner();
+        let metadata = unsafe {
+            ffi_try!(ffi::rocksdb_checkpoint_export_column_family(
+                self.inner,
+                column_family_handle,
+                c_path.as_ptr(),
+            ))
+        };
+        Ok(ExportImportFilesMetaData { inner: metadata })
     }
 }
 

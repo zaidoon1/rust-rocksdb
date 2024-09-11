@@ -17,7 +17,7 @@ use crate::{
     column_family::AsColumnFamilyRef,
     column_family::BoundColumnFamily,
     column_family::UnboundColumnFamily,
-    db_options::OptionsMustOutliveDB,
+    db_options::{ImportColumnFamilyOptions, OptionsMustOutliveDB},
     ffi,
     ffi_util::{from_cstr, opt_bytes_to_ptr, raw_data, to_cpath, CStrLike},
     ColumnFamily, ColumnFamilyDescriptor, CompactOptions, DBIteratorWithThreadMode,
@@ -2338,47 +2338,17 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
     /// and end key
     pub fn live_files(&self) -> Result<Vec<LiveFile>, Error> {
         unsafe {
-            let files = ffi::rocksdb_livefiles(self.inner.inner());
-            if files.is_null() {
+            let livefiles_ptr = ffi::rocksdb_livefiles(self.inner.inner());
+            if livefiles_ptr.is_null() {
                 Err(Error::new("Could not get live files".to_owned()))
             } else {
-                let n = ffi::rocksdb_livefiles_count(files);
-
-                let mut livefiles = Vec::with_capacity(n as usize);
-                let mut key_size: usize = 0;
-
-                for i in 0..n {
-                    let column_family_name =
-                        from_cstr(ffi::rocksdb_livefiles_column_family_name(files, i));
-                    let name = from_cstr(ffi::rocksdb_livefiles_name(files, i));
-                    let size = ffi::rocksdb_livefiles_size(files, i);
-                    let level = ffi::rocksdb_livefiles_level(files, i);
-
-                    // get smallest key inside file
-                    let smallest_key = ffi::rocksdb_livefiles_smallestkey(files, i, &mut key_size);
-                    let smallest_key = raw_data(smallest_key, key_size);
-
-                    // get largest key inside file
-                    let largest_key = ffi::rocksdb_livefiles_largestkey(files, i, &mut key_size);
-                    let largest_key = raw_data(largest_key, key_size);
-
-                    livefiles.push(LiveFile {
-                        column_family_name,
-                        name,
-                        size,
-                        level,
-                        start_key: smallest_key,
-                        end_key: largest_key,
-                        num_entries: ffi::rocksdb_livefiles_entries(files, i),
-                        num_deletions: ffi::rocksdb_livefiles_deletions(files, i),
-                    });
-                }
+                let files = LiveFile::from_rocksdb_livefiles_ptr(livefiles_ptr);
 
                 // destroy livefiles metadata(s)
-                ffi::rocksdb_livefiles_destroy(files);
+                ffi::rocksdb_livefiles_destroy(livefiles_ptr);
 
                 // return
-                Ok(livefiles)
+                Ok(files)
             }
         }
     }
@@ -2519,6 +2489,29 @@ impl<I: DBInner> DBCommon<SingleThreaded, I> {
         Ok(())
     }
 
+    #[doc = include_str!("db_create_column_family_with_import.md")]
+    pub fn create_column_family_with_import<N: AsRef<str>>(
+        &mut self,
+        options: &Options,
+        column_family_name: N,
+        import_options: &ImportColumnFamilyOptions,
+        metadata: &ExportImportFilesMetaData,
+    ) -> Result<(), Error> {
+        let inner = unsafe {
+            ffi_try!(ffi::rocksdb_create_column_family_with_import(
+                self.inner.inner(),
+                options.inner,
+                column_family_name.as_ref().as_ptr() as *const c_char,
+                import_options.inner,
+                metadata.inner
+            ))
+        };
+        self.cfs
+            .cfs
+            .insert(column_family_name.as_ref().into(), ColumnFamily { inner });
+        Ok(())
+    }
+
     /// Drops the column family with the given name
     pub fn drop_cf(&mut self, name: &str) -> Result<(), Error> {
         if let Some(cf) = self.cfs.cfs.remove(name) {
@@ -2547,6 +2540,30 @@ impl<I: DBInner> DBCommon<MultiThreaded, I> {
         let mut cfs = self.cfs.cfs.write();
         let inner = self.create_inner_cf_handle(name.as_ref(), opts)?;
         cfs.insert(
+            name.as_ref().into(),
+            Arc::new(UnboundColumnFamily { inner }),
+        );
+        Ok(())
+    }
+
+    #[doc = include_str!("db_create_column_family_with_import.md")]
+    pub fn create_column_family_with_import<N: AsRef<str>>(
+        &self,
+        options: &Options,
+        name: N,
+        import_options: &ImportColumnFamilyOptions,
+        metadata: &ExportImportFilesMetaData,
+    ) -> Result<(), Error> {
+        let inner = unsafe {
+            ffi_try!(ffi::rocksdb_create_column_family_with_import(
+                self.inner.inner(),
+                options.inner,
+                name.as_ref().as_ptr() as *const c_char,
+                import_options.inner,
+                metadata.inner
+            ))
+        };
+        self.cfs.cfs.write().insert(
             name.as_ref().into(),
             Arc::new(UnboundColumnFamily { inner }),
         );
@@ -2610,6 +2627,9 @@ pub struct LiveFile {
     pub column_family_name: String,
     /// Name of the file
     pub name: String,
+    /// The directory containing the file, without a trailing '/'. This could be
+    /// a DB path, wal_dir, etc.
+    pub directory: String,
     /// Size of the file
     pub size: usize,
     /// Level at which this file resides
@@ -2618,11 +2638,161 @@ pub struct LiveFile {
     pub start_key: Option<Vec<u8>>,
     /// Largest user defined key in the file
     pub end_key: Option<Vec<u8>>,
+    pub smallest_seqno: u64,
+    pub largest_seqno: u64,
     /// Number of entries/alive keys in the file
     pub num_entries: u64,
     /// Number of deletions/tomb key(s) in the file
     pub num_deletions: u64,
 }
+
+impl LiveFile {
+    /// Create a `Vec<LiveFile>` from a `rocksdb_livefiles_t` pointer.
+    pub(crate) fn from_rocksdb_livefiles_ptr(
+        files: *const ffi::rocksdb_livefiles_t,
+    ) -> Vec<LiveFile> {
+        unsafe {
+            let n = ffi::rocksdb_livefiles_count(files);
+
+            let mut livefiles = Vec::with_capacity(n as usize);
+            let mut key_size: usize = 0;
+
+            for i in 0..n {
+                let column_family_name =
+                    from_cstr(ffi::rocksdb_livefiles_column_family_name(files, i));
+                let name = from_cstr(ffi::rocksdb_livefiles_name(files, i));
+                let directory = from_cstr(ffi::rocksdb_livefiles_directory(files, i));
+                let size = ffi::rocksdb_livefiles_size(files, i);
+                let level = ffi::rocksdb_livefiles_level(files, i);
+
+                // get smallest key inside file
+                let smallest_key = ffi::rocksdb_livefiles_smallestkey(files, i, &mut key_size);
+                let smallest_key = raw_data(smallest_key, key_size);
+
+                // get largest key inside file
+                let largest_key = ffi::rocksdb_livefiles_largestkey(files, i, &mut key_size);
+                let largest_key = raw_data(largest_key, key_size);
+
+                livefiles.push(LiveFile {
+                    column_family_name,
+                    name,
+                    directory,
+                    size,
+                    level,
+                    start_key: smallest_key,
+                    end_key: largest_key,
+                    largest_seqno: ffi::rocksdb_livefiles_largest_seqno(files, i),
+                    smallest_seqno: ffi::rocksdb_livefiles_smallest_seqno(files, i),
+                    num_entries: ffi::rocksdb_livefiles_entries(files, i),
+                    num_deletions: ffi::rocksdb_livefiles_deletions(files, i),
+                });
+            }
+
+            livefiles
+        }
+    }
+}
+
+/// Metadata returned as output from [`Checkpoint::export_column_family`][export_column_family] and
+/// used as input to [`DB::create_column_family_with_import`].
+///
+/// [export_column_family]: crate::checkpoint::Checkpoint::export_column_family
+#[derive(Debug)]
+pub struct ExportImportFilesMetaData {
+    pub(crate) inner: *mut ffi::rocksdb_export_import_files_metadata_t,
+}
+
+impl ExportImportFilesMetaData {
+    pub fn get_db_comparator_name(&self) -> String {
+        unsafe {
+            let c_name =
+                ffi::rocksdb_export_import_files_metadata_get_db_comparator_name(self.inner);
+            from_cstr(c_name)
+        }
+    }
+
+    pub fn set_db_comparator_name(&mut self, name: &str) {
+        let c_name = CString::new(name.as_bytes()).unwrap();
+        unsafe {
+            ffi::rocksdb_export_import_files_metadata_set_db_comparator_name(
+                self.inner,
+                c_name.as_ptr(),
+            );
+        };
+    }
+
+    pub fn get_files(&self) -> Vec<LiveFile> {
+        unsafe {
+            let livefiles_ptr = ffi::rocksdb_export_import_files_metadata_get_files(self.inner);
+            let files = LiveFile::from_rocksdb_livefiles_ptr(livefiles_ptr);
+            ffi::rocksdb_livefiles_destroy(livefiles_ptr);
+            files
+        }
+    }
+
+    pub fn set_files(&mut self, files: &Vec<LiveFile>) {
+        unsafe {
+            let livefiles = ffi::rocksdb_livefiles_create();
+
+            for file in files {
+                let c_cf_name = CString::new(file.column_family_name.clone()).unwrap();
+                let c_name = CString::new(file.name.clone()).unwrap();
+                let c_directory = CString::new(file.directory.clone()).unwrap();
+
+                let live_file = ffi::rocksdb_livefile_create();
+
+                ffi::rocksdb_livefile_set_column_family_name(live_file, c_cf_name.as_ptr());
+                ffi::rocksdb_livefile_set_level(live_file, file.level);
+                ffi::rocksdb_livefile_set_name(live_file, c_name.as_ptr());
+                ffi::rocksdb_livefile_set_directory(live_file, c_directory.as_ptr());
+                ffi::rocksdb_livefile_set_size(live_file, file.size);
+                ffi::rocksdb_livefile_set_smallest_key(
+                    live_file,
+                    file.start_key
+                        .as_ref()
+                        .map_or(ptr::null(), |k| k.as_ptr() as *const libc::c_char),
+                    file.start_key.as_ref().map_or(0, Vec::len),
+                );
+                ffi::rocksdb_livefile_set_largest_key(
+                    live_file,
+                    file.end_key
+                        .as_ref()
+                        .map_or(ptr::null(), |k| k.as_ptr() as *const libc::c_char),
+                    file.end_key.as_ref().map_or(0, Vec::len),
+                );
+                ffi::rocksdb_livefile_set_smallest_seqno(live_file, file.smallest_seqno);
+                ffi::rocksdb_livefile_set_largest_seqno(live_file, file.largest_seqno);
+                ffi::rocksdb_livefile_set_num_entries(live_file, file.num_entries);
+                ffi::rocksdb_livefile_set_num_deletions(live_file, file.num_deletions);
+
+                // takes ownership of live_file, no need to destroy it after
+                ffi::rocksdb_livefiles_add(livefiles, live_file);
+            }
+
+            // takes ownership of livefiles, no need to destroy it after
+            ffi::rocksdb_export_import_files_metadata_set_files(self.inner, livefiles);
+        }
+    }
+}
+
+impl Default for ExportImportFilesMetaData {
+    fn default() -> Self {
+        Self {
+            inner: unsafe { ffi::rocksdb_export_import_files_metadata_create() },
+        }
+    }
+}
+
+impl Drop for ExportImportFilesMetaData {
+    fn drop(&mut self) {
+        unsafe {
+            ffi::rocksdb_export_import_files_metadata_destroy(self.inner);
+        }
+    }
+}
+
+unsafe impl Send for ExportImportFilesMetaData {}
+unsafe impl Sync for ExportImportFilesMetaData {}
 
 fn convert_options(opts: &[(&str, &str)]) -> Result<Vec<(CString, CString)>, Error> {
     opts.iter()

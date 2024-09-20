@@ -2707,7 +2707,9 @@ impl ExportImportFilesMetaData {
         unsafe {
             let c_name =
                 ffi::rocksdb_export_import_files_metadata_get_db_comparator_name(self.inner);
-            from_cstr(c_name)
+            let name = from_cstr(c_name);
+            ffi::rocksdb_free(c_name as *mut c_void);
+            name
         }
     }
 

@@ -22,7 +22,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: generate Cargo.lock
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Generate Cargo.lock
         run: cargo generate-lockfile
 
       - name: Audit Check

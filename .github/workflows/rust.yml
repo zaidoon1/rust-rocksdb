@@ -53,6 +53,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: generate Cargo.lock
+        run: cargo generate-lockfile
+
       # https://github.com/rustsec/audit-check/issues/2
       - uses: rustsec/audit-check@master
         with:

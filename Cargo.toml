@@ -37,7 +37,7 @@ zstd-static-linking-only = ["rust-librocksdb-sys/zstd-static-linking-only"]
 
 [dependencies]
 libc = "0.2"
-rust-librocksdb-sys = { path = "librocksdb-sys", version = "0.26.0" }
+rust-librocksdb-sys = { path = "librocksdb-sys", version = "0.27.0" }
 serde = { version = "1", features = ["derive"], optional = true }
 
 [dev-dependencies]

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.31.0 (2024-10-16)
+
+* Expose LRU cache options (athre0z)
+* add Env::from_raw constructor (jgraettinger)
+* Fix unsoundness via impure AsRef (niklasf)
+* Allow setting logging callback (jevolk)
+* upgrade to RocksDB 9.7.2 (zaidoon1)
+
 ## 0.30.0 (2024-09-06)
 
 * Improve statistics by auto gen enum Ticker & enum Histogram (rockeet)

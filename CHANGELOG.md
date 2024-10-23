@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.31.0 (2024-10-23)
+
+* Decrement refcount after registering info loggers (jevolk)
+* upgrade to RocksDB 9.7.3 (zaidoon1)
+
 ## 0.31.0 (2024-10-16)
 
 * Expose LRU cache options (athre0z)

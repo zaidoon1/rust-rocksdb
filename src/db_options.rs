@@ -3456,6 +3456,7 @@ impl Options {
         unsafe {
             let logger = ffi::rocksdb_logger_create_stderr_logger(log_level as c_int, p.as_ptr());
             ffi::rocksdb_options_set_info_log(self.inner, logger);
+            ffi::rocksdb_logger_destroy(logger);
         }
     }
 
@@ -3481,6 +3482,7 @@ impl Options {
                 func.cast_mut(),
             );
             ffi::rocksdb_options_set_info_log(self.inner, logger);
+            ffi::rocksdb_logger_destroy(logger);
         }
     }
 

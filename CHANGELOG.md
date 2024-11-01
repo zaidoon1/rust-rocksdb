@@ -1,6 +1,10 @@
 # Changelog
 
-## 0.31.0 (2024-10-23)
+## 0.33.0 (2024-11-01)
+
+* upgrade to RocksDB 9.7.4 (zaidoon1)
+
+## 0.32.0 (2024-10-23)
 
 * Decrement refcount after registering info loggers (jevolk)
 * upgrade to RocksDB 9.7.3 (zaidoon1)

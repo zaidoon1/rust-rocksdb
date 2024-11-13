@@ -111,4 +111,22 @@ compression will cause Rocksdb to hold digested dictionaries in block cache to
 save repetitive deserialization overhead. This saves a lot of CPU for read-heavy
 workloads. This feature is gated behind a flag in Rocksdb because one of the
 digested dictionary APIs used is marked as experimental. However, this feature
-is still used at facebook in production per the [Preset Dictionary Compression Blog Post](https://rocksdb.org/blog/2021/05/31/dictionary-compression.html).
+is still used at facebook in production per the [Preset Dictionary Compression
+Blog Post](https://rocksdb.org/blog/2021/05/31/dictionary-compression.html).
+
+### Switch between static and dynamic linking for bindgen (features `bindgen-static` and `bindgen-runtime`)
+
+The feature `bindgen-runtime` will enable the `runtime` feature of bindgen, which dynamically
+links to libclang. This is suitable for most platforms, and is enabled by default.
+
+The feature `bindgen-static` will enable the `static` feature of bindgen, which statically
+links to libclang. This is suitable for musllinux platforms, such as Alpine linux.
+To build on Alpine linux for example, make these changes to your Cargo.toml:
+
+```toml
+[dependencies.rocksdb]
+default-features = false
+features = ["bindgen-static", "snappy", "lz4", "zstd", "zlib", "bzip2"]
+```
+
+Notice that `runtime` and `static` features are mutually exclusive, and won't compile if both enabled.

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.34.0 (2024-12-04)
+
+* Fix two tests that want to write to the current working directory (mr-c)
+* add missing supported bsd oses (drizzt)
+* Fix column family creation race. (stuhood)
+* Allow using static bindgen feature (Congyuwang)
+* tests: use tempfile instead of the current working directory (mr-c)
+* implement with_capacity for WriteBatch (0xdeafbeef)
+* ci: make most directories read-only before running the tests (mr-c)
+* More temp directories for tests (mr-c)
+* fix(build): add ROCKSDB_SCHED_GETCPU_PRESENT for Linux build config (popcnt1)
+* upgrade to RocksDB 9.8.4 (zaidoon1)
+
 ## 0.33.0 (2024-11-01)
 
 * upgrade to RocksDB 9.7.4 (zaidoon1)

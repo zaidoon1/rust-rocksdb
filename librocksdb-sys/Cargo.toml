@@ -43,6 +43,7 @@ bzip2 = ["bzip2-sys"]
 rtti = []
 malloc-usable-size = []
 zstd-static-linking-only = []
+lto = []
 
 [dependencies]
 libc = "0.2"

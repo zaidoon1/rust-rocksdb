@@ -36,6 +36,7 @@ malloc-usable-size = ["rust-librocksdb-sys/malloc-usable-size"]
 zstd-static-linking-only = ["rust-librocksdb-sys/zstd-static-linking-only"]
 bindgen-runtime = ["rust-librocksdb-sys/bindgen-runtime"]
 bindgen-static = ["rust-librocksdb-sys/bindgen-static"]
+lto = ["rust-librocksdb-sys/lto"]
 
 [dependencies]
 libc = "0.2"

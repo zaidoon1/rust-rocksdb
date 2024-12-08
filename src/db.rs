@@ -2594,3 +2594,9 @@ pub(crate) fn convert_values(
         })
         .collect()
 }
+
+/// Range of keys for use with approximate_sizes functions.
+pub struct Range<K> {
+    pub start: K,
+    pub end: K,
+}

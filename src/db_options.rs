@@ -720,6 +720,19 @@ impl BlockBasedOptions {
         }
     }
 
+    /// Use delta encoding to compress keys in blocks.
+    /// ReadOptions::pin_data requires this option to be disabled.
+    ///
+    /// Default: true
+    pub fn set_use_delta_encoding(&mut self, enable: bool) {
+        unsafe {
+            ffi::rocksdb_block_based_options_set_use_delta_encoding(
+                self.inner,
+                c_uchar::from(enable),
+            );
+        }
+    }
+
     /// Number of keys between restart points for delta encoding of keys.
     /// This parameter can be changed dynamically. Most clients should
     /// leave this parameter alone. The minimum value allowed is 1. Any smaller

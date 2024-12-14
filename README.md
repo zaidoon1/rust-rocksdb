@@ -131,7 +131,8 @@ features = ["bindgen-static", "snappy", "lz4", "zstd", "zlib", "bzip2"]
 
 Notice that `runtime` and `static` features are mutually exclusive, and won't compile if both enabled.
 
-## LTO
+### LTO
+
 Enable the `lto` feature to enable link-time optimization. It will compile rocksdb with `-flto` flag. This feature is disabled by default.
 
 > [!IMPORTANT]

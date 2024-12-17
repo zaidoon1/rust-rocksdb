@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.35.0 (2024-12-17)
+
+* DB: Implement get_db_identity using rocksdb_get_db_identity (evanj)
+* Add lto feature (0xdeafbeef)
+* Options: Add set_track_and_verify_wals_in_manifest (evanj)
+* upgrade to RocksDB 9.9.3 (zaidoon1)
+* add set_use_delta_encoding() to Options (jevolk)
+
 ## 0.34.0 (2024-12-04)
 
 * Fix two tests that want to write to the current working directory (mr-c)

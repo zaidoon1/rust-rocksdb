@@ -1,6 +1,6 @@
 [package]
 name = "rust-librocksdb-sys"
-version = "0.30.0+9.8.4"
+version = "0.31.0+9.9.3"
 edition = "2021"
 rust-version = "1.75.0"
 authors = [

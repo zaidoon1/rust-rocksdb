@@ -18,7 +18,7 @@ mod util;
 use pretty_assertions::assert_eq;
 
 use rust_rocksdb::{
-    CuckooTableOptions, DBAccess, Direction, Error, ErrorKind, IteratorMode, Options, ReadOptions,
+    CuckooTableOptions, DBAccess, Direction, Error, ErrorKind, IteratorMode, Options, Range, ReadOptions,
     SliceTransform, TransactionDB, TransactionDBOptions, TransactionOptions,
     WriteBatchWithTransaction, WriteOptions, DB,
 };
@@ -407,6 +407,95 @@ fn cuckoo() {
         assert_eq!(r.unwrap().unwrap(), b"v2");
         assert!(db.delete(b"k1").is_ok());
         assert!(db.get(b"k1").unwrap().is_none());
+    }
+}
+
+#[test]
+fn approximate_sizes_test() {
+    let path = DBPath::new("_rust_rocksdb_approximate_size");
+    {
+        let db: TransactionDB = TransactionDB::open_default(&path).unwrap();
+
+        // Write some data
+        db.put(b"k1", b"v1111").unwrap();
+        db.put(b"k2", b"v2222").unwrap();
+        db.put(b"k3", b"v3333").unwrap();
+        db.put(b"k4", b"v4444").unwrap();
+        db.put(b"k5", b"v5555").unwrap();
+
+        let ranges = [
+            Range {
+                start: b"k1",
+                end: b"k3",
+            },
+            Range {
+                start: b"k4",
+                end: b"k6",
+            },
+        ];
+
+        let sizes = db.approximate_sizes(&ranges).unwrap();
+        assert_eq!(sizes.len(), 2);
+
+        // Both ranges should have non-zero sizes since they contain data
+        assert!(sizes[0] > 0);
+        assert!(sizes[1] > 0);
+
+        // Empty range should have zero size
+        let empty_ranges = [Range {
+            start: b"k9",
+            end: b"k9",
+        }];
+        let empty_size = db.approximate_sizes(&empty_ranges).unwrap();
+        assert_eq!(empty_size[0], 0);
+    }
+}
+
+#[test]
+fn approximate_sizes_cf_test() {
+    let path = DBPath::new("_rust_rocksdb_approximate_size_cf");
+    {
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        opts.create_missing_column_families(true);
+
+        let cf_names = ["cf1"];
+        let txn_db_opts = TransactionDBOptions::default();
+        let db: TransactionDB = TransactionDB::open_cf(&opts, &txn_db_opts, &path, cf_names).unwrap();
+        let cf1 = db.cf_handle("cf1").unwrap();
+
+        // Write some data to cf1
+        db.put_cf(&cf1, b"k1", b"v1111").unwrap();
+        db.put_cf(&cf1, b"k2", b"v2222").unwrap();
+        db.put_cf(&cf1, b"k3", b"v3333").unwrap();
+        db.put_cf(&cf1, b"k4", b"v4444").unwrap();
+        db.put_cf(&cf1, b"k5", b"v5555").unwrap();
+
+        let ranges = [
+            Range {
+                start: b"k1",
+                end: b"k3",
+            },
+            Range {
+                start: b"k4",
+                end: b"k6",
+            },
+        ];
+
+        let sizes = db.approximate_sizes_cf(&cf1, &ranges).unwrap();
+        assert_eq!(sizes.len(), 2);
+
+        // Both ranges should have non-zero sizes since they contain data
+        assert!(sizes[0] > 0);
+        assert!(sizes[1] > 0);
+
+        // Empty range should have zero size
+        let empty_ranges = [Range {
+            start: b"k9",
+            end: b"k9",
+        }];
+        let empty_size = db.approximate_sizes_cf(&cf1, &empty_ranges).unwrap();
+        assert_eq!(empty_size[0], 0);
     }
 }
 

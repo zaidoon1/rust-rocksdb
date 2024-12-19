@@ -72,6 +72,8 @@ jobs:
 
       - name: Install rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: cargo-audit
 
       - name: generate Cargo.lock
         run: cargo generate-lockfile

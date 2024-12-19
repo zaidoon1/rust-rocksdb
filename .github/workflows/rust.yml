@@ -70,6 +70,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install rust
+        uses: dtolnay/rust-toolchain@stable
+
       - name: generate Cargo.lock
         run: cargo generate-lockfile
 

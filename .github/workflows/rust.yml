@@ -73,7 +73,8 @@ jobs:
       - name: Install rust
         uses: dtolnay/rust-toolchain@stable
       
-      - uses: rustup override set stable
+      - name: use stable rust
+        run: rustup override set stable
 
       - name: generate Cargo.lock
         run: cargo generate-lockfile

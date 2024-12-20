@@ -276,6 +276,89 @@ impl<T: ThreadMode> OptimisticTransactionDB<T> {
         }
     }
 
+    /// Returns the approximate size of the ranges in bytes.
+    ///
+    /// The keys in the ranges should be provided in lexicographic order. 
+    /// The ranges should not overlap.
+    ///
+    /// This operation can be expensive. It scans data files to estimate 
+    /// the size of range.
+    pub fn approximate_sizes<K: AsRef<[u8]>>(&self, ranges: &[crate::db::Range<K>]) -> Result<Vec<u64>, Error> {
+        let num_ranges = ranges.len();
+        let mut starts: Vec<*const c_char> = Vec::with_capacity(num_ranges);
+        let mut start_lens: Vec<size_t> = Vec::with_capacity(num_ranges);
+        let mut limits: Vec<*const c_char> = Vec::with_capacity(num_ranges);
+        let mut limit_lens: Vec<size_t> = Vec::with_capacity(num_ranges);
+        let mut sizes: Vec<u64> = Vec::with_capacity(num_ranges);
+
+        for range in ranges {
+            let start = range.start.as_ref();
+            let limit = range.end.as_ref();
+
+            starts.push(start.as_ptr() as *const c_char);
+            start_lens.push(start.len() as size_t);
+            limits.push(limit.as_ptr() as *const c_char);
+            limit_lens.push(limit.len() as size_t);
+            sizes.push(0);
+        }
+
+        unsafe {
+            let db = ffi::rocksdb_optimistictransactiondb_get_base_db(self.inner.db);
+            ffi_try!(ffi::rocksdb_approximate_sizes(
+                db,
+                num_ranges as c_int,
+                starts.as_ptr(),
+                start_lens.as_ptr(),
+                limits.as_ptr(),
+                limit_lens.as_ptr(),
+                sizes.as_mut_ptr()
+            ));
+        }
+
+        Ok(sizes)
+    }
+
+    /// Similar to `approximate_sizes` but allows specifying a column family.
+    pub fn approximate_sizes_cf<K: AsRef<[u8]>>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        ranges: &[crate::db::Range<K>],
+    ) -> Result<Vec<u64>, Error> {
+        let num_ranges = ranges.len();
+        let mut starts: Vec<*const c_char> = Vec::with_capacity(num_ranges);
+        let mut start_lens: Vec<size_t> = Vec::with_capacity(num_ranges);
+        let mut limits: Vec<*const c_char> = Vec::with_capacity(num_ranges);
+        let mut limit_lens: Vec<size_t> = Vec::with_capacity(num_ranges);
+        let mut sizes: Vec<u64> = Vec::with_capacity(num_ranges);
+
+        for range in ranges {
+            let start = range.start.as_ref();
+            let limit = range.end.as_ref();
+
+            starts.push(start.as_ptr() as *const c_char);
+            start_lens.push(start.len() as size_t);
+            limits.push(limit.as_ptr() as *const c_char);
+            limit_lens.push(limit.len() as size_t);
+            sizes.push(0);
+        }
+
+        unsafe {
+            let db = ffi::rocksdb_optimistictransactiondb_get_base_db(self.inner.db);
+            ffi_try!(ffi::rocksdb_approximate_sizes_cf(
+                db,
+                cf.inner(),
+                num_ranges as c_int,
+                starts.as_ptr(),
+                start_lens.as_ptr(),
+                limits.as_ptr(),
+                limit_lens.as_ptr(),
+                sizes.as_mut_ptr()
+            ));
+        }
+
+        Ok(sizes)
+    }
+
     pub fn write_opt(
         &self,
         batch: WriteBatchWithTransaction<true>,

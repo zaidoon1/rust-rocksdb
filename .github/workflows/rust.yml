@@ -30,8 +30,29 @@ jobs:
         with:
           components: rust-docs
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
       - name: Run cargo rustdoc
         run: cargo rustdoc -- -D warnings
+
+  doctest: # doctest are no supported in cargo nextest yet. https://github.com/nextest-rs/nextest/issues/16
+    name: Doctests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Run doctests
+        run: cargo test --doc
 
   clippy:
     name: Clippy
@@ -44,7 +65,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y liburing-dev pkg-config
       - name: Set PKG_CONFIG_PATH
@@ -104,6 +127,11 @@ jobs:
       - name: Install rust
         uses: dtolnay/rust-toolchain@stable
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - uses: taiki-e/install-action@nextest
+
       - name: Remove msys64 # Workaround to resolve link error with C:\msys64\mingw64\bin\libclang.dll
         if: runner.os == 'Windows'
         run: Remove-Item -LiteralPath "C:\msys64\" -Force -Recurse
@@ -113,7 +141,6 @@ jobs:
         run: choco install llvm -y
 
       - name: Mark working directory as read-only
-        # to ensure that the tests always use a temporary directory
         if: runner.os == 'Linux'
         run: |
           mkdir -p target
@@ -124,8 +151,8 @@ jobs:
 
       - name: Run rocksdb tests
         run: |
-          cargo test --all
-          cargo test --all --features multi-threaded-cf
+          cargo nextest run --all
+          cargo nextest run --all --features multi-threaded-cf
 
       - name: Mark working directory as writable
         if: runner.os == 'Linux'
@@ -135,7 +162,6 @@ jobs:
         run: cargo clean
 
       - name: Mark working directory as read-only
-        # to ensure that the tests always use a temporary directory
         if: runner.os == 'Linux'
         run: |
           mkdir -p target
@@ -145,7 +171,7 @@ jobs:
 
       - name: Run rocksdb tests (jemalloc)
         if: runner.os != 'Windows'
-        run: cargo test --all --features jemalloc
+        run: cargo nextest run --all --features jemalloc
 
       - name: Mark working directory as writable
         if: runner.os == 'Linux'

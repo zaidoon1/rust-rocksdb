@@ -1735,3 +1735,4 @@ fn test_full_history_ts_low() {
         let _ = DB::destroy(&Options::default(), &path);
     }
 }
+

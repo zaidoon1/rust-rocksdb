@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.36.0 (2025-01-03)
+
+* Fix some typos (DeVikingMark)
+* chore: fix multiple typos of different importance (crStiv)
+* feat: allow to set per cf ttl (0xdeafbeef)
+* Fix some typos (teenager-ETH)
+* Fix future clippy warnings (niklasf)
+* upgrade to RocksDB 9.10.0 (zaidoon1)
+
 ## 0.35.0 (2024-12-17)
 
 * DB: Implement get_db_identity using rocksdb_get_db_identity (evanj)
@@ -59,7 +68,6 @@
 * Bump lz4 1.10 (agourlay)
 * feat: Properties for TransactionDB #899 (4TT1L4)
 * Improvements to user defined timestamp (larry0x)
-
 
 ## 0.28.0 (2024-07-13)
 

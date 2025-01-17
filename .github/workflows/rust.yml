@@ -95,7 +95,7 @@ jobs:
 
       - name: Install rust
         uses: dtolnay/rust-toolchain@stable
-      
+
       - name: use stable rust
         run: rustup override set stable
 
@@ -112,10 +112,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        build: [Linux, macOS, Windows]
+        build: [Linux, Linux-ARM, macOS, Windows]
         include:
           - build: Linux
             os: ubuntu-latest
+          - build: Linux-ARM
+            os: ubuntu-24.04-arm
           - build: macOS
             os: macos-latest
           - build: Windows

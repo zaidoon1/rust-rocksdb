@@ -210,7 +210,10 @@ fn build_rocksdb() {
 
         #[cfg(target_os = "linux")]
         if check_getauxval_supported() {
+            panic!("setting ROCKSDB_AUXV_GETAUXVAL_PRESENT");
             config.define("ROCKSDB_AUXV_GETAUXVAL_PRESENT", None);
+        } else {
+            panic!("failed to set ROCKSDB_AUXV_GETAUXVAL_PRESENT");
         }
     } else if target.contains("dragonfly") {
         config.define("OS_DRAGONFLYBSD", None);

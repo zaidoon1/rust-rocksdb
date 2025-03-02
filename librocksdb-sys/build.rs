@@ -1,6 +1,9 @@
 use std::path::Path;
 use std::{env, fs, path::PathBuf, process::Command};
 
+#[cfg(target_os = "linux")]
+use libc::{getauxval, AT_HWCAP};
+
 // On these platforms jemalloc-sys will use a prefixed jemalloc which cannot be linked together
 // with RocksDB.
 // See https://github.com/tikv/jemallocator/blob/f7adfca5aff272b43fd3ad896252b57fbbd9c72a/jemalloc-sys/src/env.rs#L24
@@ -48,6 +51,18 @@ fn bindgen_rocksdb() {
     bindings
         .write_to_file(out_path.join("bindings.rs"))
         .expect("unable to write rocksdb bindings");
+}
+
+#[cfg(target_os = "linux")]
+fn check_getauxval_supported() -> bool {
+    unsafe {
+        let aux_value = getauxval(AT_HWCAP);
+        if aux_value == 0 {
+            return false;
+        }
+
+        true
+    }
 }
 
 fn build_rocksdb() {
@@ -192,6 +207,11 @@ fn build_rocksdb() {
         config.define("ROCKSDB_PLATFORM_POSIX", None);
         config.define("ROCKSDB_LIB_IO_POSIX", None);
         config.define("ROCKSDB_SCHED_GETCPU_PRESENT", None);
+
+        #[cfg(target_os = "linux")]
+        if check_getauxval_supported() {
+            config.define("ROCKSDB_AUXV_GETAUXVAL_PRESENT", None);
+        }
     } else if target.contains("dragonfly") {
         config.define("OS_DRAGONFLYBSD", None);
         config.define("ROCKSDB_PLATFORM_POSIX", None);

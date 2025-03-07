@@ -5,7 +5,7 @@ rust-rocksdb
 [![crates.io](https://img.shields.io/crates/v/rust-rocksdb.svg)](https://crates.io/crates/rust-rocksdb)
 [![documentation](https://docs.rs/rust-rocksdb/badge.svg)](https://docs.rs/rust-rocksdb)
 [![license](https://img.shields.io/crates/l/rust-rocksdb.svg)](https://github.com/zaidoon1/rust-rocksdb/blob/master/LICENSE)
-![rust 1.75.0 required](https://img.shields.io/badge/rust-1.75.0-blue.svg?label=MSRV)
+![rust 1.81.0 required](https://img.shields.io/badge/rust-1.81.0-blue.svg?label=MSRV)
 
 ![GitHub commits (since latest release)](https://img.shields.io/github/commits-since/zaidoon1/rust-rocksdb/latest.svg)
 
@@ -25,7 +25,7 @@ control and be able to create regular releases.
 
 rust-rocksdb keeps a rolling MSRV (minimum supported Rust version) policy of 6 months. This means we will accept PRs that upgrade the MSRV as long as the new Rust version used is at least 6 months old.
 
-Our current MSRV is 1.75.
+Our current MSRV is 1.81.0
 
 ## Contributing
 

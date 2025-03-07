@@ -29,7 +29,7 @@ impl PropName {
             // 2. Self and CStr have the same representation so casting is sound.
             unsafe {
                 let value = CStr::from_bytes_with_nul_unchecked(value.as_bytes());
-                &*(value as *const CStr as *const Self)
+                &*(std::ptr::from_ref::<CStr>(value) as *const Self)
             }
         } else {
             panic!("input was not nul-terminated");
@@ -189,7 +189,7 @@ impl std::ops::Deref for PropertyName {
         // SAFETY: 1. PropName and CStr have the same representation so casting
         // is safe. 2. self.0 is guaranteed to be valid nul-terminated UTF-8
         // string.
-        unsafe { &*(self.0.as_c_str() as *const CStr as *const PropName) }
+        unsafe { &*(std::ptr::from_ref::<CStr>(self.0.as_c_str()) as *const PropName) }
     }
 }
 

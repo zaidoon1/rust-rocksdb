@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.37.0 (2025-03-07)
+
+* Support builds on AIX (mustartt)
+* WriteBatch: add support for WriteBatch::put_log_data (lucasvuillier)
+* Fix C++ linking (brndnmtthws)
+* add ROCKSDB_AUXV_GETAUXVAL_PRESENT for supported Linux systems (zaidoon1)
+* Add backup options and db options sync/fsync getters/setters (timvisee)
+* upgrade to RocksDB 9.11.1 (zaidoon1)
+* bump msrv to 1.81.0 (zaidoon1)
+
 ## 0.36.0 (2025-01-03)
 
 * Fix some typos (DeVikingMark)

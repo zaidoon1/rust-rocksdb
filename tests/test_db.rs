@@ -14,11 +14,11 @@
 
 mod util;
 
+use pretty_assertions::assert_eq;
 use std::convert::TryInto;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::{fs, io::Read as _};
 use std::{sync::Arc, thread, time::Duration};
-
-use pretty_assertions::assert_eq;
 
 use rust_rocksdb::statistics::{Histogram, StatsLevel, Ticker};
 use rust_rocksdb::{
@@ -1735,4 +1735,23 @@ fn test_full_history_ts_low() {
 
         let _ = DB::destroy(&Options::default(), &path);
     }
+}
+
+#[test]
+fn test_db_version() {
+    let n = DBPath::new("_rust_rocksdb_test_db_version");
+
+    let mut opts = Options::default();
+    opts.create_if_missing(true);
+    let _db = DB::open(&opts, &n).unwrap();
+
+    let mut rocksdb_log = fs::File::open(format!("{}/LOG", (&n).as_ref().to_str().unwrap()))
+        .expect("rocksdb creates a LOG file");
+    let mut settings = String::new();
+    rocksdb_log
+        .read_to_string(&mut settings)
+        .expect("can read the LOG file");
+
+    // Make sure to update this test when upgrading to a new version!
+    assert!(settings.contains("RocksDB version: 9.11.2"));
 }

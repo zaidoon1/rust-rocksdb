@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.37.0 (2025-03-30)
+
+* upgrade to RocksDB 9.11.2 (zaidoon1)
+
 ## 0.37.0 (2025-03-07)
 
 * Support builds on AIX (mustartt)

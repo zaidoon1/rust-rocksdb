@@ -1,6 +1,6 @@
 [package]
 name = "rust-librocksdb-sys"
-version = "0.34.0+9.11.2"
+version = "0.35.0+10.0.1"
 edition = "2021"
 rust-version = "1.81.0"
 authors = [
@@ -50,7 +50,7 @@ libc = "0.2"
 tikv-jemalloc-sys = { version = "0.6", features = [
     "unprefixed_malloc_on_supported_platforms",
 ], optional = true }
-lz4-sys = { version = "1.10", optional = true }
+lz4-sys = { version = "1.11", optional = true }
 zstd-sys = { version = "2.0", features = [
     "zdict_builder",
     "experimental",
@@ -63,7 +63,7 @@ const-str = "0.6"
 uuid = { version = "1", features = ["v4"] }
 
 [build-dependencies]
-cc = { version = "1.0", features = ["parallel"] }
+cc = { version = "1.2", features = ["parallel"] }
 bindgen = { version = "0.69", default-features = false }
 glob = "0.3"
 pkg-config = { version = "0.3", optional = true }

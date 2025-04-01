@@ -1,6 +1,12 @@
 # Changelog
 
-## 0.37.0 (2025-03-30)
+## 0.39.0 (2025-04-01)
+
+* upgrade to RocksDB 10.0.1 (zaidoon1)
+* bump snappy to 1.2.2 (zaidoon1)
+* bump lz4 to v1.11 (zaidoon1)
+
+## 0.38.0 (2025-03-30)
 
 * upgrade to RocksDB 9.11.2 (zaidoon1)
 

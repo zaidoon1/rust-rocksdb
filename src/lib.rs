@@ -126,7 +126,7 @@ pub use crate::{
         Cache, ChecksumType, CompactOptions, CuckooTableOptions, DBCompactionPri,
         DBCompactionStyle, DBCompressionType, DBPath, DBRecoveryMode, DataBlockIndexType,
         FifoCompactOptions, FlushOptions, IngestExternalFileOptions, KeyEncodingType, LogLevel,
-        LruCacheOptions, MemtableFactory, Options, PlainTableFactoryOptions, RateLimiterMode,
+        LruCacheOptions, MemtableFactory, Options, PlainTableFactoryOptions, PrepopulateBlockCache, RateLimiterMode,
         ReadOptions, ReadTier, UniversalCompactOptions, UniversalCompactionStopStyle,
         WaitForCompactOptions, WriteBufferManager, WriteOptions,
     },

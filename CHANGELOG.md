@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.40.0 (2025-04-19)
+
+* upgrade to RocksDB 10.1.3 (zaidoon1)
+
 ## 0.39.0 (2025-04-01)
 
 * upgrade to RocksDB 10.0.1 (zaidoon1)

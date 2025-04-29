@@ -64,6 +64,7 @@ iterable_named_enum! {
         ErrorHandlerAutoresumeRetryCount("rocksdb.error.handler.autoresume.retry.count"),
         AsyncReadBytes("rocksdb.async.read.bytes"),
         PollWaitMicros("rocksdb.poll.wait.micros"),
+        CompactionPrefetchBytes("rocksdb.compaction.prefetch.bytes"),
         PrefetchedBytesDiscarded("rocksdb.prefetched.bytes.discarded"),
         AsyncPrefetchAbortMicros("rocksdb.async.prefetch.abort.micros"),
         TableOpenPrefetchTailReadBytes("rocksdb.table.open.prefetch.tail.read.bytes"),

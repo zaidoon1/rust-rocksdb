@@ -170,5 +170,5 @@ fn sanity_checks() {
 
     // assert enum lengths
     assert_eq!(Ticker::iter().count(), 214 /* TICKER_ENUM_MAX */);
-    assert_eq!(Histogram::iter().count(), 62 /* HISTOGRAM_ENUM_MAX */);
+    assert_eq!(Histogram::iter().count(), 63 /* HISTOGRAM_ENUM_MAX */);
 }

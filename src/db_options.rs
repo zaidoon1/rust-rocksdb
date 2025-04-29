@@ -1614,6 +1614,24 @@ impl Options {
         }
     }
 
+    /// When an iterator scans this number of invisible entries (tombstones or
+    /// hidden puts) from the active memtable during a single iterator operation,
+    /// we will attempt to flush the memtable. Currently only forward scans are
+    /// supported (SeekToFirst(), Seek() and Next()).
+    /// This option helps to reduce the overhead of scanning through a
+    /// large number of entries in memtable.
+    /// Users should consider enable deletion-triggered-compaction (see
+    /// CompactOnDeletionCollectorFactory) together with this option to compact
+    /// away tombstones after the memtable is flushed.
+    ///
+    /// Default: 0 (disabled)
+    /// Dynamically changeable through the SetOptions() API.
+    pub fn set_memtable_op_scan_flush_trigger(&mut self, num: u32) {
+        unsafe {
+            ffi::rocksdb_options_set_memtable_op_scan_flush_trigger(self.inner, num);
+        }
+    }
+
     /// This option has different meanings for different compaction styles:
     ///
     /// Leveled: Non-bottom-level files with all keys older than TTL will go

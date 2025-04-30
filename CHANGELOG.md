@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.41.0 (2025-04-29)
+
+* doc db_iterator.rs: Minor edits to rustdoc; more links (evanj)
+* upgrade to RocksDB 10.2.1 (zaidoon1)
+* feat: expose set_memtable_op_scan_flush_trigger (zaidoon1)
+
 ## 0.40.0 (2025-04-19)
 
 * upgrade to RocksDB 10.1.3 (zaidoon1)

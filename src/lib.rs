@@ -95,6 +95,7 @@ mod db_iterator;
 mod db_options;
 mod db_pinnable_slice;
 mod env;
+pub mod event_listener;
 mod iter_range;
 pub mod merge_operator;
 pub mod perf;

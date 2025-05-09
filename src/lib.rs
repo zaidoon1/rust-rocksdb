@@ -105,6 +105,7 @@ mod slice_transform;
 mod snapshot;
 mod sst_file_writer;
 pub mod statistics;
+pub mod table_properties;
 mod transactions;
 mod write_batch;
 mod write_batch_with_index;

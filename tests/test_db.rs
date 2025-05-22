@@ -1755,3 +1755,42 @@ fn test_db_version() {
     // Make sure to update this test when upgrading to a new version!
     assert!(settings.contains("RocksDB version: 10.4.2"));
 }
+
+#[test]
+fn test_get_approximate_sizes_cf() {
+    let path = DBPath::new("_rust_rocksdb_get_approximate_sizes_cf_test");
+    let _ = DB::destroy(&Options::default(), &path);
+
+    {
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        opts.create_missing_column_families(true);
+
+        let cf_opts = Options::default();
+        let cfs = vec![("default", cf_opts)];
+
+        let db = DB::open_cf_with_opts(&opts, &path, cfs).unwrap();
+        let cf = db.cf_handle("default").unwrap();
+
+        // Insert some data
+        for i in 0..1000 {
+            let key = format!("key_{i:04}");
+            let value = format!("value_{i:04}");
+            db.put_cf(&cf, key.as_bytes(), value.as_bytes()).unwrap();
+        }
+
+        // Flush to ensure data is written to disk
+        db.flush_cf(&cf).unwrap();
+
+        // Get approximate sizes
+        let start_key = b"key_0000";
+        let end_key = b"key_0999";
+        let sizes =
+            db.get_approximate_sizes_cf(&cf, &[rust_rocksdb::Range::new(start_key, end_key)]);
+
+        // Check that the sizes are greater than zero
+        assert!(sizes[0] > 0);
+
+        let _ = DB::destroy(&Options::default(), &path);
+    }
+}

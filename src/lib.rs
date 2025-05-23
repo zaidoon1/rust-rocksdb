@@ -145,7 +145,9 @@ pub use crate::{
         OptimisticTransactionDB, OptimisticTransactionOptions, Transaction, TransactionDB,
         TransactionDBOptions, TransactionOptions,
     },
-    write_batch::{WriteBatch, WriteBatchIterator, WriteBatchWithTransaction},
+    write_batch::{
+        WriteBatch, WriteBatchIterator, WriteBatchIteratorCf, WriteBatchWithTransaction,
+    },
 };
 
 use rust_librocksdb_sys as ffi;

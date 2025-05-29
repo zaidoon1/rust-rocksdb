@@ -337,6 +337,7 @@ fn build_rocksdb() {
     } else if !target.contains("windows") {
         config.cpp_link_stdlib("c++");
     }
+    config.flag("-include").flag("cstdint");
     config.compile("librocksdb.a");
 }
 

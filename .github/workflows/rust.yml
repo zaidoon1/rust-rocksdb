@@ -15,6 +15,12 @@ jobs:
         with:
           components: rustfmt
 
+      - name: use stable rust
+        run: rustup override set stable
+
+      - name: generate Cargo.lock
+        run: cargo generate-lockfile
+
       - name: Run rustfmt
         run: cargo fmt --all -- --check
 
@@ -65,6 +71,13 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+
+      - name: use stable rust
+        run: rustup override set stable
+
+      - name: generate Cargo.lock
+        run: cargo generate-lockfile
+
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true

@@ -16,9 +16,10 @@
 use std::{marker::PhantomData, ptr};
 
 use crate::{
-    db::{convert_values, DBAccess},
-    ffi, AsColumnFamilyRef, DBIteratorWithThreadMode, DBPinnableSlice, DBRawIteratorWithThreadMode,
+    AsColumnFamilyRef, DBIteratorWithThreadMode, DBPinnableSlice, DBRawIteratorWithThreadMode,
     Direction, Error, IteratorMode, ReadOptions, SnapshotWithThreadMode, WriteBatchWithTransaction,
+    db::{DBAccess, convert_values},
+    ffi,
 };
 use libc::{c_char, c_void, size_t};
 
@@ -37,15 +38,17 @@ unsafe impl<DB> Send for Transaction<'_, DB> {}
 
 impl<DB> DBAccess for Transaction<'_, DB> {
     unsafe fn create_snapshot(&self) -> *const ffi::rocksdb_snapshot_t {
-        ffi::rocksdb_transaction_get_snapshot(self.inner)
+        unsafe { ffi::rocksdb_transaction_get_snapshot(self.inner) }
     }
 
     unsafe fn release_snapshot(&self, snapshot: *const ffi::rocksdb_snapshot_t) {
-        ffi::rocksdb_free(snapshot as *mut c_void);
+        unsafe {
+            ffi::rocksdb_free(snapshot as *mut c_void);
+        }
     }
 
     unsafe fn create_iterator(&self, readopts: &ReadOptions) -> *mut ffi::rocksdb_iterator_t {
-        ffi::rocksdb_transaction_create_iterator(self.inner, readopts.inner)
+        unsafe { ffi::rocksdb_transaction_create_iterator(self.inner, readopts.inner) }
     }
 
     unsafe fn create_iterator_cf(
@@ -53,7 +56,9 @@ impl<DB> DBAccess for Transaction<'_, DB> {
         cf_handle: *mut ffi::rocksdb_column_family_handle_t,
         readopts: &ReadOptions,
     ) -> *mut ffi::rocksdb_iterator_t {
-        ffi::rocksdb_transaction_create_iterator_cf(self.inner, readopts.inner, cf_handle)
+        unsafe {
+            ffi::rocksdb_transaction_create_iterator_cf(self.inner, readopts.inner, cf_handle)
+        }
     }
 
     fn get_opt<K: AsRef<[u8]>>(

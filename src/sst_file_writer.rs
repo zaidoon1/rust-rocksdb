@@ -13,7 +13,7 @@
 // limitations under the License.
 //`
 
-use crate::{ffi, ffi_util::to_cpath, Error, Options};
+use crate::{Error, Options, ffi, ffi_util::to_cpath};
 
 use libc::{self, c_char, size_t};
 use std::{ffi::CString, marker::PhantomData, path::Path};

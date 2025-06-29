@@ -114,8 +114,8 @@ pub use crate::{
     },
     compaction_filter::Decision as CompactionDecision,
     db::{
-        DBAccess, DBCommon, DBWithThreadMode, LiveFile, MultiThreaded, SingleThreaded, ThreadMode,
-        DB,
+        DB, DBAccess, DBCommon, DBWithThreadMode, LiveFile, MultiThreaded, SingleThreaded,
+        ThreadMode,
     },
     db_iterator::{
         DBIterator, DBIteratorWithThreadMode, DBRawIterator, DBRawIteratorWithThreadMode,
@@ -243,12 +243,12 @@ mod test {
     };
 
     use super::{
+        BlockBasedOptions, BoundColumnFamily, Cache, ColumnFamily, ColumnFamilyDescriptor, DB,
+        DBIterator, DBRawIterator, IngestExternalFileOptions, Options, PlainTableFactoryOptions,
+        ReadOptions, Snapshot, SstFileWriter, WriteBatch, WriteBufferManager, WriteOptions,
         column_family::UnboundColumnFamily,
         db_options::{CacheWrapper, WriteBufferManagerWrapper},
         env::{Env, EnvWrapper},
-        BlockBasedOptions, BoundColumnFamily, Cache, ColumnFamily, ColumnFamilyDescriptor,
-        DBIterator, DBRawIterator, IngestExternalFileOptions, Options, PlainTableFactoryOptions,
-        ReadOptions, Snapshot, SstFileWriter, WriteBatch, WriteBufferManager, WriteOptions, DB,
     };
 
     #[test]

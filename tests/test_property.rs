@@ -16,7 +16,7 @@ mod util;
 
 use pretty_assertions::assert_eq;
 
-use rust_rocksdb::{properties, Options, DB};
+use rust_rocksdb::{DB, Options, properties};
 use util::DBPath;
 
 #[test]

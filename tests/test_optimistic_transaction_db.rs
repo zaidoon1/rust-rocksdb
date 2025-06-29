@@ -16,9 +16,9 @@
 mod util;
 
 use rust_rocksdb::{
-    CuckooTableOptions, DBAccess, Direction, Error, ErrorKind, IteratorMode,
+    CuckooTableOptions, DB, DBAccess, Direction, Error, ErrorKind, IteratorMode,
     OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions, SingleThreaded,
-    SliceTransform, SnapshotWithThreadMode, WriteBatchWithTransaction, WriteOptions, DB,
+    SliceTransform, SnapshotWithThreadMode, WriteBatchWithTransaction, WriteOptions,
 };
 use util::DBPath;
 

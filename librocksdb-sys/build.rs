@@ -2,7 +2,7 @@ use std::path::Path;
 use std::{env, fs, path::PathBuf, process::Command};
 
 #[cfg(target_os = "linux")]
-use libc::{getauxval, AT_HWCAP};
+use libc::{AT_HWCAP, getauxval};
 
 // On these platforms jemalloc-sys will use a prefixed jemalloc which cannot be linked together
 // with RocksDB.
@@ -185,7 +185,8 @@ fn build_rocksdb() {
         config.define("ROCKSDB_PLATFORM_POSIX", None);
         config.define("ROCKSDB_LIB_IO_POSIX", None);
 
-        env::set_var("IPHONEOS_DEPLOYMENT_TARGET", "12.0");
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        unsafe { env::set_var("IPHONEOS_DEPLOYMENT_TARGET", "12.0") };
     } else if target.contains("darwin") {
         config.define("OS_MACOSX", None);
         config.define("ROCKSDB_PLATFORM_POSIX", None);
@@ -390,7 +391,7 @@ fn try_to_find_and_link_lib(lib_name: &str) -> bool {
             Some(_) => "static",
             None => "dylib",
         };
-        println!("cargo:rustc-link-lib={}={}", mode, lib_name.to_lowercase());
+        println!("cargo:rustc-link-lib={mode}={}", lib_name.to_lowercase());
         return true;
     }
     false
@@ -420,9 +421,9 @@ fn update_submodules() {
 
     match ret.map(|status| (status.success(), status.code())) {
         Ok((true, _)) => (),
-        Ok((false, Some(c))) => panic!("Command failed with error code {}", c),
+        Ok((false, Some(c))) => panic!("Command failed with error code {c}"),
         Ok((false, None)) => panic!("Command got killed"),
-        Err(e) => panic!("Command failed with error: {}", e),
+        Err(e) => panic!("Command failed with error: {e}"),
     }
 }
 
@@ -442,7 +443,7 @@ fn main() {
                 Some(_) => "static",
                 None => "dylib",
             };
-            println!("cargo:rustc-link-lib={}=rocksdb", mode);
+            println!("cargo:rustc-link-lib={mode}=rocksdb");
 
             return;
         }

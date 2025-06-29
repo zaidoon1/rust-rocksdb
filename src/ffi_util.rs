@@ -13,25 +13,29 @@
 // limitations under the License.
 //
 
-use crate::{ffi, Error};
+use crate::{Error, ffi};
 use libc::{self, c_char, c_void, size_t};
 use std::ffi::{CStr, CString};
 use std::path::Path;
 use std::ptr;
 
 pub(crate) unsafe fn from_cstr(ptr: *const c_char) -> String {
-    let cstr = CStr::from_ptr(ptr as *const _);
-    String::from_utf8_lossy(cstr.to_bytes()).into_owned()
+    unsafe {
+        let cstr = CStr::from_ptr(ptr as *const _);
+        String::from_utf8_lossy(cstr.to_bytes()).into_owned()
+    }
 }
 
 pub(crate) unsafe fn raw_data(ptr: *const c_char, size: usize) -> Option<Vec<u8>> {
-    if ptr.is_null() {
-        None
-    } else {
-        let mut dst = vec![0; size];
-        ptr::copy_nonoverlapping(ptr as *const u8, dst.as_mut_ptr(), size);
+    unsafe {
+        if ptr.is_null() {
+            None
+        } else {
+            let mut dst = vec![0; size];
+            ptr::copy_nonoverlapping(ptr as *const u8, dst.as_mut_ptr(), size);
 
-        Some(dst)
+            Some(dst)
+        }
     }
 }
 
@@ -64,13 +68,13 @@ macro_rules! ffi_try {
         ffi_try_impl!($($function)::*())
     };
 
-    ( $($function:ident)::*( $arg1:expr $(, $arg:expr)* $(,)? ) ) => {
+    ( $($function:ident)::*( $arg1:expr_2021 $(, $arg:expr_2021)* $(,)? ) ) => {
         ffi_try_impl!($($function)::*($arg1 $(, $arg)* ,))
     };
 }
 
 macro_rules! ffi_try_impl {
-    ( $($function:ident)::*( $($arg:expr,)*) ) => {{
+    ( $($function:ident)::*( $($arg:expr_2021,)*) ) => {{
         let mut err: *mut ::libc::c_char = ::std::ptr::null_mut();
         let result = $($function)::*($($arg,)* &mut err);
         if !err.is_null() {

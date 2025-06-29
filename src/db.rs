@@ -14,16 +14,16 @@
 //
 
 use crate::{
+    ColumnFamily, ColumnFamilyDescriptor, CompactOptions, DBIteratorWithThreadMode,
+    DBPinnableSlice, DBRawIteratorWithThreadMode, DBWALIterator, DEFAULT_COLUMN_FAMILY_NAME,
+    Direction, Error, FlushOptions, IngestExternalFileOptions, IteratorMode, Options, ReadOptions,
+    SnapshotWithThreadMode, WaitForCompactOptions, WriteBatch, WriteOptions,
     column_family::AsColumnFamilyRef,
     column_family::BoundColumnFamily,
     column_family::UnboundColumnFamily,
     db_options::OptionsMustOutliveDB,
     ffi,
-    ffi_util::{from_cstr, opt_bytes_to_ptr, raw_data, to_cpath, CStrLike},
-    ColumnFamily, ColumnFamilyDescriptor, CompactOptions, DBIteratorWithThreadMode,
-    DBPinnableSlice, DBRawIteratorWithThreadMode, DBWALIterator, Direction, Error, FlushOptions,
-    IngestExternalFileOptions, IteratorMode, Options, ReadOptions, SnapshotWithThreadMode,
-    WaitForCompactOptions, WriteBatch, WriteOptions, DEFAULT_COLUMN_FAMILY_NAME,
+    ffi_util::{CStrLike, from_cstr, opt_bytes_to_ptr, raw_data, to_cpath},
 };
 
 use crate::column_family::ColumnFamilyTtl;
@@ -197,15 +197,17 @@ pub trait DBAccess {
 
 impl<T: ThreadMode, D: DBInner> DBAccess for DBCommon<T, D> {
     unsafe fn create_snapshot(&self) -> *const ffi::rocksdb_snapshot_t {
-        ffi::rocksdb_create_snapshot(self.inner.inner())
+        unsafe { ffi::rocksdb_create_snapshot(self.inner.inner()) }
     }
 
     unsafe fn release_snapshot(&self, snapshot: *const ffi::rocksdb_snapshot_t) {
-        ffi::rocksdb_release_snapshot(self.inner.inner(), snapshot);
+        unsafe {
+            ffi::rocksdb_release_snapshot(self.inner.inner(), snapshot);
+        }
     }
 
     unsafe fn create_iterator(&self, readopts: &ReadOptions) -> *mut ffi::rocksdb_iterator_t {
-        ffi::rocksdb_create_iterator(self.inner.inner(), readopts.inner)
+        unsafe { ffi::rocksdb_create_iterator(self.inner.inner(), readopts.inner) }
     }
 
     unsafe fn create_iterator_cf(
@@ -213,7 +215,7 @@ impl<T: ThreadMode, D: DBInner> DBAccess for DBCommon<T, D> {
         cf_handle: *mut ffi::rocksdb_column_family_handle_t,
         readopts: &ReadOptions,
     ) -> *mut ffi::rocksdb_iterator_t {
-        ffi::rocksdb_create_iterator_cf(self.inner.inner(), readopts.inner, cf_handle)
+        unsafe { ffi::rocksdb_create_iterator_cf(self.inner.inner(), readopts.inner, cf_handle) }
     }
 
     fn get_opt<K: AsRef<[u8]>>(
@@ -2497,10 +2499,9 @@ impl<I: DBInner> DBCommon<SingleThreaded, I> {
 
     /// Drops the column family with the given name
     pub fn drop_cf(&mut self, name: &str) -> Result<(), Error> {
-        if let Some(cf) = self.cfs.cfs.remove(name) {
-            self.drop_column_family(cf.inner, cf)
-        } else {
-            Err(Error::new(format!("Invalid column family: {name}")))
+        match self.cfs.cfs.remove(name) {
+            Some(cf) => self.drop_column_family(cf.inner, cf),
+            _ => Err(Error::new(format!("Invalid column family: {name}"))),
         }
     }
 
@@ -2527,10 +2528,9 @@ impl<I: DBInner> DBCommon<MultiThreaded, I> {
     /// Drops the column family with the given name by internally locking the inner column
     /// family map. This avoids needing `&mut self` reference
     pub fn drop_cf(&self, name: &str) -> Result<(), Error> {
-        if let Some(cf) = self.cfs.cfs.write().unwrap().remove(name) {
-            self.drop_column_family(cf.inner, cf)
-        } else {
-            Err(Error::new(format!("Invalid column family: {name}")))
+        match self.cfs.cfs.write().unwrap().remove(name) {
+            Some(cf) => self.drop_column_family(cf.inner, cf),
+            _ => Err(Error::new(format!("Invalid column family: {name}"))),
         }
     }
 

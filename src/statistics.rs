@@ -18,7 +18,7 @@ macro_rules! iterable_named_enum {
     $type_vis:vis enum $typename:ident {
         $(
             $(#[$variant_meta:meta])*
-            $variant:ident($variant_str:literal) $(= $value:expr)?,
+            $variant:ident($variant_str:literal) $(= $value:expr_2021)?,
         )+
     }
     ) => {

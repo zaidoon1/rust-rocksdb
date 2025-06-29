@@ -17,8 +17,8 @@ mod util;
 use std::{fs, io::Read as _};
 
 use rust_rocksdb::{
-    checkpoint::Checkpoint, BlockBasedOptions, BlockBasedPinningTier, Cache, DBCompactionPri,
-    DBCompressionType, DataBlockIndexType, Env, LruCacheOptions, Options, ReadOptions, DB,
+    BlockBasedOptions, BlockBasedPinningTier, Cache, DB, DBCompactionPri, DBCompressionType,
+    DataBlockIndexType, Env, LruCacheOptions, Options, ReadOptions, checkpoint::Checkpoint,
 };
 use util::DBPath;
 

@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use std::ffi::CStr;
-use std::panic::{catch_unwind, AssertUnwindSafe, RefUnwindSafe};
+use std::panic::{AssertUnwindSafe, RefUnwindSafe, catch_unwind};
 use std::path::Path;
-use std::ptr::{null_mut, NonNull};
+use std::ptr::{NonNull, null_mut};
 use std::slice;
 use std::sync::Arc;
 
@@ -24,6 +24,7 @@ use libc::{self, c_char, c_double, c_int, c_uchar, c_uint, c_void, size_t};
 use crate::column_family::ColumnFamilyTtl;
 use crate::statistics::{Histogram, HistogramData, StatsLevel};
 use crate::{
+    ColumnFamilyDescriptor, Error, SnapshotWithThreadMode,
     compaction_filter::{self, CompactionFilterCallback, CompactionFilterFn},
     compaction_filter_factory::{self, CompactionFilterFactory},
     comparator::{
@@ -32,13 +33,12 @@ use crate::{
     db::DBAccess,
     env::Env,
     ffi,
-    ffi_util::{from_cstr, to_cpath, CStrLike},
+    ffi_util::{CStrLike, from_cstr, to_cpath},
     merge_operator::{
-        self, full_merge_callback, partial_merge_callback, MergeFn, MergeOperatorCallback,
+        self, MergeFn, MergeOperatorCallback, full_merge_callback, partial_merge_callback,
     },
     slice_transform::SliceTransform,
     statistics::Ticker,
-    ColumnFamilyDescriptor, Error, SnapshotWithThreadMode,
 };
 
 pub(crate) struct WriteBufferManagerWrapper {
@@ -1061,32 +1061,34 @@ impl Options {
         column_family_names: *mut *mut c_char,
         column_family_options: *mut *mut ffi::rocksdb_options_t,
     ) -> Vec<ColumnFamilyDescriptor> {
-        let column_family_names_iter =
+        unsafe {
+            let column_family_names_iter =
+                slice::from_raw_parts(column_family_names, num_column_families)
+                    .iter()
+                    .map(|ptr| from_cstr(*ptr));
+            let column_family_options_iter =
+                slice::from_raw_parts(column_family_options, num_column_families)
+                    .iter()
+                    .map(|ptr| Options {
+                        inner: *ptr,
+                        outlive: OptionsMustOutliveDB::default(),
+                    });
+            let column_descriptors = column_family_names_iter
+                .zip(column_family_options_iter)
+                .map(|(name, options)| ColumnFamilyDescriptor {
+                    name,
+                    options,
+                    ttl: ColumnFamilyTtl::Disabled,
+                })
+                .collect::<Vec<_>>();
+            // free pointers
             slice::from_raw_parts(column_family_names, num_column_families)
                 .iter()
-                .map(|ptr| from_cstr(*ptr));
-        let column_family_options_iter =
-            slice::from_raw_parts(column_family_options, num_column_families)
-                .iter()
-                .map(|ptr| Options {
-                    inner: *ptr,
-                    outlive: OptionsMustOutliveDB::default(),
-                });
-        let column_descriptors = column_family_names_iter
-            .zip(column_family_options_iter)
-            .map(|(name, options)| ColumnFamilyDescriptor {
-                name,
-                options,
-                ttl: ColumnFamilyTtl::Disabled,
-            })
-            .collect::<Vec<_>>();
-        // free pointers
-        slice::from_raw_parts(column_family_names, num_column_families)
-            .iter()
-            .for_each(|ptr| ffi::rocksdb_free(*ptr as *mut c_void));
-        ffi::rocksdb_free(column_family_names as *mut c_void);
-        ffi::rocksdb_free(column_family_options as *mut c_void);
-        column_descriptors
+                .for_each(|ptr| ffi::rocksdb_free(*ptr as *mut c_void));
+            ffi::rocksdb_free(column_family_names as *mut c_void);
+            ffi::rocksdb_free(column_family_options as *mut c_void);
+            column_descriptors
+        }
     }
 
     /// Updates DBOptions with values parsed from a string.

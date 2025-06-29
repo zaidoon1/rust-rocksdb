@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{ffi, DB};
+use crate::{DB, ffi};
 use core::ops::Deref;
 use libc::size_t;
 use std::marker::PhantomData;

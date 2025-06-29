@@ -28,16 +28,16 @@ use std::ffi::CStr;
 
 use crate::column_family::ColumnFamilyTtl;
 use crate::{
+    AsColumnFamilyRef, BoundColumnFamily, ColumnFamily, ColumnFamilyDescriptor, DB,
+    DBIteratorWithThreadMode, DBPinnableSlice, DBRawIteratorWithThreadMode,
+    DEFAULT_COLUMN_FAMILY_NAME, Direction, Error, IteratorMode, MultiThreaded, Options,
+    ReadOptions, SingleThreaded, SnapshotWithThreadMode, ThreadMode, Transaction,
+    TransactionDBOptions, TransactionOptions, WriteBatchWithTransaction, WriteOptions,
     column_family::UnboundColumnFamily,
-    db::{convert_values, DBAccess},
+    db::{DBAccess, convert_values},
     db_options::OptionsMustOutliveDB,
     ffi,
     ffi_util::to_cpath,
-    AsColumnFamilyRef, BoundColumnFamily, ColumnFamily, ColumnFamilyDescriptor,
-    DBIteratorWithThreadMode, DBPinnableSlice, DBRawIteratorWithThreadMode, Direction, Error,
-    IteratorMode, MultiThreaded, Options, ReadOptions, SingleThreaded, SnapshotWithThreadMode,
-    ThreadMode, Transaction, TransactionDBOptions, TransactionOptions, WriteBatchWithTransaction,
-    WriteOptions, DB, DEFAULT_COLUMN_FAMILY_NAME,
 };
 use ffi::rocksdb_transaction_t;
 use libc::{c_char, c_int, c_void, size_t};
@@ -90,15 +90,17 @@ unsafe impl<T: ThreadMode> Sync for TransactionDB<T> {}
 
 impl<T: ThreadMode> DBAccess for TransactionDB<T> {
     unsafe fn create_snapshot(&self) -> *const ffi::rocksdb_snapshot_t {
-        ffi::rocksdb_transactiondb_create_snapshot(self.inner)
+        unsafe { ffi::rocksdb_transactiondb_create_snapshot(self.inner) }
     }
 
     unsafe fn release_snapshot(&self, snapshot: *const ffi::rocksdb_snapshot_t) {
-        ffi::rocksdb_transactiondb_release_snapshot(self.inner, snapshot);
+        unsafe {
+            ffi::rocksdb_transactiondb_release_snapshot(self.inner, snapshot);
+        }
     }
 
     unsafe fn create_iterator(&self, readopts: &ReadOptions) -> *mut ffi::rocksdb_iterator_t {
-        ffi::rocksdb_transactiondb_create_iterator(self.inner, readopts.inner)
+        unsafe { ffi::rocksdb_transactiondb_create_iterator(self.inner, readopts.inner) }
     }
 
     unsafe fn create_iterator_cf(
@@ -106,7 +108,9 @@ impl<T: ThreadMode> DBAccess for TransactionDB<T> {
         cf_handle: *mut ffi::rocksdb_column_family_handle_t,
         readopts: &ReadOptions,
     ) -> *mut ffi::rocksdb_iterator_t {
-        ffi::rocksdb_transactiondb_create_iterator_cf(self.inner, readopts.inner, cf_handle)
+        unsafe {
+            ffi::rocksdb_transactiondb_create_iterator_cf(self.inner, readopts.inner, cf_handle)
+        }
     }
 
     fn get_opt<K: AsRef<[u8]>>(
@@ -989,10 +993,9 @@ impl TransactionDB<SingleThreaded> {
 
     /// Drops the column family with the given name
     pub fn drop_cf(&mut self, name: &str) -> Result<(), Error> {
-        if let Some(cf) = self.cfs.cfs.remove(name) {
-            self.drop_column_family(cf.inner, cf)
-        } else {
-            Err(Error::new(format!("Invalid column family: {name}")))
+        match self.cfs.cfs.remove(name) {
+            Some(cf) => self.drop_column_family(cf.inner, cf),
+            _ => Err(Error::new(format!("Invalid column family: {name}"))),
         }
     }
 }
@@ -1025,10 +1028,9 @@ impl TransactionDB<MultiThreaded> {
     /// Drops the column family with the given name by internally locking the inner column
     /// family map. This avoids needing `&mut self` reference
     pub fn drop_cf(&self, name: &str) -> Result<(), Error> {
-        if let Some(cf) = self.cfs.cfs.write().unwrap().remove(name) {
-            self.drop_column_family(cf.inner, cf)
-        } else {
-            Err(Error::new(format!("Invalid column family: {name}")))
+        match self.cfs.cfs.write().unwrap().remove(name) {
+            Some(cf) => self.drop_column_family(cf.inner, cf),
+            _ => Err(Error::new(format!("Invalid column family: {name}"))),
         }
     }
 

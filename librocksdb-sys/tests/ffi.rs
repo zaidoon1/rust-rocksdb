@@ -49,15 +49,17 @@ static mut phase: &str = "";
 // static mut dbbackupname: *mut c_uchar = ptr::null_mut();
 
 unsafe fn strndup(s: *const c_char, n: size_t) -> *mut c_char {
-    let r: *mut c_char = malloc(n + 1) as *mut c_char;
-    if r.is_null() {
-        return r;
+    unsafe {
+        let r: *mut c_char = malloc(n + 1) as *mut c_char;
+        if r.is_null() {
+            return r;
+        }
+        strncpy(r, s, n)
     }
-    strncpy(r, s, n)
 }
 
 unsafe fn rstr<'a>(s: *const c_char) -> Cow<'a, str> {
-    CStr::from_ptr(s).to_string_lossy()
+    unsafe { CStr::from_ptr(s).to_string_lossy() }
 }
 
 fn GetTempDir() -> PathBuf {
@@ -68,8 +70,10 @@ fn GetTempDir() -> PathBuf {
 }
 
 unsafe fn StartPhase(name: &'static str) {
-    err_println!("=== Test {}\n", name);
-    phase = name;
+    unsafe {
+        err_println!("=== Test {}\n", name);
+        phase = name;
+    }
 }
 
 macro_rules! CheckNoError {
@@ -81,7 +85,7 @@ macro_rules! CheckNoError {
 }
 
 macro_rules! CheckCondition {
-    ($cond:expr) => {
+    ($cond:expr_2021) => {
         unsafe {
             assert!($cond, "{}: {}", phase, stringify!($cond));
         }
@@ -89,26 +93,30 @@ macro_rules! CheckCondition {
 }
 
 unsafe fn CheckEqual(expected: *const c_char, actual: *const c_char, n: size_t) {
-    let is_equal = (expected.is_null() && actual.is_null())
-        || (!expected.is_null()
-            && !actual.is_null()
-            && n == strlen(expected)
-            && memcmp(expected as *const c_void, actual as *const c_void, n) == 0);
+    unsafe {
+        let is_equal = (expected.is_null() && actual.is_null())
+            || (!expected.is_null()
+                && !actual.is_null()
+                && n == strlen(expected)
+                && memcmp(expected as *const c_void, actual as *const c_void, n) == 0);
 
-    if !is_equal {
-        panic!(
-            "{}: expected '{}', got '{}'",
-            phase,
-            rstr(strndup(expected, n)),
-            rstr(strndup(actual, 5))
-        );
+        if !is_equal {
+            panic!(
+                "{}: expected '{}', got '{}'",
+                phase,
+                rstr(strndup(expected, n)),
+                rstr(strndup(actual, 5))
+            );
+        }
     }
 }
 
 unsafe fn Free<T>(ptr: *mut *mut T) {
-    if !(*ptr).is_null() {
-        free(*ptr as *mut c_void);
-        *ptr = ptr::null_mut();
+    unsafe {
+        if !(*ptr).is_null() {
+            free(*ptr as *mut c_void);
+            *ptr = ptr::null_mut();
+        }
     }
 }
 
@@ -118,12 +126,15 @@ unsafe fn CheckGet(
     key: *const c_char,
     expected: *const c_char,
 ) {
-    let mut err: *mut c_char = ptr::null_mut();
-    let mut val_len: size_t = 0;
-    let mut val: *mut c_char = rocksdb_get(db, options, key, strlen(key), &mut val_len, &mut err);
-    CheckNoError!(err);
-    CheckEqual(expected, val, val_len);
-    Free(&mut val);
+    unsafe {
+        let mut err: *mut c_char = ptr::null_mut();
+        let mut val_len: size_t = 0;
+        let mut val: *mut c_char =
+            rocksdb_get(db, options, key, strlen(key), &mut val_len, &mut err);
+        CheckNoError!(err);
+        CheckEqual(expected, val, val_len);
+        Free(&mut val);
+    }
 }
 
 unsafe fn CheckGetCF(
@@ -133,29 +144,33 @@ unsafe fn CheckGetCF(
     key: *const c_char,
     expected: *const c_char,
 ) {
-    let mut err: *mut c_char = ptr::null_mut();
-    let mut val_len: size_t = 0;
-    let mut val: *mut c_char = rocksdb_get_cf(
-        db,
-        options,
-        handle,
-        key,
-        strlen(key),
-        &mut val_len,
-        &mut err,
-    );
-    CheckNoError!(err);
-    CheckEqual(expected, val, val_len);
-    Free(&mut val);
+    unsafe {
+        let mut err: *mut c_char = ptr::null_mut();
+        let mut val_len: size_t = 0;
+        let mut val: *mut c_char = rocksdb_get_cf(
+            db,
+            options,
+            handle,
+            key,
+            strlen(key),
+            &mut val_len,
+            &mut err,
+        );
+        CheckNoError!(err);
+        CheckEqual(expected, val, val_len);
+        Free(&mut val);
+    }
 }
 
 unsafe fn CheckIter(iter: *mut rocksdb_iterator_t, key: *const c_char, val: *const c_char) {
-    let mut len: size_t = 0;
-    let mut str: *const c_char;
-    str = rocksdb_iter_key(iter, &mut len);
-    CheckEqual(key, str, len);
-    str = rocksdb_iter_value(iter, &mut len);
-    CheckEqual(val, str, len);
+    unsafe {
+        let mut len: size_t = 0;
+        let mut str: *const c_char;
+        str = rocksdb_iter_key(iter, &mut len);
+        CheckEqual(key, str, len);
+        str = rocksdb_iter_value(iter, &mut len);
+        CheckEqual(val, str, len);
+    }
 }
 
 // Callback from rocksdb_writebatch_iterate()
@@ -166,28 +181,32 @@ unsafe extern "C" fn CheckPut(
     v: *const c_char,
     vlen: size_t,
 ) {
-    let mut state: *mut c_int = ptr as *mut c_int;
-    CheckCondition!(*state < 2);
-    match *state {
-        0 => {
-            CheckEqual(cstrp!("bar"), k, klen);
-            CheckEqual(cstrp!("b"), v, vlen);
+    unsafe {
+        let mut state: *mut c_int = ptr as *mut c_int;
+        CheckCondition!(*state < 2);
+        match *state {
+            0 => {
+                CheckEqual(cstrp!("bar"), k, klen);
+                CheckEqual(cstrp!("b"), v, vlen);
+            }
+            1 => {
+                CheckEqual(cstrp!("box"), k, klen);
+                CheckEqual(cstrp!("c"), v, vlen);
+            }
+            _ => {}
         }
-        1 => {
-            CheckEqual(cstrp!("box"), k, klen);
-            CheckEqual(cstrp!("c"), v, vlen);
-        }
-        _ => {}
+        *state += 1;
     }
-    *state += 1;
 }
 
 // Callback from rocksdb_writebatch_iterate()
 unsafe extern "C" fn CheckDel(ptr: *mut c_void, k: *const c_char, klen: size_t) {
-    let mut state: *mut c_int = ptr as *mut c_int;
-    CheckCondition!(*state == 2);
-    CheckEqual(cstrp!("bar"), k, klen);
-    *state += 1;
+    unsafe {
+        let mut state: *mut c_int = ptr as *mut c_int;
+        CheckCondition!(*state == 2);
+        CheckEqual(cstrp!("bar"), k, klen);
+        *state += 1;
+    }
 }
 
 unsafe extern "C" fn CmpDestroy(arg: *mut c_void) {}
@@ -199,17 +218,19 @@ unsafe extern "C" fn CmpCompare(
     b: *const c_char,
     blen: size_t,
 ) -> c_int {
-    let n = if alen < blen { alen } else { blen };
-    let mut r = memcmp(a as *const c_void, b as *const c_void, n);
-    if r == 0 {
-        match alen.cmp(&blen) {
-            Ordering::Greater => r = 1,
-            Ordering::Less => r = -1,
-            Ordering::Equal => {}
+    unsafe {
+        let n = if alen < blen { alen } else { blen };
+        let mut r = memcmp(a as *const c_void, b as *const c_void, n);
+        if r == 0 {
+            match alen.cmp(&blen) {
+                Ordering::Greater => r = 1,
+                Ordering::Less => r = -1,
+                Ordering::Equal => {}
+            }
         }
-    }
 
-    r
+        r
+    }
 }
 
 unsafe extern "C" fn CmpName(arg: *mut c_void) -> *const c_char {
@@ -237,27 +258,29 @@ unsafe extern "C" fn CFilterFilter(
     new_value_length: *mut size_t,
     value_changed: *mut u8,
 ) -> c_uchar {
-    if key_length == 3 {
-        if memcmp(
-            key.cast::<c_void>(),
-            cstrp!("bar").cast::<c_void>(),
-            key_length,
-        ) == 0
-        {
-            return 1;
-        } else if memcmp(
-            key.cast::<c_void>(),
-            cstrp!("baz").cast::<c_void>(),
-            key_length,
-        ) == 0
-        {
-            *value_changed = 1;
-            *new_value = cstrp!("newbazvalue") as *mut c_char;
-            *new_value_length = 11;
-            return 0;
+    unsafe {
+        if key_length == 3 {
+            if memcmp(
+                key.cast::<c_void>(),
+                cstrp!("bar").cast::<c_void>(),
+                key_length,
+            ) == 0
+            {
+                return 1;
+            } else if memcmp(
+                key.cast::<c_void>(),
+                cstrp!("baz").cast::<c_void>(),
+                key_length,
+            ) == 0
+            {
+                *value_changed = 1;
+                *new_value = cstrp!("newbazvalue") as *mut c_char;
+                *new_value_length = 11;
+                return 0;
+            }
         }
+        0
     }
-    0
 }
 
 unsafe extern "C" fn CFilterFactoryDestroy(arg: *mut c_void) {}
@@ -270,12 +293,14 @@ unsafe extern "C" fn CFilterCreate(
     arg: *mut c_void,
     context: *mut rocksdb_compactionfiltercontext_t,
 ) -> *mut rocksdb_compactionfilter_t {
-    rocksdb_compactionfilter_create(
-        ptr::null_mut(),
-        Some(CFilterDestroy),
-        Some(CFilterFilter),
-        Some(CFilterName),
-    )
+    unsafe {
+        rocksdb_compactionfilter_create(
+            ptr::null_mut(),
+            Some(CFilterDestroy),
+            Some(CFilterFilter),
+            Some(CFilterName),
+        )
+    }
 }
 
 unsafe fn CheckCompaction(
@@ -285,50 +310,52 @@ unsafe fn CheckCompaction(
     roptions: *mut rocksdb_readoptions_t,
     woptions: *mut rocksdb_writeoptions_t,
 ) -> *mut rocksdb_t {
-    let mut err: *mut c_char = ptr::null_mut();
-    let db = rocksdb_open(options, dbname, &mut err);
-    CheckNoError!(err);
-    rocksdb_put(
-        db,
-        woptions,
-        cstrp!("foo"),
-        3,
-        cstrp!("foovalue"),
-        8,
-        &mut err,
-    );
-    CheckNoError!(err);
-    CheckGet(db, roptions, cstrp!("foo"), cstrp!("foovalue"));
-    rocksdb_put(
-        db,
-        woptions,
-        cstrp!("bar"),
-        3,
-        cstrp!("barvalue"),
-        8,
-        &mut err,
-    );
-    CheckNoError!(err);
-    CheckGet(db, roptions, cstrp!("bar"), cstrp!("barvalue"));
-    rocksdb_put(
-        db,
-        woptions,
-        cstrp!("baz"),
-        3,
-        cstrp!("bazvalue"),
-        8,
-        &mut err,
-    );
-    CheckNoError!(err);
-    CheckGet(db, roptions, cstrp!("baz"), cstrp!("bazvalue"));
+    unsafe {
+        let mut err: *mut c_char = ptr::null_mut();
+        let db = rocksdb_open(options, dbname, &mut err);
+        CheckNoError!(err);
+        rocksdb_put(
+            db,
+            woptions,
+            cstrp!("foo"),
+            3,
+            cstrp!("foovalue"),
+            8,
+            &mut err,
+        );
+        CheckNoError!(err);
+        CheckGet(db, roptions, cstrp!("foo"), cstrp!("foovalue"));
+        rocksdb_put(
+            db,
+            woptions,
+            cstrp!("bar"),
+            3,
+            cstrp!("barvalue"),
+            8,
+            &mut err,
+        );
+        CheckNoError!(err);
+        CheckGet(db, roptions, cstrp!("bar"), cstrp!("barvalue"));
+        rocksdb_put(
+            db,
+            woptions,
+            cstrp!("baz"),
+            3,
+            cstrp!("bazvalue"),
+            8,
+            &mut err,
+        );
+        CheckNoError!(err);
+        CheckGet(db, roptions, cstrp!("baz"), cstrp!("bazvalue"));
 
-    // Force compaction
-    rocksdb_compact_range(db, ptr::null(), 0, ptr::null(), 0);
-    // should have filtered bar, but not foo
-    CheckGet(db, roptions, cstrp!("foo"), cstrp!("foovalue"));
-    CheckGet(db, roptions, cstrp!("bar"), ptr::null());
-    CheckGet(db, roptions, cstrp!("baz"), cstrp!("newbazvalue"));
-    db
+        // Force compaction
+        rocksdb_compact_range(db, ptr::null(), 0, ptr::null(), 0);
+        // should have filtered bar, but not foo
+        CheckGet(db, roptions, cstrp!("foo"), cstrp!("foovalue"));
+        CheckGet(db, roptions, cstrp!("bar"), ptr::null());
+        CheckGet(db, roptions, cstrp!("baz"), cstrp!("newbazvalue"));
+        db
+    }
 }
 
 // Custom merge operator
@@ -351,11 +378,13 @@ unsafe extern "C" fn MergeOperatorFullMerge(
     success: *mut u8,
     new_value_length: *mut size_t,
 ) -> *mut c_char {
-    *new_value_length = 4;
-    *success = 1;
-    let result: *mut c_char = malloc(4) as *mut _;
-    memcpy(result as *mut _, cstrp!("fake") as *mut _, 4);
-    result
+    unsafe {
+        *new_value_length = 4;
+        *success = 1;
+        let result: *mut c_char = malloc(4) as *mut _;
+        memcpy(result as *mut _, cstrp!("fake") as *mut _, 4);
+        result
+    }
 }
 
 unsafe extern "C" fn MergeOperatorPartialMerge(
@@ -368,11 +397,13 @@ unsafe extern "C" fn MergeOperatorPartialMerge(
     success: *mut u8,
     new_value_length: *mut size_t,
 ) -> *mut c_char {
-    *new_value_length = 4;
-    *success = 1;
-    let result: *mut c_char = malloc(4) as *mut _;
-    memcpy(result as *mut _, cstrp!("fake") as *const _, 4);
-    result
+    unsafe {
+        *new_value_length = 4;
+        *success = 1;
+        let result: *mut c_char = malloc(4) as *mut _;
+        memcpy(result as *mut _, cstrp!("fake") as *const _, 4);
+        result
+    }
 }
 
 #[test]

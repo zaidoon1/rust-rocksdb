@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use crate::{
-    db::{DBAccess, DB},
-    ffi, Error, ReadOptions, WriteBatch,
+    Error, ReadOptions, WriteBatch,
+    db::{DB, DBAccess},
+    ffi,
 };
 use libc::{c_char, c_uchar, size_t};
 use std::{marker::PhantomData, slice};
@@ -508,16 +509,21 @@ impl<D: DBAccess> Iterator for DBIteratorWithThreadMode<'_, D> {
     fn next(&mut self) -> Option<Result<KVBytes, Error>> {
         if self.done {
             None
-        } else if let Some((key, value)) = self.raw.item() {
-            let item = (Box::from(key), Box::from(value));
-            match self.direction {
-                Direction::Forward => self.raw.next(),
-                Direction::Reverse => self.raw.prev(),
-            }
-            Some(Ok(item))
         } else {
-            self.done = true;
-            self.raw.status().err().map(Result::Err)
+            match self.raw.item() {
+                Some((key, value)) => {
+                    let item = (Box::from(key), Box::from(value));
+                    match self.direction {
+                        Direction::Forward => self.raw.next(),
+                        Direction::Reverse => self.raw.prev(),
+                    }
+                    Some(Ok(item))
+                }
+                _ => {
+                    self.done = true;
+                    self.raw.status().err().map(Result::Err)
+                }
+            }
         }
     }
 }

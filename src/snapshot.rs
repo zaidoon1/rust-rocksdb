@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use crate::{
-    db::DBAccess, ffi, AsColumnFamilyRef, DBIteratorWithThreadMode, DBPinnableSlice,
-    DBRawIteratorWithThreadMode, Error, IteratorMode, ReadOptions, DB,
+    AsColumnFamilyRef, DB, DBIteratorWithThreadMode, DBPinnableSlice, DBRawIteratorWithThreadMode,
+    Error, IteratorMode, ReadOptions, db::DBAccess, ffi,
 };
 
 /// A type alias to keep compatibility. See [`SnapshotWithThreadMode`] for details

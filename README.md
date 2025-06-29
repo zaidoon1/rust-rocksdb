@@ -1,11 +1,10 @@
-rust-rocksdb
-============
+# rust-rocksdb
 
 [![RocksDB build](https://github.com/zaidoon1/rust-rocksdb/actions/workflows/rust.yml/badge.svg?branch=master)](https://github.com/zaidoon1/rust-rocksdb/actions/workflows/rust.yml)
 [![crates.io](https://img.shields.io/crates/v/rust-rocksdb.svg)](https://crates.io/crates/rust-rocksdb)
 [![documentation](https://docs.rs/rust-rocksdb/badge.svg)](https://docs.rs/rust-rocksdb)
 [![license](https://img.shields.io/crates/l/rust-rocksdb.svg)](https://github.com/zaidoon1/rust-rocksdb/blob/master/LICENSE)
-![rust 1.81.0 required](https://img.shields.io/badge/rust-1.81.0-blue.svg?label=MSRV)
+![rust 1.85.0 required](https://img.shields.io/badge/rust-1.85.0-blue.svg?label=MSRV)
 
 ![GitHub commits (since latest release)](https://img.shields.io/github/commits-since/zaidoon1/rust-rocksdb/latest.svg)
 
@@ -25,7 +24,7 @@ control and be able to create regular releases.
 
 rust-rocksdb keeps a rolling MSRV (minimum supported Rust version) policy of 6 months. This means we will accept PRs that upgrade the MSRV as long as the new Rust version used is at least 6 months old.
 
-Our current MSRV is 1.81.0
+Our current MSRV is 1.85.0
 
 ## Contributing
 
@@ -74,8 +73,8 @@ data structures use `RwLock` by default. Alternatively, you can directly create
 
 The feature `mt_static` will request the library to be built with [/MT](https://learn.microsoft.com/en-us/cpp/build/reference/md-mt-ld-use-run-time-library?view=msvc-170)
 flag, which results in library using the static version of the run-time library.
-*This can be useful in case there's a conflict in the dependency tree between different
-run-time versions.*
+_This can be useful in case there's a conflict in the dependency tree between different
+run-time versions._
 
 ### Jemalloc
 

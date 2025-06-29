@@ -1,6 +1,6 @@
 mod util;
 
-use rust_rocksdb::{CompactOptions, Options, ReadOptions, DB};
+use rust_rocksdb::{CompactOptions, DB, Options, ReadOptions};
 use std::cmp::Ordering;
 use std::iter::FromIterator;
 use util::{U64Comparator, U64Timestamp};

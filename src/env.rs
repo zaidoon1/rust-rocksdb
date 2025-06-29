@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use libc::{self, c_int};
 
-use crate::{ffi, Error};
+use crate::{Error, ffi};
 
 /// An Env is an interface used by the rocksdb implementation to access
 /// operating system functionality like the filesystem etc. Callers

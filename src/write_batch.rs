@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{ffi, AsColumnFamilyRef};
+use crate::{AsColumnFamilyRef, ffi};
 use libc::{c_char, c_void, size_t};
 use std::slice;
 
@@ -71,25 +71,29 @@ unsafe extern "C" fn writebatch_put_callback(
     v: *const c_char,
     vlen: usize,
 ) {
-    // coerce the raw pointer back into a box, but "leak" it so we prevent
-    // freeing the resource before we are done with it
-    let boxed_cb = Box::from_raw(state as *mut &mut dyn WriteBatchIterator);
-    let leaked_cb = Box::leak(boxed_cb);
-    let key = slice::from_raw_parts(k as *const u8, klen);
-    let value = slice::from_raw_parts(v as *const u8, vlen);
-    leaked_cb.put(
-        key.to_vec().into_boxed_slice(),
-        value.to_vec().into_boxed_slice(),
-    );
+    unsafe {
+        // coerce the raw pointer back into a box, but "leak" it so we prevent
+        // freeing the resource before we are done with it
+        let boxed_cb = Box::from_raw(state as *mut &mut dyn WriteBatchIterator);
+        let leaked_cb = Box::leak(boxed_cb);
+        let key = slice::from_raw_parts(k as *const u8, klen);
+        let value = slice::from_raw_parts(v as *const u8, vlen);
+        leaked_cb.put(
+            key.to_vec().into_boxed_slice(),
+            value.to_vec().into_boxed_slice(),
+        );
+    }
 }
 
 unsafe extern "C" fn writebatch_delete_callback(state: *mut c_void, k: *const c_char, klen: usize) {
-    // coerce the raw pointer back into a box, but "leak" it so we prevent
-    // freeing the resource before we are done with it
-    let boxed_cb = Box::from_raw(state as *mut &mut dyn WriteBatchIterator);
-    let leaked_cb = Box::leak(boxed_cb);
-    let key = slice::from_raw_parts(k as *const u8, klen);
-    leaked_cb.delete(key.to_vec().into_boxed_slice());
+    unsafe {
+        // coerce the raw pointer back into a box, but "leak" it so we prevent
+        // freeing the resource before we are done with it
+        let boxed_cb = Box::from_raw(state as *mut &mut dyn WriteBatchIterator);
+        let leaked_cb = Box::leak(boxed_cb);
+        let key = slice::from_raw_parts(k as *const u8, klen);
+        leaked_cb.delete(key.to_vec().into_boxed_slice());
+    }
 }
 
 impl<const TRANSACTION: bool> WriteBatchWithTransaction<TRANSACTION> {

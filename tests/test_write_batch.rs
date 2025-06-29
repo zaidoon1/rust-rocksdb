@@ -17,7 +17,7 @@ use std::collections::HashMap;
 
 use pretty_assertions::assert_eq;
 
-use rust_rocksdb::{Error, WriteBatch, WriteBatchIterator, DB};
+use rust_rocksdb::{DB, Error, WriteBatch, WriteBatchIterator};
 use util::DBPath;
 
 #[test]
@@ -97,9 +97,11 @@ fn test_write_batch_put_log_data() {
         assert_eq!(write_batch.len(), 1);
 
         // The WriteBatch data has the written "log_data"
-        assert!(String::from_utf8(write_batch.data().to_vec())
-            .unwrap()
-            .contains("log_data_value"));
+        assert!(
+            String::from_utf8(write_batch.data().to_vec())
+                .unwrap()
+                .contains("log_data_value")
+        );
     }
 
     assert!(called);

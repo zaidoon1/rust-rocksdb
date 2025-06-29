@@ -16,7 +16,7 @@ mod util;
 
 use pretty_assertions::assert_eq;
 
-use rust_rocksdb::{Error, Options, ReadOptions, SstFileWriter, DB};
+use rust_rocksdb::{DB, Error, Options, ReadOptions, SstFileWriter};
 use util::{DBPath, U64Comparator, U64Timestamp};
 
 #[test]

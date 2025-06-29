@@ -16,7 +16,7 @@ mod util;
 
 use pretty_assertions::assert_eq;
 
-use rust_rocksdb::{perf, Options, TransactionDB, TransactionDBOptions};
+use rust_rocksdb::{Options, TransactionDB, TransactionDBOptions, perf};
 use util::DBPath;
 
 #[cfg(not(feature = "multi-threaded-cf"))]

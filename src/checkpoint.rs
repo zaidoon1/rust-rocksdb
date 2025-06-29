@@ -17,7 +17,7 @@
 //!
 //! [1]: https://github.com/facebook/rocksdb/wiki/Checkpoints
 
-use crate::{db::DBInner, ffi, ffi_util::to_cpath, DBCommon, Error, ThreadMode};
+use crate::{DBCommon, Error, ThreadMode, db::DBInner, ffi, ffi_util::to_cpath};
 use std::{marker::PhantomData, path::Path};
 
 /// Undocumented parameter for `ffi::rocksdb_checkpoint_create` function. Zero by default.

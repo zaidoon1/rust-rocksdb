@@ -64,7 +64,7 @@ uuid = { version = "1", features = ["v4"] }
 
 [build-dependencies]
 cc = { version = "1.2", features = ["parallel"] }
-bindgen = { version = "0.69", default-features = false }
+bindgen = { version = "0.72", default-features = false }
 glob = "0.3"
 pkg-config = { version = "0.3", optional = true }
 libc = "0.2"

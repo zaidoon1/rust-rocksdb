@@ -1753,5 +1753,5 @@ fn test_db_version() {
         .expect("can read the LOG file");
 
     // Make sure to update this test when upgrading to a new version!
-    assert!(settings.contains("RocksDB version: 10.2.1"));
+    assert!(settings.contains("RocksDB version: 10.4.2"));
 }

@@ -213,11 +213,13 @@ iterable_named_enum! {
         ReadaheadTrimmed("rocksdb.readahead.trimmed"),
         FifoMaxSizeCompactions("rocksdb.fifo.max.size.compactions"),
         FifoTtlCompactions("rocksdb.fifo.ttl.compactions"),
+        FifoChangeTemperatureCompactions("rocksdb.fifo.change_temperature.compactions"),
         PrefetchBytes("rocksdb.prefetch.bytes"),
         PrefetchBytesUseful("rocksdb.prefetch.bytes.useful"),
         PrefetchHits("rocksdb.prefetch.hits"),
         SstFooterCorruptionCount("rocksdb.footer.corruption.count"),
         FileReadCorruptionRetryCount("rocksdb.file.read.corruption.retry.count"),
         FileReadCorruptionRetrySuccessCount("rocksdb.file.read.corruption.retry.success.count"),
+        NumberWbwiIngest("rocksdb.number.wbwi.ingest"),
     }
 }

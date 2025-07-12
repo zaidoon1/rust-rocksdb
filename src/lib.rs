@@ -95,6 +95,7 @@ mod db_iterator;
 mod db_options;
 mod db_pinnable_slice;
 mod env;
+pub mod event_listener;
 mod iter_range;
 pub mod merge_operator;
 pub mod perf;
@@ -124,11 +125,12 @@ pub use crate::{
     db_options::{
         BlockBasedIndexType, BlockBasedOptions, BlockBasedPinningTier, BottommostLevelCompaction,
         Cache, ChecksumType, CompactOptions, CuckooTableOptions, DBCompactionPri,
-        DBCompactionStyle, DBCompressionType, DBPath, DBRecoveryMode, DataBlockIndexType,
-        FifoCompactOptions, FlushOptions, IngestExternalFileOptions, KeyEncodingType, LogLevel,
-        LruCacheOptions, MemtableFactory, Options, PlainTableFactoryOptions, RateLimiterMode,
-        ReadOptions, ReadTier, UniversalCompactOptions, UniversalCompactionStopStyle,
-        WaitForCompactOptions, WriteBufferManager, WriteOptions,
+        DBCompactionReason, DBCompactionStyle, DBCompressionType, DBPath, DBRecoveryMode,
+        DBWriteStallCondition, DataBlockIndexType, FifoCompactOptions, FlushOptions,
+        IngestExternalFileOptions, KeyEncodingType, LogLevel, LruCacheOptions, MemtableFactory,
+        Options, PlainTableFactoryOptions, RateLimiterMode, ReadOptions, ReadTier,
+        UniversalCompactOptions, UniversalCompactionStopStyle, WaitForCompactOptions,
+        WriteBufferManager, WriteOptions,
     },
     db_pinnable_slice::DBPinnableSlice,
     env::Env,

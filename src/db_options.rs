@@ -22,6 +22,7 @@ use std::sync::Arc;
 use libc::{self, c_char, c_double, c_int, c_uchar, c_uint, c_void, size_t};
 
 use crate::column_family::ColumnFamilyTtl;
+use crate::event_listener::{new_event_listener, EventListener, EventListenerOptions};
 use crate::statistics::{Histogram, HistogramData, StatsLevel};
 use crate::{
     compaction_filter::{self, CompactionFilterCallback, CompactionFilterFn},
@@ -1755,6 +1756,11 @@ impl Options {
             );
             ffi::rocksdb_options_set_compaction_filter(self.inner, cf);
         }
+    }
+
+    pub fn add_event_listener<L: EventListener>(&mut self, l: L, options: EventListenerOptions) {
+        let handle = new_event_listener(l, options);
+        unsafe { ffi::rocksdb_options_add_eventlistener(self.inner, handle.inner) }
     }
 
     /// This is a factory that provides compaction filter objects which allow
@@ -4608,6 +4614,123 @@ pub enum DBCompactionPri {
     OldestSmallestSeqFirst = ffi::rocksdb_k_oldest_smallest_seq_first_compaction_pri as isize,
     MinOverlappingRatio = ffi::rocksdb_k_min_overlapping_ratio_compaction_pri as isize,
     RoundRobin = ffi::rocksdb_k_round_robin_compaction_pri as isize,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[repr(u32)]
+pub enum DBCompactionReason {
+    KUnknown,
+    // [Level] number of L0 files > level0_file_num_compaction_trigger
+    KLevelL0filesNum,
+    // [Level] total size of level > MaxBytesForLevel()
+    KLevelMaxLevelSize,
+    // [Universal] Compacting for size amplification
+    KUniversalSizeAmplification,
+    // [Universal] Compacting for size ratio
+    KUniversalSizeRatio,
+    // [Universal] number of sorted runs > level0_file_num_compaction_trigger
+    KUniversalSortedRunNum,
+    // [FIFO] total size > max_table_files_size
+    KFifomaxSize,
+    // [FIFO] reduce number of files.
+    KFiforeduceNumFiles,
+    // [FIFO] files with creation time < (current_time - interval)
+    KFifottl,
+    // Manual compaction
+    KManualCompaction,
+    // DB::SuggestCompactRange() marked files for compaction
+    KFilesMarkedForCompaction,
+    // [Level] Automatic compaction within bottommost level to cleanup duplicate
+    // versions of same user key, usually due to a released snapshot.
+    KBottommostFiles,
+    // Compaction based on TTL
+    KTtl,
+    // According to the comments in flush_job.cc, RocksDB treats flush as
+    // a level 0 compaction in internal stats.
+    KFlush,
+    // [InternalOnly] External sst file ingestion treated as a compaction
+    // with placeholder input level L0 as file ingestion
+    // technically does not have an input level like other compactions.
+    // Used only for internal stats and conflict checking with other compactions
+    KExternalSstIngestion,
+    // Compaction due to SST file being too old
+    KPeriodicCompaction,
+    // Compaction in order to move files to temperature
+    KChangeTemperature,
+    // Compaction scheduled to force garbage collection of blob files
+    KForcedBlobGc,
+    // A special TTL compaction for RoundRobin policy, which basically the same as
+    // kLevelMaxLevelSize, but the goal is to compact TTLed files.
+    KRoundRobinTtl,
+    // [InternalOnly] DBImpl::ReFitLevel treated as a compaction,
+    // Used only for internal conflict checking with other compactions
+    KRefitLevel,
+    // total number of compaction reasons, new reasons must be added above this.
+    KNumOfReasons,
+}
+
+impl From<u32> for DBCompactionReason {
+    fn from(value: u32) -> Self {
+        match value {
+            1 => DBCompactionReason::KLevelL0filesNum,
+            2 => DBCompactionReason::KLevelMaxLevelSize,
+            3 => DBCompactionReason::KUniversalSizeAmplification,
+            4 => DBCompactionReason::KUniversalSizeRatio,
+            5 => DBCompactionReason::KUniversalSortedRunNum,
+            6 => DBCompactionReason::KFifomaxSize,
+            7 => DBCompactionReason::KFiforeduceNumFiles,
+            8 => DBCompactionReason::KFifottl,
+            9 => DBCompactionReason::KManualCompaction,
+            10 => DBCompactionReason::KFilesMarkedForCompaction,
+            11 => DBCompactionReason::KBottommostFiles,
+            12 => DBCompactionReason::KTtl,
+            13 => DBCompactionReason::KFlush,
+            14 => DBCompactionReason::KExternalSstIngestion,
+            15 => DBCompactionReason::KPeriodicCompaction,
+            16 => DBCompactionReason::KChangeTemperature,
+            17 => DBCompactionReason::KForcedBlobGc,
+            18 => DBCompactionReason::KRoundRobinTtl,
+            19 => DBCompactionReason::KRefitLevel,
+            20 => DBCompactionReason::KNumOfReasons,
+            _ => DBCompactionReason::KUnknown,
+        }
+    }
+}
+
+impl DBCompactionReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DBCompactionReason::KUnknown => "KUnknown",
+            DBCompactionReason::KLevelL0filesNum => "KLevelL0filesNum",
+            DBCompactionReason::KLevelMaxLevelSize => "KLevelMaxLevelSize",
+            DBCompactionReason::KUniversalSizeAmplification => "KUniversalSizeAmplification",
+            DBCompactionReason::KUniversalSizeRatio => "KUniversalSizeRatio",
+            DBCompactionReason::KUniversalSortedRunNum => "KUniversalSortedRunNum",
+            DBCompactionReason::KFifomaxSize => "KFifomaxSize",
+            DBCompactionReason::KFiforeduceNumFiles => "KFiforeduceNumFiles",
+            DBCompactionReason::KFifottl => "KFifottl",
+            DBCompactionReason::KManualCompaction => "KManualCompaction",
+            DBCompactionReason::KFilesMarkedForCompaction => "KFilesMarkedForCompaction",
+            DBCompactionReason::KBottommostFiles => "KBottommostFiles",
+            DBCompactionReason::KTtl => "KTtl",
+            DBCompactionReason::KFlush => "KFlush",
+            DBCompactionReason::KExternalSstIngestion => "KExternalSstIngestion",
+            DBCompactionReason::KPeriodicCompaction => "KPeriodicCompaction",
+            DBCompactionReason::KChangeTemperature => "KChangeTemperature",
+            DBCompactionReason::KForcedBlobGc => "KForcedBlobGc",
+            DBCompactionReason::KRoundRobinTtl => "KRoundRobinTtl",
+            DBCompactionReason::KRefitLevel => "KRefitLevel",
+            DBCompactionReason::KNumOfReasons => "KNumOfReasons",
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(C)]
+pub enum DBWriteStallCondition {
+    KDelayed,
+    KStopped,
+    KNormal,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

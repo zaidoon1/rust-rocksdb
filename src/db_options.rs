@@ -22,7 +22,7 @@ use std::sync::Arc;
 use libc::{self, c_char, c_double, c_int, c_uchar, c_uint, c_void, size_t};
 
 use crate::column_family::ColumnFamilyTtl;
-use crate::event_listener::{new_event_listener, EventListener, EventListenerOptions};
+use crate::event_listener::{new_event_listener, EventListener};
 use crate::statistics::{Histogram, HistogramData, StatsLevel};
 use crate::{
     compaction_filter::{self, CompactionFilterCallback, CompactionFilterFn},
@@ -1758,8 +1758,8 @@ impl Options {
         }
     }
 
-    pub fn add_event_listener<L: EventListener>(&mut self, l: L, options: EventListenerOptions) {
-        let handle = new_event_listener(l, options);
+    pub fn add_event_listener<L: EventListener>(&mut self, l: L) {
+        let handle = new_event_listener(l);
         unsafe { ffi::rocksdb_options_add_eventlistener(self.inner, handle.inner) }
     }
 
@@ -4721,6 +4721,34 @@ impl DBCompactionReason {
             DBCompactionReason::KRoundRobinTtl => "KRoundRobinTtl",
             DBCompactionReason::KRefitLevel => "KRefitLevel",
             DBCompactionReason::KNumOfReasons => "KNumOfReasons",
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum DBBackgroundErrorReason {
+    KFlush = 0,
+    KCompaction = 1,
+    KWriteCallback = 2,
+    KMemTable = 3,
+    KManifestWrite = 4,
+    KFlushNoWAL = 5,
+    KManifestWriteNoWAL = 6,
+    KUnknown, // not an actual background error reason but will be used when we don't recognize the enum value
+}
+
+impl From<u32> for DBBackgroundErrorReason {
+    fn from(value: u32) -> Self {
+        match value {
+            0 => DBBackgroundErrorReason::KFlush,
+            1 => DBBackgroundErrorReason::KCompaction,
+            2 => DBBackgroundErrorReason::KWriteCallback,
+            3 => DBBackgroundErrorReason::KMemTable,
+            4 => DBBackgroundErrorReason::KManifestWrite,
+            5 => DBBackgroundErrorReason::KFlushNoWAL,
+            6 => DBBackgroundErrorReason::KManifestWriteNoWAL,
+            _ => DBBackgroundErrorReason::KUnknown,
         }
     }
 }

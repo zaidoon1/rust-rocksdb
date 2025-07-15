@@ -1,4 +1,4 @@
-use crate::db_options::{DBCompactionReason, DBWriteStallCondition};
+use crate::db_options::{DBBackgroundErrorReason, DBCompactionReason, DBWriteStallCondition};
 use crate::{ffi, Error};
 use libc::c_void;
 
@@ -253,6 +253,21 @@ impl MemTableInfo {
     }
 }
 
+pub struct MutableStatus {
+    result: Result<(), String>,
+    ptr: *mut ffi::rocksdb_status_ptr_t,
+}
+
+impl MutableStatus {
+    pub fn reset(&self) {
+        unsafe { ffi::rocksdb_reset_status(self.ptr) }
+    }
+
+    pub fn result(&self) -> Result<(), String> {
+        self.result.clone()
+    }
+}
+
 /// EventListener trait contains a set of call-back functions that will
 /// be called when specific RocksDB event happens such as flush.  It can
 /// be used as a building block for developing custom features such as
@@ -272,6 +287,7 @@ pub trait EventListener: Send + Sync {
     fn on_external_file_ingested(&self, _: &IngestionInfo) {}
     fn on_stall_conditions_changed(&self, _: &WriteStallInfo) {}
     fn on_memtable_sealed(&self, _: &MemTableInfo) {}
+    fn on_background_error(&self, _: DBBackgroundErrorReason, _: MutableStatus) {}
 }
 
 extern "C" fn destructor<E: EventListener>(ctx: *mut c_void) {
@@ -366,79 +382,45 @@ extern "C" fn on_memtable_sealed<E: EventListener>(
     ctx.on_memtable_sealed(&info);
 }
 
+extern "C" fn on_background_error<E: EventListener>(
+    ctx: *mut c_void,
+    reason: u32,
+    status_ptr: *mut ffi::rocksdb_status_ptr_t,
+) {
+    let ctx = unsafe { &*(ctx as *mut E) };
+    let status = MutableStatus {
+        // TODO: fetch status_ptr error if there is one but need to update
+        // rocksdb c api first
+        result: Ok(()),
+        ptr: status_ptr,
+    };
+    ctx.on_background_error(DBBackgroundErrorReason::from(reason), status);
+}
+
 pub struct DBEventListener {
     pub(crate) inner: *mut ffi::rocksdb_eventlistener_t,
 }
 
-#[allow(clippy::struct_excessive_bools)]
-pub struct EventListenerOptions {
-    pub on_flush_begin: bool,
-    pub on_flush_completed: bool,
-    pub on_compaction_begin: bool,
-    pub on_compaction_completed: bool,
-    pub on_subcompaction_begin: bool,
-    pub on_subcompaction_completed: bool,
-    pub on_external_file_ingested: bool,
-    pub on_stall_conditions_changed: bool,
-    pub on_memtable_sealed: bool,
-}
-
-pub fn new_event_listener<E: EventListener>(
-    e: E,
-    options: EventListenerOptions,
-) -> DBEventListener {
+pub fn new_event_listener<E: EventListener>(e: E) -> DBEventListener {
     let p: Box<E> = Box::new(e);
     unsafe {
         DBEventListener {
+            // WARNING: none of the callbacks below are actually optional.
+            // Rocksdb will try calling the callback as long as there is an
+            // event listener setup, this means we must define all of them
             inner: ffi::rocksdb_eventlistener_create(
                 Box::into_raw(p) as *mut c_void,
                 Some(destructor::<E>),
-                if options.on_flush_begin {
-                    Some(on_flush_begin::<E>)
-                } else {
-                    None
-                },
-                if options.on_flush_completed {
-                    Some(on_flush_completed::<E>)
-                } else {
-                    None
-                },
-                if options.on_compaction_begin {
-                    Some(on_compaction_begin::<E>)
-                } else {
-                    None
-                },
-                if options.on_compaction_completed {
-                    Some(on_compaction_completed::<E>)
-                } else {
-                    None
-                },
-                if options.on_subcompaction_begin {
-                    Some(on_subcompaction_begin::<E>)
-                } else {
-                    None
-                },
-                if options.on_subcompaction_completed {
-                    Some(on_subcompaction_completed::<E>)
-                } else {
-                    None
-                },
-                if options.on_external_file_ingested {
-                    Some(on_external_file_ingested::<E>)
-                } else {
-                    None
-                },
-                None, // TODO: add support for on_background_error
-                if options.on_stall_conditions_changed {
-                    Some(on_stall_conditions_changed::<E>)
-                } else {
-                    None
-                },
-                if options.on_memtable_sealed {
-                    Some(on_memtable_sealed::<E>)
-                } else {
-                    None
-                },
+                Some(on_flush_begin::<E>),
+                Some(on_flush_completed::<E>),
+                Some(on_compaction_begin::<E>),
+                Some(on_compaction_completed::<E>),
+                Some(on_subcompaction_begin::<E>),
+                Some(on_subcompaction_completed::<E>),
+                Some(on_external_file_ingested::<E>),
+                Some(on_background_error::<E>),
+                Some(on_stall_conditions_changed::<E>),
+                Some(on_memtable_sealed::<E>),
             ),
         }
     }

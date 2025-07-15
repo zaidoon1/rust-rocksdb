@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.42.1 (2025-07-15)
+
+- fix event listener implementation and add partial support for on_background_error (zaidoon1)
+
 ## 0.42.0 (2025-07-14)
 
 - add event listener support (zaidoon1)

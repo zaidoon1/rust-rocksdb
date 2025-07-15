@@ -1,8 +1,11 @@
 mod util;
 
+use rust_rocksdb::DBBackgroundErrorReason;
 use rust_rocksdb::{
     event_listener::*, DBCompactionReason, DBWriteStallCondition, FlushOptions, Options, DB,
 };
+use std::io::Write;
+use std::path::Path;
 use std::sync::atomic::*;
 use std::sync::Arc;
 use util::DBPath;
@@ -105,26 +108,24 @@ impl EventListener for StallEventCounter {
     }
 }
 
+#[derive(Default, Clone)]
+struct BackgroundErrorCounter {
+    background_error: Arc<AtomicUsize>,
+}
+
+impl EventListener for BackgroundErrorCounter {
+    fn on_background_error(&self, _: DBBackgroundErrorReason, _: MutableStatus) {
+        self.background_error.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
 #[test]
 fn test_event_listener_stall_conditions_changed() {
     let path = DBPath::new("_rust_rocksdb_event_listener_stall_conditions");
 
     let mut opts = Options::default();
     let counter = StallEventCounter::default();
-    opts.add_event_listener(
-        counter.clone(),
-        EventListenerOptions {
-            on_flush_begin: true,
-            on_flush_completed: true,
-            on_compaction_begin: true,
-            on_compaction_completed: true,
-            on_subcompaction_begin: true,
-            on_subcompaction_completed: true,
-            on_external_file_ingested: true,
-            on_stall_conditions_changed: true,
-            on_memtable_sealed: true,
-        },
-    );
+    opts.add_event_listener(counter.clone());
     opts.create_if_missing(true);
     let mut cf_opts = Options::default();
     cf_opts.set_level_zero_slowdown_writes_trigger(1);
@@ -170,20 +171,7 @@ fn test_event_listener_basic() {
 
     let mut opts = Options::default();
     let counter = EventCounter::default();
-    opts.add_event_listener(
-        counter.clone(),
-        EventListenerOptions {
-            on_flush_begin: true,
-            on_flush_completed: true,
-            on_compaction_begin: true,
-            on_compaction_completed: true,
-            on_subcompaction_begin: true,
-            on_subcompaction_completed: true,
-            on_external_file_ingested: true,
-            on_stall_conditions_changed: true,
-            on_memtable_sealed: true,
-        },
-    );
+    opts.add_event_listener(counter.clone());
     opts.create_if_missing(true);
     let db = DB::open(&opts, &path).unwrap();
     for i in 1..8000 {
@@ -215,4 +203,75 @@ fn test_event_listener_basic() {
         counter.input_bytes.load(Ordering::SeqCst) > counter.output_bytes.load(Ordering::SeqCst)
     );
     assert_eq!(counter.manual_compaction.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn test_event_listener_background_error() {
+    let path = DBPath::new("_rust_rocksdb_event_listener_background_error");
+
+    let mut opts = Options::default();
+    let counter = BackgroundErrorCounter::default();
+    opts.add_event_listener(counter.clone());
+    opts.create_if_missing(true);
+    let db = DB::open(&opts, &path).unwrap();
+
+    let mut fopts = FlushOptions::default();
+    fopts.set_wait(true);
+    for i in 1..10 {
+        db.put(format!("{i:04}").as_bytes(), b"value").unwrap();
+        db.flush_opt(&fopts).unwrap();
+    }
+    assert_eq!(counter.background_error.load(Ordering::SeqCst), 0);
+}
+
+#[derive(Default, Clone)]
+struct BackgroundErrorCleaner(Arc<AtomicUsize>);
+
+impl EventListener for BackgroundErrorCleaner {
+    fn on_background_error(&self, _: DBBackgroundErrorReason, s: MutableStatus) {
+        s.reset();
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[test]
+fn test_event_listener_status_reset() {
+    let path = DBPath::new("_rust_rocksdb_event_listener_background_error");
+
+    let mut opts = Options::default();
+    let cleaner = BackgroundErrorCleaner::default();
+    let counter = cleaner.0.clone();
+    opts.add_event_listener(cleaner.clone());
+    opts.create_if_missing(true);
+    let db = DB::open(&opts, &path).unwrap();
+
+    for i in 1..5 {
+        db.put(format!("{i:04}").as_bytes(), b"value").unwrap();
+    }
+    let mut fopts = FlushOptions::default();
+    fopts.set_wait(true);
+    db.flush_opt(&fopts).unwrap();
+
+    corrupt_sst_file(&db, &path);
+
+    for i in 1..5 {
+        db.put(format!("{i:04}").as_bytes(), b"value").unwrap();
+    }
+
+    db.compact_range(None::<&[u8]>, None::<&[u8]>);
+
+    db.flush_opt(&fopts).unwrap();
+    assert_eq!(counter.load(Ordering::SeqCst), 1);
+}
+
+fn corrupt_sst_file<P: AsRef<Path>>(db: &DB, path: P) {
+    let files = db.live_files().unwrap();
+    let mut file_name = files.first().unwrap().name.clone();
+    file_name.remove(0);
+
+    let sst_path = path.as_ref().to_path_buf().join(file_name);
+
+    let mut file = std::fs::File::create(sst_path).unwrap();
+    file.write_all(b"sad").unwrap();
+    file.sync_all().unwrap();
 }

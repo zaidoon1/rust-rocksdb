@@ -160,8 +160,10 @@ impl PropertyName {
     /// must not contain interior nul bytes.
     #[inline]
     unsafe fn from_vec_with_nul_unchecked(inner: Vec<u8>) -> Self {
-        // SAFETY: Caller promises inner is nul-terminated and valid UTF-8.
-        Self(CString::from_vec_with_nul_unchecked(inner))
+        unsafe {
+            // SAFETY: Caller promises inner is nul-terminated and valid UTF-8.
+            Self(CString::from_vec_with_nul_unchecked(inner))
+        }
     }
 
     /// Converts the value into a C string.
@@ -294,10 +296,12 @@ impl<'a> CStrLike for &'a PropertyName {
 ///
 /// Expects `name` not to contain any interior nul bytes.
 pub(crate) unsafe fn level_property(name: &str, level: usize) -> PropertyName {
-    let bytes = format!("rocksdb.{name}{level}\0").into_bytes();
-    // SAFETY: We’re appending terminating nul and caller promises `name` has no
-    // interior nul bytes.
-    PropertyName::from_vec_with_nul_unchecked(bytes)
+    unsafe {
+        let bytes = format!("rocksdb.{name}{level}\0").into_bytes();
+        // SAFETY: We’re appending terminating nul and caller promises `name` has no
+        // interior nul bytes.
+        PropertyName::from_vec_with_nul_unchecked(bytes)
+    }
 }
 
 #[test]

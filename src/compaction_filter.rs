@@ -100,15 +100,19 @@ pub unsafe extern "C" fn destructor_callback<F>(raw_cb: *mut c_void)
 where
     F: CompactionFilter,
 {
-    drop(Box::from_raw(raw_cb as *mut F));
+    unsafe {
+        drop(Box::from_raw(raw_cb as *mut F));
+    }
 }
 
 pub unsafe extern "C" fn name_callback<F>(raw_cb: *mut c_void) -> *const c_char
 where
     F: CompactionFilter,
 {
-    let cb = &*(raw_cb as *mut F);
-    cb.name().as_ptr()
+    unsafe {
+        let cb = &*(raw_cb as *mut F);
+        cb.name().as_ptr()
+    }
 }
 
 pub unsafe extern "C" fn filter_callback<F>(
@@ -125,20 +129,22 @@ pub unsafe extern "C" fn filter_callback<F>(
 where
     F: CompactionFilter,
 {
-    use self::Decision::{Change, Keep, Remove};
+    unsafe {
+        use self::Decision::{Change, Keep, Remove};
 
-    let cb = &mut *(raw_cb as *mut F);
-    let key = slice::from_raw_parts(raw_key as *const u8, key_length);
-    let oldval = slice::from_raw_parts(existing_value as *const u8, value_length);
-    let result = cb.filter(level as u32, key, oldval);
-    match result {
-        Keep => 0,
-        Remove => 1,
-        Change(newval) => {
-            *new_value = newval.as_ptr() as *mut c_char;
-            *new_value_length = newval.len() as size_t;
-            *value_changed = 1_u8;
-            0
+        let cb = &mut *(raw_cb as *mut F);
+        let key = slice::from_raw_parts(raw_key as *const u8, key_length);
+        let oldval = slice::from_raw_parts(existing_value as *const u8, value_length);
+        let result = cb.filter(level as u32, key, oldval);
+        match result {
+            Keep => 0,
+            Remove => 1,
+            Change(newval) => {
+                *new_value = newval.as_ptr() as *mut c_char;
+                *new_value_length = newval.len() as size_t;
+                *value_changed = 1_u8;
+                0
+            }
         }
     }
 }

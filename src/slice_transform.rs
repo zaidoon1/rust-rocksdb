@@ -83,12 +83,16 @@ pub struct TransformCallback<'a> {
 }
 
 pub unsafe extern "C" fn slice_transform_destructor_callback(raw_cb: *mut c_void) {
-    drop(Box::from_raw(raw_cb as *mut TransformCallback));
+    unsafe {
+        drop(Box::from_raw(raw_cb as *mut TransformCallback));
+    }
 }
 
 pub unsafe extern "C" fn slice_transform_name_callback(raw_cb: *mut c_void) -> *const c_char {
-    let cb = &mut *(raw_cb as *mut TransformCallback);
-    cb.name.as_ptr()
+    unsafe {
+        let cb = &mut *(raw_cb as *mut TransformCallback);
+        cb.name.as_ptr()
+    }
 }
 
 pub unsafe extern "C" fn transform_callback(
@@ -97,11 +101,13 @@ pub unsafe extern "C" fn transform_callback(
     key_len: size_t,
     dst_length: *mut size_t,
 ) -> *mut c_char {
-    let cb = &mut *(raw_cb as *mut TransformCallback);
-    let key = slice::from_raw_parts(raw_key as *const u8, key_len);
-    let prefix = (cb.transform_fn)(key);
-    *dst_length = prefix.len() as size_t;
-    prefix.as_ptr() as *mut c_char
+    unsafe {
+        let cb = &mut *(raw_cb as *mut TransformCallback);
+        let key = slice::from_raw_parts(raw_key as *const u8, key_len);
+        let prefix = (cb.transform_fn)(key);
+        *dst_length = prefix.len() as size_t;
+        prefix.as_ptr() as *mut c_char
+    }
 }
 
 pub unsafe extern "C" fn in_domain_callback(
@@ -109,7 +115,9 @@ pub unsafe extern "C" fn in_domain_callback(
     raw_key: *const c_char,
     key_len: size_t,
 ) -> c_uchar {
-    let cb = &mut *(raw_cb as *mut TransformCallback);
-    let key = slice::from_raw_parts(raw_key as *const u8, key_len);
-    c_uchar::from(cb.in_domain_fn.map_or(true, |in_domain| in_domain(key)))
+    unsafe {
+        let cb = &mut *(raw_cb as *mut TransformCallback);
+        let key = slice::from_raw_parts(raw_key as *const u8, key_len);
+        c_uchar::from(cb.in_domain_fn.map_or(true, |in_domain| in_domain(key)))
+    }
 }

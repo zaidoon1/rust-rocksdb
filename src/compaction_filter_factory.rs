@@ -30,15 +30,19 @@ pub unsafe extern "C" fn destructor_callback<F>(raw_self: *mut c_void)
 where
     F: CompactionFilterFactory,
 {
-    drop(Box::from_raw(raw_self as *mut F));
+    unsafe {
+        drop(Box::from_raw(raw_self as *mut F));
+    }
 }
 
 pub unsafe extern "C" fn name_callback<F>(raw_self: *mut c_void) -> *const c_char
 where
     F: CompactionFilterFactory,
 {
-    let self_ = &*(raw_self.cast_const() as *const F);
-    self_.name().as_ptr()
+    unsafe {
+        let self_ = &*(raw_self.cast_const() as *const F);
+        self_.name().as_ptr()
+    }
 }
 
 /// Context information of a compaction run
@@ -52,13 +56,16 @@ pub struct CompactionFilterContext {
 
 impl CompactionFilterContext {
     unsafe fn from_raw(ptr: *mut ffi::rocksdb_compactionfiltercontext_t) -> Self {
-        let is_full_compaction = ffi::rocksdb_compactionfiltercontext_is_full_compaction(ptr) != 0;
-        let is_manual_compaction =
-            ffi::rocksdb_compactionfiltercontext_is_manual_compaction(ptr) != 0;
+        unsafe {
+            let is_full_compaction =
+                ffi::rocksdb_compactionfiltercontext_is_full_compaction(ptr) != 0;
+            let is_manual_compaction =
+                ffi::rocksdb_compactionfiltercontext_is_manual_compaction(ptr) != 0;
 
-        Self {
-            is_full_compaction,
-            is_manual_compaction,
+            Self {
+                is_full_compaction,
+                is_manual_compaction,
+            }
         }
     }
 }
@@ -70,18 +77,20 @@ pub unsafe extern "C" fn create_compaction_filter_callback<F>(
 where
     F: CompactionFilterFactory,
 {
-    let self_ = &mut *(raw_self as *mut F);
-    let context = CompactionFilterContext::from_raw(context);
-    let filter = Box::new(self_.create(context));
+    unsafe {
+        let self_ = &mut *(raw_self as *mut F);
+        let context = CompactionFilterContext::from_raw(context);
+        let filter = Box::new(self_.create(context));
 
-    let filter_ptr = Box::into_raw(filter);
+        let filter_ptr = Box::into_raw(filter);
 
-    ffi::rocksdb_compactionfilter_create(
-        filter_ptr as *mut c_void,
-        Some(compaction_filter::destructor_callback::<F::Filter>),
-        Some(compaction_filter::filter_callback::<F::Filter>),
-        Some(compaction_filter::name_callback::<F::Filter>),
-    )
+        ffi::rocksdb_compactionfilter_create(
+            filter_ptr as *mut c_void,
+            Some(compaction_filter::destructor_callback::<F::Filter>),
+            Some(compaction_filter::filter_callback::<F::Filter>),
+            Some(compaction_filter::name_callback::<F::Filter>),
+        )
+    }
 }
 
 #[cfg(test)]

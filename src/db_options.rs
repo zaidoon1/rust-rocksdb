@@ -1635,6 +1635,29 @@ impl Options {
         }
     }
 
+    /// Similar to `memtable_op_scan_flush_trigger`, but this option applies to
+    /// Next() calls between Seeks or until iterator destruction. If the average
+    /// of the number of invisible entries scanned from the active memtable, the
+    /// memtable will be marked for flush.
+    /// Note that to avoid the case where the window between Seeks is too small,
+    /// the option only takes effect if the total number of hidden entries scanned
+    /// within a window is at least `memtable_op_scan_flush_trigger`. So this
+    /// option is only effective when `memtable_op_scan_flush_trigger` is set.
+    ///
+    /// This option should be set to a lower value than
+    /// `memtable_op_scan_flush_trigger`. It covers the case where an iterator
+    /// scans through an expensive key range with many invisible entries from the
+    /// active memtable, but the number of invisible entries per operation does not
+    /// exceed `memtable_op_scan_flush_trigger`.
+    ///
+    /// Default: 0 (disabled)
+    /// Dynamically changeable through the SetOptions() API.
+    pub fn set_memtable_avg_op_scan_flush_trigger(&mut self, num: u32) {
+        unsafe {
+            ffi::rocksdb_options_set_memtable_avg_op_scan_flush_trigger(self.inner, num);
+        }
+    }
+
     /// This option has different meanings for different compaction styles:
     ///
     /// Leveled: Non-bottom-level files with all keys older than TTL will go

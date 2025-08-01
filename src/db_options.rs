@@ -25,6 +25,7 @@ use crate::column_family::ColumnFamilyTtl;
 use crate::event_listener::{new_event_listener, EventListener};
 use crate::statistics::{Histogram, HistogramData, StatsLevel};
 use crate::write_buffer_manager::WriteBufferManager;
+use crate::SstFileManager;
 use crate::{
     compaction_filter::{self, CompactionFilterCallback, CompactionFilterFn},
     compaction_filter_factory::{self, CompactionFilterFactory},
@@ -50,6 +51,7 @@ pub(crate) struct OptionsMustOutliveDB {
     blob_cache: Option<Cache>,
     block_based: Option<BlockBasedOptionsMustOutliveDB>,
     write_buffer_manager: Option<WriteBufferManager>,
+    sst_file_manager: Option<SstFileManager>,
 }
 
 impl OptionsMustOutliveDB {
@@ -63,6 +65,7 @@ impl OptionsMustOutliveDB {
                 .as_ref()
                 .map(BlockBasedOptionsMustOutliveDB::clone),
             write_buffer_manager: self.write_buffer_manager.clone(),
+            sst_file_manager: self.sst_file_manager.clone(),
         }
     }
 }
@@ -3640,6 +3643,23 @@ impl Options {
             );
         }
         self.outlive.write_buffer_manager = Some(write_buffer_manager.clone());
+    }
+
+    /// <https://github.com/facebook/rocksdb/wiki/SST-File-Manager>
+    ///
+    /// SST file manager tracks SST files and control their file deletion rate.
+    //
+    // Features:
+    //  - Throttle the deletion rate of the SST files.
+    //  - Keep track the total size of all SST files.
+    //  - Set a maximum allowed space limit for SST files that when reached
+    //    the DB wont do any further flushes or compactions and will set the
+    //    background error.
+    pub fn set_sst_file_manager(&mut self, manager: &SstFileManager) {
+        unsafe {
+            ffi::rocksdb_options_set_sst_file_manager(self.inner, manager.0.inner.as_ptr());
+        }
+        self.outlive.sst_file_manager = Some(manager.clone());
     }
 
     /// If true, working thread may avoid doing unnecessary and long-latency

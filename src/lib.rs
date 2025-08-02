@@ -85,6 +85,7 @@
 mod ffi_util;
 
 pub mod backup;
+mod cache;
 pub mod checkpoint;
 mod column_family;
 pub mod compaction_filter;
@@ -107,8 +108,10 @@ mod sst_file_writer;
 pub mod statistics;
 mod transactions;
 mod write_batch;
+mod write_buffer_manager;
 
 pub use crate::{
+    cache::Cache,
     column_family::{
         AsColumnFamilyRef, BoundColumnFamily, ColumnFamily, ColumnFamilyDescriptor,
         ColumnFamilyRef, ColumnFamilyTtl, DEFAULT_COLUMN_FAMILY_NAME,
@@ -124,13 +127,12 @@ pub use crate::{
     },
     db_options::{
         BlockBasedIndexType, BlockBasedOptions, BlockBasedPinningTier, BottommostLevelCompaction,
-        Cache, ChecksumType, CompactOptions, CuckooTableOptions, DBBackgroundErrorReason,
-        DBCompactionPri, DBCompactionReason, DBCompactionStyle, DBCompressionType, DBPath,
-        DBRecoveryMode, DBWriteStallCondition, DataBlockIndexType, FifoCompactOptions,
-        FlushOptions, IngestExternalFileOptions, KeyEncodingType, LogLevel, LruCacheOptions,
-        MemtableFactory, Options, PlainTableFactoryOptions, RateLimiterMode, ReadOptions, ReadTier,
-        UniversalCompactOptions, UniversalCompactionStopStyle, WaitForCompactOptions,
-        WriteBufferManager, WriteOptions,
+        ChecksumType, CompactOptions, CuckooTableOptions, DBBackgroundErrorReason, DBCompactionPri,
+        DBCompactionReason, DBCompactionStyle, DBCompressionType, DBPath, DBRecoveryMode,
+        DBWriteStallCondition, DataBlockIndexType, FifoCompactOptions, FlushOptions,
+        IngestExternalFileOptions, KeyEncodingType, LogLevel, LruCacheOptions, MemtableFactory,
+        Options, PlainTableFactoryOptions, RateLimiterMode, ReadOptions, ReadTier,
+        UniversalCompactOptions, UniversalCompactionStopStyle, WaitForCompactOptions, WriteOptions,
     },
     db_pinnable_slice::DBPinnableSlice,
     env::Env,
@@ -148,6 +150,7 @@ pub use crate::{
     write_batch::{
         WriteBatch, WriteBatchIterator, WriteBatchIteratorCf, WriteBatchWithTransaction,
     },
+    write_buffer_manager::WriteBufferManager,
 };
 
 use rust_librocksdb_sys as ffi;
@@ -242,17 +245,18 @@ impl fmt::Display for Error {
 #[cfg(test)]
 mod test {
     use crate::{
+        cache::{Cache, CacheWrapper},
+        write_buffer_manager::{WriteBufferManager, WriteBufferManagerWrapper},
         OptimisticTransactionDB, OptimisticTransactionOptions, Transaction, TransactionDB,
         TransactionDBOptions, TransactionOptions,
     };
 
     use super::{
         column_family::UnboundColumnFamily,
-        db_options::{CacheWrapper, WriteBufferManagerWrapper},
         env::{Env, EnvWrapper},
-        BlockBasedOptions, BoundColumnFamily, Cache, ColumnFamily, ColumnFamilyDescriptor,
-        DBIterator, DBRawIterator, IngestExternalFileOptions, Options, PlainTableFactoryOptions,
-        ReadOptions, Snapshot, SstFileWriter, WriteBatch, WriteBufferManager, WriteOptions, DB,
+        BlockBasedOptions, BoundColumnFamily, ColumnFamily, ColumnFamilyDescriptor, DBIterator,
+        DBRawIterator, IngestExternalFileOptions, Options, PlainTableFactoryOptions, ReadOptions,
+        Snapshot, SstFileWriter, WriteBatch, WriteOptions, DB,
     };
 
     #[test]

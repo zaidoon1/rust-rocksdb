@@ -15,15 +15,16 @@
 use std::ffi::CStr;
 use std::panic::{catch_unwind, AssertUnwindSafe, RefUnwindSafe};
 use std::path::Path;
-use std::ptr::{null_mut, NonNull};
+use std::ptr::null_mut;
 use std::slice;
-use std::sync::Arc;
 
 use libc::{self, c_char, c_double, c_int, c_uchar, c_uint, c_void, size_t};
 
+use crate::cache::Cache;
 use crate::column_family::ColumnFamilyTtl;
 use crate::event_listener::{new_event_listener, EventListener};
 use crate::statistics::{Histogram, HistogramData, StatsLevel};
+use crate::write_buffer_manager::WriteBufferManager;
 use crate::{
     compaction_filter::{self, CompactionFilterCallback, CompactionFilterFn},
     compaction_filter_factory::{self, CompactionFilterFactory},
@@ -41,182 +42,6 @@ use crate::{
     statistics::Ticker,
     ColumnFamilyDescriptor, Error, SnapshotWithThreadMode,
 };
-
-pub(crate) struct WriteBufferManagerWrapper {
-    pub(crate) inner: NonNull<ffi::rocksdb_write_buffer_manager_t>,
-}
-
-impl Drop for WriteBufferManagerWrapper {
-    fn drop(&mut self) {
-        unsafe {
-            ffi::rocksdb_write_buffer_manager_destroy(self.inner.as_ptr());
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct WriteBufferManager(pub(crate) Arc<WriteBufferManagerWrapper>);
-
-impl WriteBufferManager {
-    /// <https://github.com/facebook/rocksdb/wiki/Write-Buffer-Manager>
-    /// Write buffer manager helps users control the total memory used by memtables across multiple column families and/or DB instances.
-    /// Users can enable this control by 2 ways:
-    ///
-    /// 1- Limit the total memtable usage across multiple column families and DBs under a threshold.
-    /// 2- Cost the memtable memory usage to block cache so that memory of RocksDB can be capped by the single limit.
-    /// The usage of a write buffer manager is similar to rate_limiter and sst_file_manager.
-    /// Users can create one write buffer manager object and pass it to all the options of column families or DBs whose memtable size they want to be controlled by this object.
-    ///
-    /// A memory limit is given when creating the write buffer manager object. RocksDB will try to limit the total memory to under this limit.
-    ///
-    /// a flush will be triggered on one column family of the DB you are inserting to,
-    ///
-    /// If mutable memtable size exceeds about 90% of the limit,
-    /// If the total memory is over the limit, more aggressive flush may also be triggered only if the mutable memtable size also exceeds 50% of the limit.
-    /// Both checks are needed because if already more than half memory is being flushed, triggering more flush may not help.
-    ///
-    /// The total memory is counted as total memory allocated in the arena, even if some of that may not yet be used by memtable.
-    ///
-    /// buffer_size: the memory limit in bytes.
-    /// allow_stall: If set true, it will enable stalling of all writers when memory usage exceeds buffer_size (soft limit).
-    ///             It will wait for flush to complete and memory usage to drop down
-    pub fn new_write_buffer_manager(buffer_size: size_t, allow_stall: bool) -> Self {
-        let inner = NonNull::new(unsafe {
-            ffi::rocksdb_write_buffer_manager_create(buffer_size, allow_stall)
-        })
-        .unwrap();
-        WriteBufferManager(Arc::new(WriteBufferManagerWrapper { inner }))
-    }
-
-    /// Users can set up RocksDB to cost memory used by memtables to block cache.
-    /// This can happen no matter whether you enable memtable memory limit or not.
-    /// This option is added to manage memory (memtables + block cache) under a single limit.
-    ///
-    /// buffer_size: the memory limit in bytes.
-    /// allow_stall: If set true, it will enable stalling of all writers when memory usage exceeds buffer_size (soft limit).
-    ///             It will wait for flush to complete and memory usage to drop down
-    /// cache: the block cache instance
-    pub fn new_write_buffer_manager_with_cache(
-        buffer_size: size_t,
-        allow_stall: bool,
-        cache: Cache,
-    ) -> Self {
-        let inner = NonNull::new(unsafe {
-            ffi::rocksdb_write_buffer_manager_create_with_cache(
-                buffer_size,
-                cache.0.inner.as_ptr(),
-                allow_stall,
-            )
-        })
-        .unwrap();
-        WriteBufferManager(Arc::new(WriteBufferManagerWrapper { inner }))
-    }
-
-    /// Returns the WriteBufferManager memory usage in bytes.
-    pub fn get_usage(&self) -> usize {
-        unsafe { ffi::rocksdb_write_buffer_manager_memory_usage(self.0.inner.as_ptr()) }
-    }
-
-    /// Returns the current buffer size in bytes.
-    pub fn get_buffer_size(&self) -> usize {
-        unsafe { ffi::rocksdb_write_buffer_manager_buffer_size(self.0.inner.as_ptr()) }
-    }
-
-    /// Set the buffer size in bytes.
-    pub fn set_buffer_size(&self, new_size: usize) {
-        unsafe {
-            ffi::rocksdb_write_buffer_manager_set_buffer_size(self.0.inner.as_ptr(), new_size);
-        }
-    }
-
-    /// Returns if WriteBufferManager is enabled.
-    pub fn enabled(&self) -> bool {
-        unsafe { ffi::rocksdb_write_buffer_manager_enabled(self.0.inner.as_ptr()) }
-    }
-
-    /// set the allow_stall flag.
-    pub fn set_allow_stall(&self, allow_stall: bool) {
-        unsafe {
-            ffi::rocksdb_write_buffer_manager_set_allow_stall(self.0.inner.as_ptr(), allow_stall);
-        }
-    }
-}
-
-pub(crate) struct CacheWrapper {
-    pub(crate) inner: NonNull<ffi::rocksdb_cache_t>,
-}
-
-impl Drop for CacheWrapper {
-    fn drop(&mut self) {
-        unsafe {
-            ffi::rocksdb_cache_destroy(self.inner.as_ptr());
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct Cache(pub(crate) Arc<CacheWrapper>);
-
-impl Cache {
-    /// Creates an LRU cache with capacity in bytes.
-    pub fn new_lru_cache(capacity: size_t) -> Cache {
-        let inner = NonNull::new(unsafe { ffi::rocksdb_cache_create_lru(capacity) }).unwrap();
-        Cache(Arc::new(CacheWrapper { inner }))
-    }
-
-    /// Creates an LRU cache with custom options.
-    pub fn new_lru_cache_opts(opts: &LruCacheOptions) -> Cache {
-        let inner =
-            NonNull::new(unsafe { ffi::rocksdb_cache_create_lru_opts(opts.inner) }).unwrap();
-        Cache(Arc::new(CacheWrapper { inner }))
-    }
-
-    /// Creates a HyperClockCache with capacity in bytes.
-    ///
-    /// `estimated_entry_charge` is an important tuning parameter. The optimal
-    /// choice at any given time is
-    /// `(cache.get_usage() - 64 * cache.get_table_address_count()) /
-    /// cache.get_occupancy_count()`, or approximately `cache.get_usage() /
-    /// cache.get_occupancy_count()`.
-    ///
-    /// However, the value cannot be changed dynamically, so as the cache
-    /// composition changes at runtime, the following tradeoffs apply:
-    ///
-    /// * If the estimate is substantially too high (e.g., 25% higher),
-    ///   the cache may have to evict entries to prevent load factors that
-    ///   would dramatically affect lookup times.
-    /// * If the estimate is substantially too low (e.g., less than half),
-    ///   then meta data space overhead is substantially higher.
-    ///
-    /// The latter is generally preferable, and picking the larger of
-    /// block size and meta data block size is a reasonable choice that
-    /// errs towards this side.
-    pub fn new_hyper_clock_cache(capacity: size_t, estimated_entry_charge: size_t) -> Cache {
-        Cache(Arc::new(CacheWrapper {
-            inner: NonNull::new(unsafe {
-                ffi::rocksdb_cache_create_hyper_clock(capacity, estimated_entry_charge)
-            })
-            .unwrap(),
-        }))
-    }
-
-    /// Returns the cache memory usage in bytes.
-    pub fn get_usage(&self) -> usize {
-        unsafe { ffi::rocksdb_cache_get_usage(self.0.inner.as_ptr()) }
-    }
-
-    /// Returns the pinned memory usage in bytes.
-    pub fn get_pinned_usage(&self) -> usize {
-        unsafe { ffi::rocksdb_cache_get_pinned_usage(self.0.inner.as_ptr()) }
-    }
-
-    /// Sets cache capacity in bytes.
-    pub fn set_capacity(&mut self, capacity: size_t) {
-        unsafe {
-            ffi::rocksdb_cache_set_capacity(self.0.inner.as_ptr(), capacity);
-        }
-    }
-}
 
 #[derive(Default)]
 pub(crate) struct OptionsMustOutliveDB {
@@ -427,9 +252,7 @@ unsafe impl Send for BlockBasedOptions {}
 unsafe impl Send for CuckooTableOptions {}
 unsafe impl Send for ReadOptions {}
 unsafe impl Send for IngestExternalFileOptions {}
-unsafe impl Send for CacheWrapper {}
 unsafe impl Send for CompactOptions {}
-unsafe impl Send for WriteBufferManagerWrapper {}
 
 // Sync is similarly safe for many types because they do not expose interior mutability, and their
 // use within the rocksdb library is generally behind a const reference
@@ -441,9 +264,7 @@ unsafe impl Sync for BlockBasedOptions {}
 unsafe impl Sync for CuckooTableOptions {}
 unsafe impl Sync for ReadOptions {}
 unsafe impl Sync for IngestExternalFileOptions {}
-unsafe impl Sync for CacheWrapper {}
 unsafe impl Sync for CompactOptions {}
-unsafe impl Sync for WriteBufferManagerWrapper {}
 
 impl Drop for Options {
     fn drop(&mut self) {
@@ -5142,8 +4963,9 @@ impl Drop for DBPath {
 
 #[cfg(test)]
 mod tests {
+    use crate::cache::Cache;
     use crate::db_options::WriteBufferManager;
-    use crate::{Cache, MemtableFactory, Options};
+    use crate::{MemtableFactory, Options};
 
     #[test]
     fn test_enable_statistics() {

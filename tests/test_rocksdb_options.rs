@@ -527,3 +527,35 @@ fn test_set_memtable_avg_op_scan_flush_trigger() {
         let _db = DB::open(&opts, &path).unwrap();
     }
 }
+
+#[test]
+fn jemalloc_init() {
+    let path = DBPath::new("_jemalloc_init");
+    {
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        let _db = DB::open(&opts, &path).unwrap();
+    }
+
+    let mut rocksdb_log =
+        fs::File::open((&path).as_ref().join("LOG")).expect("rocksdb creates a LOG file");
+    let mut log_content = String::new();
+    rocksdb_log
+        .read_to_string(&mut log_content)
+        .expect("can read the LOG file");
+
+    if cfg!(feature = "jemalloc")
+        && !(
+            // See NO_JEMALLOC_TARGETS in librocksdb-sys/build.rs
+            cfg!(target_os = "android")
+                || cfg!(target_os = "dragonfly")
+                || cfg!(target_env = "musl")
+                || cfg!(target_os = "macos")
+                || cfg!(target_os = "ios")
+        )
+    {
+        assert!(log_content.contains("Jemalloc supported: 1"));
+    } else {
+        assert!(log_content.contains("Jemalloc supported: 0"));
+    }
+}

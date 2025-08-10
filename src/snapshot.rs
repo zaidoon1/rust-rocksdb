@@ -64,10 +64,10 @@ impl<'a, D: DBAccess> SnapshotWithThreadMode<'a, D> {
     /// Creates an iterator over the data in this snapshot under the given column family, using
     /// the default read options.
     pub fn iterator_cf(
-        &self,
+        &'_ self,
         cf_handle: &impl AsColumnFamilyRef,
         mode: IteratorMode,
-    ) -> DBIteratorWithThreadMode<D> {
+    ) -> DBIteratorWithThreadMode<'_, D> {
         let readopts = ReadOptions::default();
         self.iterator_cf_opt(cf_handle, readopts, mode)
     }
@@ -85,17 +85,17 @@ impl<'a, D: DBAccess> SnapshotWithThreadMode<'a, D> {
     /// Creates an iterator over the data in this snapshot under the given column family, using
     /// the given read options.
     pub fn iterator_cf_opt(
-        &self,
+        &'_ self,
         cf_handle: &impl AsColumnFamilyRef,
         mut readopts: ReadOptions,
         mode: IteratorMode,
-    ) -> DBIteratorWithThreadMode<D> {
+    ) -> DBIteratorWithThreadMode<'_, D> {
         readopts.set_snapshot(self);
         DBIteratorWithThreadMode::new_cf(self.db, cf_handle.inner(), readopts, mode)
     }
 
     /// Creates a raw iterator over the data in this snapshot, using the default read options.
-    pub fn raw_iterator(&self) -> DBRawIteratorWithThreadMode<D> {
+    pub fn raw_iterator(&'_ self) -> DBRawIteratorWithThreadMode<'_, D> {
         let readopts = ReadOptions::default();
         self.raw_iterator_opt(readopts)
     }
@@ -103,15 +103,18 @@ impl<'a, D: DBAccess> SnapshotWithThreadMode<'a, D> {
     /// Creates a raw iterator over the data in this snapshot under the given column family, using
     /// the default read options.
     pub fn raw_iterator_cf(
-        &self,
+        &'_ self,
         cf_handle: &impl AsColumnFamilyRef,
-    ) -> DBRawIteratorWithThreadMode<D> {
+    ) -> DBRawIteratorWithThreadMode<'_, D> {
         let readopts = ReadOptions::default();
         self.raw_iterator_cf_opt(cf_handle, readopts)
     }
 
     /// Creates a raw iterator over the data in this snapshot, using the given read options.
-    pub fn raw_iterator_opt(&self, mut readopts: ReadOptions) -> DBRawIteratorWithThreadMode<D> {
+    pub fn raw_iterator_opt(
+        &'_ self,
+        mut readopts: ReadOptions,
+    ) -> DBRawIteratorWithThreadMode<'_, D> {
         readopts.set_snapshot(self);
         DBRawIteratorWithThreadMode::new(self.db, readopts)
     }
@@ -119,10 +122,10 @@ impl<'a, D: DBAccess> SnapshotWithThreadMode<'a, D> {
     /// Creates a raw iterator over the data in this snapshot under the given column family, using
     /// the given read options.
     pub fn raw_iterator_cf_opt(
-        &self,
+        &'_ self,
         cf_handle: &impl AsColumnFamilyRef,
         mut readopts: ReadOptions,
-    ) -> DBRawIteratorWithThreadMode<D> {
+    ) -> DBRawIteratorWithThreadMode<'_, D> {
         readopts.set_snapshot(self);
         DBRawIteratorWithThreadMode::new_cf(self.db, cf_handle.inner(), readopts)
     }
@@ -168,7 +171,10 @@ impl<'a, D: DBAccess> SnapshotWithThreadMode<'a, D> {
     /// Return the value associated with a key using RocksDB's PinnableSlice
     /// so as to avoid unnecessary memory copy. Similar to get_pinned_opt but
     /// leverages default options.
-    pub fn get_pinned<K: AsRef<[u8]>>(&self, key: K) -> Result<Option<DBPinnableSlice>, Error> {
+    pub fn get_pinned<K: AsRef<[u8]>>(
+        &'_ self,
+        key: K,
+    ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
         let readopts = ReadOptions::default();
         self.get_pinned_opt(key, readopts)
     }
@@ -177,10 +183,10 @@ impl<'a, D: DBAccess> SnapshotWithThreadMode<'a, D> {
     /// so as to avoid unnecessary memory copy. Similar to get_pinned_cf_opt but
     /// leverages default options.
     pub fn get_pinned_cf<K: AsRef<[u8]>>(
-        &self,
+        &'_ self,
         cf: &impl AsColumnFamilyRef,
         key: K,
-    ) -> Result<Option<DBPinnableSlice>, Error> {
+    ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
         let readopts = ReadOptions::default();
         self.get_pinned_cf_opt(cf, key.as_ref(), readopts)
     }
@@ -188,10 +194,10 @@ impl<'a, D: DBAccess> SnapshotWithThreadMode<'a, D> {
     /// Return the value associated with a key using RocksDB's PinnableSlice
     /// so as to avoid unnecessary memory copy.
     pub fn get_pinned_opt<K: AsRef<[u8]>>(
-        &self,
+        &'_ self,
         key: K,
         mut readopts: ReadOptions,
-    ) -> Result<Option<DBPinnableSlice>, Error> {
+    ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
         readopts.set_snapshot(self);
         self.db.get_pinned_opt(key.as_ref(), &readopts)
     }
@@ -200,11 +206,11 @@ impl<'a, D: DBAccess> SnapshotWithThreadMode<'a, D> {
     /// so as to avoid unnecessary memory copy. Similar to get_pinned_opt but
     /// allows specifying ColumnFamily.
     pub fn get_pinned_cf_opt<K: AsRef<[u8]>>(
-        &self,
+        &'_ self,
         cf: &impl AsColumnFamilyRef,
         key: K,
         mut readopts: ReadOptions,
-    ) -> Result<Option<DBPinnableSlice>, Error> {
+    ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
         readopts.set_snapshot(self);
         self.db.get_pinned_cf_opt(cf, key.as_ref(), &readopts)
     }

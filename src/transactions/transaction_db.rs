@@ -131,19 +131,19 @@ impl<T: ThreadMode> DBAccess for TransactionDB<T> {
     }
 
     fn get_pinned_opt<K: AsRef<[u8]>>(
-        &self,
+        &'_ self,
         key: K,
         readopts: &ReadOptions,
-    ) -> Result<Option<DBPinnableSlice>, Error> {
+    ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
         self.get_pinned_opt(key, readopts)
     }
 
     fn get_pinned_cf_opt<K: AsRef<[u8]>>(
-        &self,
+        &'_ self,
         cf: &impl AsColumnFamilyRef,
         key: K,
         readopts: &ReadOptions,
-    ) -> Result<Option<DBPinnableSlice>, Error> {
+    ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
         self.get_pinned_cf_opt(cf, key, readopts)
     }
 
@@ -402,7 +402,7 @@ impl<T: ThreadMode> TransactionDB<T> {
     }
 
     /// Creates a transaction with default options.
-    pub fn transaction(&self) -> Transaction<Self> {
+    pub fn transaction(&'_ self) -> Transaction<'_, Self> {
         self.transaction_opt(&WriteOptions::default(), &TransactionOptions::default())
     }
 
@@ -429,7 +429,7 @@ impl<T: ThreadMode> TransactionDB<T> {
     ///
     /// This function is expected to call once after open database.
     /// User should commit or rollback all transactions before start other transactions.
-    pub fn prepared_transactions(&self) -> Vec<Transaction<Self>> {
+    pub fn prepared_transactions(&'_ self) -> Vec<Transaction<'_, Self>> {
         self.prepared
             .lock()
             .unwrap()
@@ -477,25 +477,28 @@ impl<T: ThreadMode> TransactionDB<T> {
             .map(|x| x.map(|v| v.as_ref().to_vec()))
     }
 
-    pub fn get_pinned<K: AsRef<[u8]>>(&self, key: K) -> Result<Option<DBPinnableSlice>, Error> {
+    pub fn get_pinned<K: AsRef<[u8]>>(
+        &'_ self,
+        key: K,
+    ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
         self.get_pinned_opt(key, &ReadOptions::default())
     }
 
     /// Returns the bytes associated with a key value and the given column family.
     pub fn get_pinned_cf<K: AsRef<[u8]>>(
-        &self,
+        &'_ self,
         cf: &impl AsColumnFamilyRef,
         key: K,
-    ) -> Result<Option<DBPinnableSlice>, Error> {
+    ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
         self.get_pinned_cf_opt(cf, key, &ReadOptions::default())
     }
 
     /// Returns the bytes associated with a key value with read options.
     pub fn get_pinned_opt<K: AsRef<[u8]>>(
-        &self,
+        &'_ self,
         key: K,
         readopts: &ReadOptions,
-    ) -> Result<Option<DBPinnableSlice>, Error> {
+    ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
         let key = key.as_ref();
         unsafe {
             let val = ffi_try!(ffi::rocksdb_transactiondb_get_pinned(
@@ -514,11 +517,11 @@ impl<T: ThreadMode> TransactionDB<T> {
 
     /// Returns the bytes associated with a key value and the given column family with read options.
     pub fn get_pinned_cf_opt<K: AsRef<[u8]>>(
-        &self,
+        &'_ self,
         cf: &impl AsColumnFamilyRef,
         key: K,
         readopts: &ReadOptions,
-    ) -> Result<Option<DBPinnableSlice>, Error> {
+    ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
         let key = key.as_ref();
         unsafe {
             let val = ffi_try!(ffi::rocksdb_transactiondb_get_pinned_cf(
@@ -954,7 +957,7 @@ impl<T: ThreadMode> TransactionDB<T> {
         DBRawIteratorWithThreadMode::new_cf(self, cf_handle.inner(), readopts)
     }
 
-    pub fn snapshot(&self) -> SnapshotWithThreadMode<Self> {
+    pub fn snapshot(&'_ self) -> SnapshotWithThreadMode<'_, Self> {
         SnapshotWithThreadMode::<Self>::new(self)
     }
 
@@ -1015,7 +1018,7 @@ impl TransactionDB<MultiThreaded> {
     }
 
     /// Returns the underlying column family handle.
-    pub fn cf_handle(&self, name: &str) -> Option<Arc<BoundColumnFamily>> {
+    pub fn cf_handle(&'_ self, name: &str) -> Option<Arc<BoundColumnFamily<'_>>> {
         self.cfs
             .cfs
             .read()

@@ -151,11 +151,11 @@ impl WriteBatchWithIndex {
     }
 
     pub fn get_pinned_from_batch_and_db<T, I, K>(
-        &self,
+        &'_ self,
         db: &DBCommon<T, I>,
         key: K,
         readopts: &ReadOptions,
-    ) -> Result<Option<DBPinnableSlice>, Error>
+    ) -> Result<Option<DBPinnableSlice<'_>>, Error>
     where
         T: ThreadMode,
         I: DBInner,
@@ -233,12 +233,12 @@ impl WriteBatchWithIndex {
     }
 
     pub fn get_pinned_from_batch_and_db_cf<T, I, K>(
-        &self,
+        &'_ self,
         db: &DBCommon<T, I>,
         cf: &impl AsColumnFamilyRef,
         key: K,
         readopts: &ReadOptions,
-    ) -> Result<Option<DBPinnableSlice>, Error>
+    ) -> Result<Option<DBPinnableSlice<'_>>, Error>
     where
         T: ThreadMode,
         I: DBInner,

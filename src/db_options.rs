@@ -904,9 +904,9 @@ impl Options {
                 })
                 .collect::<Vec<_>>();
             // free pointers
-            slice::from_raw_parts(column_family_names, num_column_families)
-                .iter()
-                .for_each(|ptr| ffi::rocksdb_free(*ptr as *mut c_void));
+            for ptr in slice::from_raw_parts(column_family_names, num_column_families) {
+                ffi::rocksdb_free(*ptr as *mut c_void);
+            }
             ffi::rocksdb_free(column_family_names as *mut c_void);
             ffi::rocksdb_free(column_family_options as *mut c_void);
             column_descriptors

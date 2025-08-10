@@ -206,7 +206,7 @@ impl MergeOperands {
         self.num_operands == 0
     }
 
-    pub fn iter(&self) -> MergeOperandsIter {
+    pub fn iter(&'_ self) -> MergeOperandsIter<'_> {
         MergeOperandsIter {
             operands: self,
             cursor: 0,

@@ -1,6 +1,217 @@
-use crate::db_options::{DBBackgroundErrorReason, DBCompactionReason, DBWriteStallCondition};
 use crate::{ffi, Error};
 use libc::c_void;
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(C)]
+pub enum DBWriteStallCondition {
+    KDelayed,
+    KStopped,
+    KNormal,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[repr(u32)]
+pub enum DBCompactionReason {
+    KUnknown,
+    // [Level] number of L0 files > level0_file_num_compaction_trigger
+    KLevelL0filesNum,
+    // [Level] total size of level > MaxBytesForLevel()
+    KLevelMaxLevelSize,
+    // [Universal] Compacting for size amplification
+    KUniversalSizeAmplification,
+    // [Universal] Compacting for size ratio
+    KUniversalSizeRatio,
+    // [Universal] number of sorted runs > level0_file_num_compaction_trigger
+    KUniversalSortedRunNum,
+    // [FIFO] total size > max_table_files_size
+    KFifomaxSize,
+    // [FIFO] reduce number of files.
+    KFiforeduceNumFiles,
+    // [FIFO] files with creation time < (current_time - interval)
+    KFifottl,
+    // Manual compaction
+    KManualCompaction,
+    // DB::SuggestCompactRange() marked files for compaction
+    KFilesMarkedForCompaction,
+    // [Level] Automatic compaction within bottommost level to cleanup duplicate
+    // versions of same user key, usually due to a released snapshot.
+    KBottommostFiles,
+    // Compaction based on TTL
+    KTtl,
+    // According to the comments in flush_job.cc, RocksDB treats flush as
+    // a level 0 compaction in internal stats.
+    KFlush,
+    // [InternalOnly] External sst file ingestion treated as a compaction
+    // with placeholder input level L0 as file ingestion
+    // technically does not have an input level like other compactions.
+    // Used only for internal stats and conflict checking with other compactions
+    KExternalSstIngestion,
+    // Compaction due to SST file being too old
+    KPeriodicCompaction,
+    // Compaction in order to move files to temperature
+    KChangeTemperature,
+    // Compaction scheduled to force garbage collection of blob files
+    KForcedBlobGc,
+    // A special TTL compaction for RoundRobin policy, which basically the same as
+    // kLevelMaxLevelSize, but the goal is to compact TTLed files.
+    KRoundRobinTtl,
+    // [InternalOnly] DBImpl::ReFitLevel treated as a compaction,
+    // Used only for internal conflict checking with other compactions
+    KRefitLevel,
+    // total number of compaction reasons, new reasons must be added above this.
+    KNumOfReasons,
+}
+
+impl From<u32> for DBCompactionReason {
+    fn from(value: u32) -> Self {
+        match value {
+            1 => DBCompactionReason::KLevelL0filesNum,
+            2 => DBCompactionReason::KLevelMaxLevelSize,
+            3 => DBCompactionReason::KUniversalSizeAmplification,
+            4 => DBCompactionReason::KUniversalSizeRatio,
+            5 => DBCompactionReason::KUniversalSortedRunNum,
+            6 => DBCompactionReason::KFifomaxSize,
+            7 => DBCompactionReason::KFiforeduceNumFiles,
+            8 => DBCompactionReason::KFifottl,
+            9 => DBCompactionReason::KManualCompaction,
+            10 => DBCompactionReason::KFilesMarkedForCompaction,
+            11 => DBCompactionReason::KBottommostFiles,
+            12 => DBCompactionReason::KTtl,
+            13 => DBCompactionReason::KFlush,
+            14 => DBCompactionReason::KExternalSstIngestion,
+            15 => DBCompactionReason::KPeriodicCompaction,
+            16 => DBCompactionReason::KChangeTemperature,
+            17 => DBCompactionReason::KForcedBlobGc,
+            18 => DBCompactionReason::KRoundRobinTtl,
+            19 => DBCompactionReason::KRefitLevel,
+            20 => DBCompactionReason::KNumOfReasons,
+            _ => DBCompactionReason::KUnknown,
+        }
+    }
+}
+
+impl DBCompactionReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DBCompactionReason::KUnknown => "KUnknown",
+            DBCompactionReason::KLevelL0filesNum => "KLevelL0filesNum",
+            DBCompactionReason::KLevelMaxLevelSize => "KLevelMaxLevelSize",
+            DBCompactionReason::KUniversalSizeAmplification => "KUniversalSizeAmplification",
+            DBCompactionReason::KUniversalSizeRatio => "KUniversalSizeRatio",
+            DBCompactionReason::KUniversalSortedRunNum => "KUniversalSortedRunNum",
+            DBCompactionReason::KFifomaxSize => "KFifomaxSize",
+            DBCompactionReason::KFiforeduceNumFiles => "KFiforeduceNumFiles",
+            DBCompactionReason::KFifottl => "KFifottl",
+            DBCompactionReason::KManualCompaction => "KManualCompaction",
+            DBCompactionReason::KFilesMarkedForCompaction => "KFilesMarkedForCompaction",
+            DBCompactionReason::KBottommostFiles => "KBottommostFiles",
+            DBCompactionReason::KTtl => "KTtl",
+            DBCompactionReason::KFlush => "KFlush",
+            DBCompactionReason::KExternalSstIngestion => "KExternalSstIngestion",
+            DBCompactionReason::KPeriodicCompaction => "KPeriodicCompaction",
+            DBCompactionReason::KChangeTemperature => "KChangeTemperature",
+            DBCompactionReason::KForcedBlobGc => "KForcedBlobGc",
+            DBCompactionReason::KRoundRobinTtl => "KRoundRobinTtl",
+            DBCompactionReason::KRefitLevel => "KRefitLevel",
+            DBCompactionReason::KNumOfReasons => "KNumOfReasons",
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[repr(u32)]
+pub enum DBFlushReason {
+    KOthers,
+    KGetLiveFiles,
+    KShutDown,
+    KExternalFileIngestion,
+    KManualCompaction,
+    KWriteBufferManager,
+    KWriteBufferFull,
+    KTest,
+    KDeleteFiles,
+    KAutoCompaction,
+    KManualFlush,
+    KErrorRecovery,
+    KErrorRecoveryRetryFlush,
+    KWalFull,
+    KCatchUpAfterErrorRecovery,
+    KUnknown, // not an actual flush reason but will be used when we don't recognize the enum value
+}
+
+impl From<u32> for DBFlushReason {
+    fn from(value: u32) -> Self {
+        match value {
+            0 => DBFlushReason::KOthers,
+            1 => DBFlushReason::KGetLiveFiles,
+            2 => DBFlushReason::KShutDown,
+            3 => DBFlushReason::KExternalFileIngestion,
+            4 => DBFlushReason::KManualCompaction,
+            5 => DBFlushReason::KWriteBufferManager,
+            6 => DBFlushReason::KWriteBufferFull,
+            7 => DBFlushReason::KTest,
+            8 => DBFlushReason::KDeleteFiles,
+            9 => DBFlushReason::KAutoCompaction,
+            10 => DBFlushReason::KManualFlush,
+            11 => DBFlushReason::KErrorRecovery,
+            12 => DBFlushReason::KErrorRecoveryRetryFlush,
+            13 => DBFlushReason::KWalFull,
+            14 => DBFlushReason::KCatchUpAfterErrorRecovery,
+            _ => DBFlushReason::KUnknown,
+        }
+    }
+}
+
+impl DBFlushReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DBFlushReason::KOthers => "KOthers",
+            DBFlushReason::KGetLiveFiles => "KGetLiveFiles",
+            DBFlushReason::KShutDown => "KShutDown",
+            DBFlushReason::KExternalFileIngestion => "KExternalFileIngestion",
+            DBFlushReason::KManualCompaction => "KManualCompaction",
+            DBFlushReason::KWriteBufferManager => "KWriteBufferManager",
+            DBFlushReason::KWriteBufferFull => "KWriteBufferFull",
+            DBFlushReason::KTest => "KTest",
+            DBFlushReason::KDeleteFiles => "KDeleteFiles",
+            DBFlushReason::KAutoCompaction => "KAutoCompaction",
+            DBFlushReason::KManualFlush => "KManualFlush",
+            DBFlushReason::KErrorRecovery => "KErrorRecovery",
+            DBFlushReason::KErrorRecoveryRetryFlush => "KErrorRecoveryRetryFlush",
+            DBFlushReason::KWalFull => "KWalFull",
+            DBFlushReason::KCatchUpAfterErrorRecovery => "KCatchUpAfterErrorRecovery",
+            DBFlushReason::KUnknown => "KUnknown",
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum DBBackgroundErrorReason {
+    KFlush = 0,
+    KCompaction = 1,
+    KWriteCallback = 2,
+    KMemTable = 3,
+    KManifestWrite = 4,
+    KFlushNoWAL = 5,
+    KManifestWriteNoWAL = 6,
+    KUnknown, // not an actual background error reason but will be used when we don't recognize the enum value
+}
+
+impl From<u32> for DBBackgroundErrorReason {
+    fn from(value: u32) -> Self {
+        match value {
+            0 => DBBackgroundErrorReason::KFlush,
+            1 => DBBackgroundErrorReason::KCompaction,
+            2 => DBBackgroundErrorReason::KWriteCallback,
+            3 => DBBackgroundErrorReason::KMemTable,
+            4 => DBBackgroundErrorReason::KManifestWrite,
+            5 => DBBackgroundErrorReason::KFlushNoWAL,
+            6 => DBBackgroundErrorReason::KManifestWriteNoWAL,
+            _ => DBBackgroundErrorReason::KUnknown,
+        }
+    }
+}
 
 pub struct FlushJobInfo {
     pub(crate) inner: *const ffi::rocksdb_flushjobinfo_t,
@@ -41,7 +252,9 @@ impl FlushJobInfo {
         unsafe { ffi::rocksdb_flushjobinfo_smallest_seqno(self.inner) }
     }
 
-    // TODO: make a pr to rocksdb to expose flush reason via c api
+    pub fn flush_reason(&self) -> DBFlushReason {
+        unsafe { DBFlushReason::from(ffi::rocksdb_flushjobinfo_flush_reason(self.inner)) }
+    }
 }
 
 pub struct CompactionJobInfo {
@@ -157,6 +370,14 @@ impl SubcompactionJobInfo {
 
     pub fn output_level(&self) -> i32 {
         unsafe { ffi::rocksdb_subcompactionjobinfo_output_level(self.inner) }
+    }
+
+    pub fn compaction_reason(&self) -> DBCompactionReason {
+        unsafe {
+            DBCompactionReason::from(ffi::rocksdb_subcompactionjobinfo_compaction_reason(
+                self.inner,
+            ))
+        }
     }
 }
 

@@ -1,9 +1,6 @@
 mod util;
 
-use rust_rocksdb::DBBackgroundErrorReason;
-use rust_rocksdb::{
-    event_listener::*, DBCompactionReason, DBWriteStallCondition, FlushOptions, Options, DB,
-};
+use rust_rocksdb::{event_listener::*, FlushOptions, Options, DB};
 use std::io::Write;
 use std::path::Path;
 use std::sync::atomic::*;
@@ -20,6 +17,7 @@ struct EventCounter {
     input_bytes: Arc<AtomicUsize>,
     output_bytes: Arc<AtomicUsize>,
     manual_compaction: Arc<AtomicUsize>,
+    manual_flush: Arc<AtomicUsize>,
 }
 
 impl EventListener for EventCounter {
@@ -39,6 +37,10 @@ impl EventListener for EventCounter {
         self.flush.fetch_add(1, Ordering::SeqCst);
         assert_ne!(info.largest_seqno(), 0);
         assert!(info.smallest_seqno() <= info.largest_seqno());
+
+        if info.flush_reason() == DBFlushReason::KManualFlush {
+            self.manual_flush.fetch_add(1, Ordering::SeqCst);
+        }
     }
 
     fn on_compaction_completed(&self, info: &CompactionJobInfo) {
@@ -182,6 +184,7 @@ fn test_event_listener_basic() {
     fopts.set_wait(true);
     db.flush_opt(&fopts).unwrap();
     assert_ne!(counter.flush.load(Ordering::SeqCst), 0);
+    assert_eq!(counter.manual_flush.load(Ordering::SeqCst), 1);
 
     for i in 1..8000 {
         db.put(format!("{i:04}").as_bytes(), format!("{i:04}").as_bytes())
@@ -193,6 +196,7 @@ fn test_event_listener_basic() {
     assert_eq!(counter.compaction.load(Ordering::SeqCst), 0);
     db.compact_range(None::<&[u8]>, None::<&[u8]>);
     assert_eq!(counter.flush.load(Ordering::SeqCst), flush_cnt);
+    assert_eq!(counter.manual_flush.load(Ordering::SeqCst), 2);
     assert_ne!(counter.compaction.load(Ordering::SeqCst), 0);
     drop(db);
     assert!(

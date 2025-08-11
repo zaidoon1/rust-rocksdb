@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.43.0 (2025-08-11)
+
+- upgrade to RocksDB 10.5.1 (zaidoon1)
+- clippy fixes (zaidoon1)
+- Ensure jemalloc is linked in when the feature is enabled (#1026) (timothyg-stripe)
+- fix set_skip_prepare transaction option to call correct c api (zaidoon1)
+- Expose get_pinned_from_batch_and_db for WriteBatchWithIndex (tillrohrmann)
+- Expose WBWI through rust-rocksdb (tillrohrmann)
+- Access to open column families names (AhmedSoliman)
+- Pass write batch by reference (AhmedSoliman)
+- Use parking_lot's RwLock (AhmedSoliman)
+- minor code refactor to take out different complex options outside of db_options file (zaidoon1)
+- feat: expose set_memtable_avg_op_scan_flush_trigger (zaidoon1)
+- mark set_skip_checking_sst_file_sizes_on_db_open as deprecated (#1017) (evanj)
+- Implement WriteBatchIteratorCf trait and update related methods for compatibility (#1002) (RiversJin)
+- Add get_approximate_sizes (#998) (ran-openai)
+- ffi_util.rs: improve opt_bytes_to_str to avoid potential use-after-free (#693) (#1003) (Chain-Fox)
+- db_options.rs: deprecate set_ignore_range_deletions (RocksDB 10.2.1) (#1000) (evanj)
+- prep work for upgrading to rust 2024 (zaidoon1)
+
 ## 0.42.1 (2025-07-15)
 
 - fix event listener implementation and add partial support for on_background_error (zaidoon1)

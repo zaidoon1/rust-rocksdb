@@ -38,80 +38,8 @@ pub enum PerfStatsLevel {
     OutOfBound,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-#[repr(i32)]
-pub enum PerfMetric {
-    UserKeyComparisonCount = 0,
-    BlockCacheHitCount = 1,
-    BlockReadCount = 2,
-    BlockReadByte = 3,
-    BlockReadTime = 4,
-    BlockChecksumTime = 5,
-    BlockDecompressTime = 6,
-    GetReadBytes = 7,
-    MultigetReadBytes = 8,
-    IterReadBytes = 9,
-    InternalKeySkippedCount = 10,
-    InternalDeleteSkippedCount = 11,
-    InternalRecentSkippedCount = 12,
-    InternalMergeCount = 13,
-    GetSnapshotTime = 14,
-    GetFromMemtableTime = 15,
-    GetFromMemtableCount = 16,
-    GetPostProcessTime = 17,
-    GetFromOutputFilesTime = 18,
-    SeekOnMemtableTime = 19,
-    SeekOnMemtableCount = 20,
-    NextOnMemtableCount = 21,
-    PrevOnMemtableCount = 22,
-    SeekChildSeekTime = 23,
-    SeekChildSeekCount = 24,
-    SeekMinHeapTime = 25,
-    SeekMaxHeapTime = 26,
-    SeekInternalSeekTime = 27,
-    FindNextUserEntryTime = 28,
-    WriteWalTime = 29,
-    WriteMemtableTime = 30,
-    WriteDelayTime = 31,
-    WritePreAndPostProcessTime = 32,
-    DbMutexLockNanos = 33,
-    DbConditionWaitNanos = 34,
-    MergeOperatorTimeNanos = 35,
-    ReadIndexBlockNanos = 36,
-    ReadFilterBlockNanos = 37,
-    NewTableBlockIterNanos = 38,
-    NewTableIteratorNanos = 39,
-    BlockSeekNanos = 40,
-    FindTableNanos = 41,
-    BloomMemtableHitCount = 42,
-    BloomMemtableMissCount = 43,
-    BloomSstHitCount = 44,
-    BloomSstMissCount = 45,
-    KeyLockWaitTime = 46,
-    KeyLockWaitCount = 47,
-    EnvNewSequentialFileNanos = 48,
-    EnvNewRandomAccessFileNanos = 49,
-    EnvNewWritableFileNanos = 50,
-    EnvReuseWritableFileNanos = 51,
-    EnvNewRandomRwFileNanos = 52,
-    EnvNewDirectoryNanos = 53,
-    EnvFileExistsNanos = 54,
-    EnvGetChildrenNanos = 55,
-    EnvGetChildrenFileAttributesNanos = 56,
-    EnvDeleteFileNanos = 57,
-    EnvCreateDirNanos = 58,
-    EnvCreateDirIfMissingNanos = 59,
-    EnvDeleteDirNanos = 60,
-    EnvGetFileSizeNanos = 61,
-    EnvGetFileModificationTimeNanos = 62,
-    EnvRenameFileNanos = 63,
-    EnvLinkFileNanos = 64,
-    EnvLockFileNanos = 65,
-    EnvUnlockFileNanos = 66,
-    EnvNewLoggerNanos = 67,
-    TotalMetricCount = 68,
-}
+// Include the generated PerfMetric enum from perf_enum.rs
+include!("perf_enum.rs");
 
 /// Sets the perf stats level for current thread.
 pub fn set_perf_stats(lvl: PerfStatsLevel) {
@@ -296,4 +224,112 @@ pub fn get_memory_usage_stats(
         mem_table_readers_total: mu.approximate_mem_table_readers_total(),
         cache_total: mu.approximate_cache_total(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Options, DB};
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_perf_context_with_db_operations() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        let db = DB::open(&opts, temp_dir.path()).unwrap();
+
+        // Insert data with deletions to test internal key/delete skipping
+        let n = 10;
+        for i in 0..n {
+            let k = vec![i as u8];
+            db.put(&k, &k).unwrap();
+            if i % 2 == 0 {
+                db.delete(&k).unwrap();
+            }
+        }
+
+        set_perf_stats(PerfStatsLevel::EnableCount);
+        let mut ctx = PerfContext::default();
+
+        // Use iterator with explicit seek to trigger metrics
+        let mut iter = db.raw_iterator();
+        iter.seek_to_first();
+        let mut valid_count = 0;
+        while iter.valid() {
+            valid_count += 1;
+            iter.next();
+        }
+
+        // Check counts - should have 5 valid entries (odd numbers: 1,3,5,7,9)
+        assert_eq!(
+            valid_count, 5,
+            "Iterator should find 5 valid entries (odd numbers)"
+        );
+
+        // Check internal skip metrics
+        let internal_key_skipped = ctx.metric(PerfMetric::InternalKeySkippedCount);
+        let internal_delete_skipped = ctx.metric(PerfMetric::InternalDeleteSkippedCount);
+
+        // In RocksDB, when iterating over deleted keys in SST files:
+        // - We should skip the deletion markers (n/2 = 5 deletes)
+        // - Total internal keys skipped should be >= number of deletions
+        assert!(
+            internal_key_skipped >= (n / 2) as u64,
+            "internal_key_skipped ({}) should be >= {} (deletions)",
+            internal_key_skipped,
+            n / 2
+        );
+        assert_eq!(
+            internal_delete_skipped,
+            (n / 2) as u64,
+            "internal_delete_skipped ({internal_delete_skipped}) should equal {} (deleted entries)",
+            n / 2
+        );
+        assert_eq!(
+            ctx.metric(PerfMetric::SeekInternalSeekTime),
+            0,
+            "Time metrics should be 0 with EnableCount"
+        );
+
+        // Test reset
+        ctx.reset();
+        assert_eq!(ctx.metric(PerfMetric::InternalKeySkippedCount), 0);
+        assert_eq!(ctx.metric(PerfMetric::InternalDeleteSkippedCount), 0);
+
+        // Change perf level to EnableTime
+        set_perf_stats(PerfStatsLevel::EnableTime);
+
+        // Iterate backwards
+        let mut iter = db.raw_iterator();
+        iter.seek_to_last();
+        let mut backward_count = 0;
+        while iter.valid() {
+            backward_count += 1;
+            iter.prev();
+        }
+        assert_eq!(
+            backward_count, 5,
+            "Backward iteration should also find 5 valid entries"
+        );
+
+        // Check accumulated metrics after second iteration
+        let key_skipped_after = ctx.metric(PerfMetric::InternalKeySkippedCount);
+        let delete_skipped_after = ctx.metric(PerfMetric::InternalDeleteSkippedCount);
+
+        // After both iterations, we should have accumulated more skipped keys
+        assert!(
+            key_skipped_after >= internal_key_skipped,
+            "After second iteration, internal_key_skipped ({key_skipped_after}) should be >= first iteration ({internal_key_skipped})",
+        );
+        assert_eq!(
+            delete_skipped_after,
+            (n / 2) as u64,
+            "internal_delete_skipped should still be {} after second iteration",
+            n / 2
+        );
+
+        // Disable perf stats
+        set_perf_stats(PerfStatsLevel::Disable);
+    }
 }

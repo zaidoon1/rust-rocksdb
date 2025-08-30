@@ -1945,6 +1945,177 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         self.delete_cf_with_ts_opt(cf, key.as_ref(), ts.as_ref(), &WriteOptions::default())
     }
 
+    /// Remove the database entry for "key" with WriteOptions.
+    ///
+    /// Requires that the key exists and was not overwritten. Returns OK on success,
+    /// and a non-OK status on error. It is not an error if "key" did not exist in the database.
+    ///
+    /// If a key is overwritten (by calling Put() multiple times), then the result
+    /// of calling SingleDelete() on this key is undefined. SingleDelete() only
+    /// behaves correctly if there has been only one Put() for this key since the
+    /// previous call to SingleDelete() for this key.
+    ///
+    /// This feature is currently an experimental performance optimization
+    /// for a very specific workload. It is up to the caller to ensure that
+    /// SingleDelete is only used for a key that is not deleted using Delete() or
+    /// written using Merge(). Mixing SingleDelete operations with Deletes and
+    /// Merges can result in undefined behavior.
+    ///
+    /// Note: consider setting options.sync = true.
+    ///
+    /// For more information, see <https://github.com/facebook/rocksdb/wiki/Single-Delete>
+    pub fn single_delete_opt<K: AsRef<[u8]>>(
+        &self,
+        key: K,
+        writeopts: &WriteOptions,
+    ) -> Result<(), Error> {
+        let key = key.as_ref();
+
+        unsafe {
+            ffi_try!(ffi::rocksdb_singledelete(
+                self.inner.inner(),
+                writeopts.inner,
+                key.as_ptr() as *const c_char,
+                key.len() as size_t,
+            ));
+            Ok(())
+        }
+    }
+
+    /// Remove the database entry for "key" from a specific column family with WriteOptions.
+    ///
+    /// See single_delete_opt() for detailed behavior and restrictions.
+    pub fn single_delete_cf_opt<K: AsRef<[u8]>>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        key: K,
+        writeopts: &WriteOptions,
+    ) -> Result<(), Error> {
+        let key = key.as_ref();
+
+        unsafe {
+            ffi_try!(ffi::rocksdb_singledelete_cf(
+                self.inner.inner(),
+                writeopts.inner,
+                cf.inner(),
+                key.as_ptr() as *const c_char,
+                key.len() as size_t,
+            ));
+            Ok(())
+        }
+    }
+
+    /// Remove the database entry for "key" with WriteOptions.
+    ///
+    /// Takes an additional argument `ts` as the timestamp.
+    /// Note: the DB must be opened with user defined timestamp enabled.
+    ///
+    /// See single_delete_opt() for detailed behavior and restrictions.
+    pub fn single_delete_with_ts_opt<K, S>(
+        &self,
+        key: K,
+        ts: S,
+        writeopts: &WriteOptions,
+    ) -> Result<(), Error>
+    where
+        K: AsRef<[u8]>,
+        S: AsRef<[u8]>,
+    {
+        let key = key.as_ref();
+        let ts = ts.as_ref();
+        unsafe {
+            ffi_try!(ffi::rocksdb_singledelete_with_ts(
+                self.inner.inner(),
+                writeopts.inner,
+                key.as_ptr() as *const c_char,
+                key.len() as size_t,
+                ts.as_ptr() as *const c_char,
+                ts.len() as size_t,
+            ));
+            Ok(())
+        }
+    }
+
+    /// Remove the database entry for "key" from a specific column family with WriteOptions.
+    ///
+    /// Takes an additional argument `ts` as the timestamp.
+    /// Note: the DB must be opened with user defined timestamp enabled.
+    ///
+    /// See single_delete_opt() for detailed behavior and restrictions.
+    pub fn single_delete_cf_with_ts_opt<K, S>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        key: K,
+        ts: S,
+        writeopts: &WriteOptions,
+    ) -> Result<(), Error>
+    where
+        K: AsRef<[u8]>,
+        S: AsRef<[u8]>,
+    {
+        let key = key.as_ref();
+        let ts = ts.as_ref();
+        unsafe {
+            ffi_try!(ffi::rocksdb_singledelete_cf_with_ts(
+                self.inner.inner(),
+                writeopts.inner,
+                cf.inner(),
+                key.as_ptr() as *const c_char,
+                key.len() as size_t,
+                ts.as_ptr() as *const c_char,
+                ts.len() as size_t,
+            ));
+            Ok(())
+        }
+    }
+
+    /// Remove the database entry for "key".
+    ///
+    /// See single_delete_opt() for detailed behavior and restrictions.
+    pub fn single_delete<K: AsRef<[u8]>>(&self, key: K) -> Result<(), Error> {
+        self.single_delete_opt(key.as_ref(), &WriteOptions::default())
+    }
+
+    /// Remove the database entry for "key" from a specific column family.
+    ///
+    /// See single_delete_opt() for detailed behavior and restrictions.
+    pub fn single_delete_cf<K: AsRef<[u8]>>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        key: K,
+    ) -> Result<(), Error> {
+        self.single_delete_cf_opt(cf, key.as_ref(), &WriteOptions::default())
+    }
+
+    /// Remove the database entry for "key".
+    ///
+    /// Takes an additional argument `ts` as the timestamp.
+    /// Note: the DB must be opened with user defined timestamp enabled.
+    ///
+    /// See single_delete_opt() for detailed behavior and restrictions.
+    pub fn single_delete_with_ts<K: AsRef<[u8]>, S: AsRef<[u8]>>(
+        &self,
+        key: K,
+        ts: S,
+    ) -> Result<(), Error> {
+        self.single_delete_with_ts_opt(key.as_ref(), ts.as_ref(), &WriteOptions::default())
+    }
+
+    /// Remove the database entry for "key" from a specific column family.
+    ///
+    /// Takes an additional argument `ts` as the timestamp.
+    /// Note: the DB must be opened with user defined timestamp enabled.
+    ///
+    /// See single_delete_opt() for detailed behavior and restrictions.
+    pub fn single_delete_cf_with_ts<K: AsRef<[u8]>, S: AsRef<[u8]>>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        key: K,
+        ts: S,
+    ) -> Result<(), Error> {
+        self.single_delete_cf_with_ts_opt(cf, key.as_ref(), ts.as_ref(), &WriteOptions::default())
+    }
+
     /// Runs a manual compaction on the Range of keys given. This is not likely to be needed for typical usage.
     pub fn compact_range<S: AsRef<[u8]>, E: AsRef<[u8]>>(&self, start: Option<S>, end: Option<E>) {
         unsafe {

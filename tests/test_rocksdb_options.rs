@@ -14,7 +14,11 @@
 
 mod util;
 
-use std::{fs, io::Read as _};
+use std::{
+    fs,
+    io::Read as _,
+    sync::{atomic::AtomicUsize, Arc, LazyLock},
+};
 
 use rust_rocksdb::{
     checkpoint::Checkpoint, BlockBasedOptions, BlockBasedPinningTier, Cache, DBCompactionPri,
@@ -455,21 +459,132 @@ fn test_lru_cache_custom_opts() {
     assert_eq!(&*db.get(KEY).unwrap().unwrap(), VALUE);
 }
 
+struct UnsafeLoggerCheck {
+    dropped: bool,
+}
+
+static UNSAFE_LOGGER_CHECK_DROP_COUNT: LazyLock<AtomicUsize> =
+    LazyLock::new(|| AtomicUsize::new(0));
+
+impl UnsafeLoggerCheck {
+    fn new() -> Self {
+        Self { dropped: false }
+    }
+
+    fn check_not_dropped(&self) {
+        assert!(!self.dropped);
+    }
+
+    fn get_drop_count() -> usize {
+        UNSAFE_LOGGER_CHECK_DROP_COUNT.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn add_drop() {
+        UNSAFE_LOGGER_CHECK_DROP_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl Drop for UnsafeLoggerCheck {
+    fn drop(&mut self) {
+        self.dropped = true;
+        Self::add_drop();
+    }
+}
+
+fn static_callback_fn(level: rust_rocksdb::LogLevel, msg: &str) {
+    println!("level={level:?} msg={msg}");
+}
+
 #[test]
 fn test_set_callback_logger() {
     use rust_rocksdb::LogLevel::Debug;
     let path = DBPath::new("_set_callback_logger");
-    let mut msgs = 0;
+
+    let msgs = Arc::new(AtomicUsize::new(0));
     {
         let mut opts = Options::default();
         opts.create_if_missing(true);
-        opts.set_callback_logger(Debug, &|_lev, _msg| {
-            msgs += 1;
+
+        // passing a static function compiles without any magic
+        opts.set_callback_logger(rust_rocksdb::LogLevel::Error, static_callback_fn);
+
+        // passing a closure should also work
+        let closure_msgs = msgs.clone();
+        let debug_msgs = Arc::new(AtomicUsize::new(0));
+        let closure_debug_msgs = debug_msgs.clone();
+        opts.set_callback_logger(Debug, move |level, _msg| {
+            closure_msgs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if level == Debug {
+                closure_debug_msgs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
         });
 
         let _db = DB::open(&opts, &path).unwrap();
+        // we expect some debug messages
+        assert!(debug_msgs.load(std::sync::atomic::Ordering::SeqCst) > 0);
     }
-    assert!(msgs > 0, "callback logger produced no messages!");
+    assert!(
+        msgs.load(std::sync::atomic::Ordering::SeqCst) > 0,
+        "callback logger produced no messages!"
+    );
+
+    // check that level filtering works: set the level to Info and expect 0 debug messages
+    {
+        let mut opts = Options::default();
+        let debug_msgs = Arc::new(AtomicUsize::new(0));
+        let closure_debug_msgs = debug_msgs.clone();
+        opts.set_callback_logger(rust_rocksdb::LogLevel::Info, move |level, _msg| {
+            if level == Debug {
+                closure_debug_msgs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        });
+        let _db = DB::open(&opts, &path).unwrap();
+
+        // no debug messages: we set the level to Info: it should be excluded
+        assert_eq!(debug_msgs.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    // test that the callback is not dropped prematurely and that cloning options still works
+    msgs.store(0, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(0, UnsafeLoggerCheck::get_drop_count());
+    let opts = {
+        let unsafe_logger_check = UnsafeLoggerCheck::new();
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+
+        let closure_msgs = msgs.clone();
+        opts.set_callback_logger(Debug, move |_lev, _msg| {
+            unsafe_logger_check.check_not_dropped();
+            closure_msgs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        });
+        opts
+    };
+    // UnsafeLoggerCheck is not dropped: it should have been moved
+    assert_eq!(0, UnsafeLoggerCheck::get_drop_count());
+
+    let opts_clone = opts.clone();
+
+    assert_eq!(0, msgs.load(std::sync::atomic::Ordering::SeqCst));
+    let _db = DB::open(&opts, &path).unwrap();
+    drop(_db);
+    assert!(
+        msgs.load(std::sync::atomic::Ordering::SeqCst) > 0,
+        "callback logger produced no messages!"
+    );
+
+    msgs.store(0, std::sync::atomic::Ordering::SeqCst);
+    let _db2 = DB::open(&opts_clone, &path).unwrap();
+    assert!(
+        msgs.load(std::sync::atomic::Ordering::SeqCst) > 0,
+        "callback logger produced no messages!"
+    );
+    drop(_db2);
+
+    drop(opts);
+    assert_eq!(0, UnsafeLoggerCheck::get_drop_count());
+    drop(opts_clone);
+    // finally UnsafeLoggerCheck must be dropped after all the options and the dbs are dropped
+    assert_eq!(1, UnsafeLoggerCheck::get_drop_count());
 }
 
 #[test]

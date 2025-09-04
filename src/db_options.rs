@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use std::ffi::CStr;
-use std::panic::{catch_unwind, AssertUnwindSafe, RefUnwindSafe};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 use std::ptr::null_mut;
 use std::slice;
+use std::sync::Arc;
 
 use libc::{self, c_char, c_double, c_int, c_uchar, c_uint, c_void, size_t};
 
@@ -43,6 +44,14 @@ use crate::{
     ColumnFamilyDescriptor, Error, SnapshotWithThreadMode,
 };
 
+// must be Send and Sync because it will be called by RocksDB from different threads
+type LogCallbackFn = dyn Fn(LogLevel, &str) + 'static + Send + Sync;
+
+// Holds a log callback to ensure it outlives any Options and DBs that use it.
+struct LogCallback {
+    callback: Box<LogCallbackFn>,
+}
+
 #[derive(Default)]
 pub(crate) struct OptionsMustOutliveDB {
     env: Option<Env>,
@@ -50,6 +59,7 @@ pub(crate) struct OptionsMustOutliveDB {
     blob_cache: Option<Cache>,
     block_based: Option<BlockBasedOptionsMustOutliveDB>,
     write_buffer_manager: Option<WriteBufferManager>,
+    log_callback: Option<Arc<LogCallback>>,
 }
 
 impl OptionsMustOutliveDB {
@@ -63,6 +73,7 @@ impl OptionsMustOutliveDB {
                 .as_ref()
                 .map(BlockBasedOptionsMustOutliveDB::clone),
             write_buffer_manager: self.write_buffer_manager.clone(),
+            log_callback: self.log_callback.clone(),
         }
     }
 }
@@ -3377,48 +3388,52 @@ impl Options {
         }
     }
 
-    /// Invokes callback with log messages.
+    /// Invokes `callback` with RocksDB log messages with level >= `log_level`.
+    ///
+    /// The callback can be called concurrently by multiple RocksDB threads.
     ///
     /// # Examples
     /// ```
     /// use rust_rocksdb::{LogLevel, Options};
     ///
     /// let mut options = Options::default();
-    /// options.set_callback_logger(LogLevel::Debug, &|level, msg| println!("{level:?} {msg}"));
+    /// options.set_callback_logger(LogLevel::Debug, move |level, msg| println!("{level:?} {msg}"));
     /// ```
-    pub fn set_callback_logger<'a, F>(&mut self, log_level: LogLevel, func: &'a F)
-    where
-        F: for<'b> FnMut(LogLevel, &'b str) + RefUnwindSafe + Send + Sync + 'a,
-    {
-        let func = func as *const F;
-        let func = func.cast::<c_void>();
+    pub fn set_callback_logger(
+        &mut self,
+        log_level: LogLevel,
+        callback: impl Fn(LogLevel, &str) + 'static + Send + Sync,
+    ) {
+        // store the closure in an Arc so it can be shared across multiple Option/DBs
+        let holder = Arc::new(LogCallback {
+            callback: Box::new(callback),
+        });
+        let holder_ptr = holder.as_ref() as *const LogCallback;
+        let holder_cvoid = holder_ptr.cast::<c_void>().cast_mut();
+
         unsafe {
             let logger = ffi::rocksdb_logger_create_callback_logger(
                 log_level as c_int,
-                Some(Self::logger_callback::<'a, F>),
-                func.cast_mut(),
+                Some(Self::logger_callback),
+                holder_cvoid,
             );
             ffi::rocksdb_options_set_info_log(self.inner, logger);
             ffi::rocksdb_logger_destroy(logger);
         }
+
+        self.outlive.log_callback = Some(holder);
     }
 
-    extern "C" fn logger_callback<'a, F>(
-        func: *mut c_void,
-        level: u32,
-        msg: *mut c_char,
-        len: usize,
-    ) where
-        F: for<'b> FnMut(LogLevel, &'b str) + RefUnwindSafe + Send + Sync + 'a,
-    {
+    extern "C" fn logger_callback(func: *mut c_void, level: u32, msg: *mut c_char, len: usize) {
         use std::{mem, process, str};
 
         let level = unsafe { mem::transmute::<u32, LogLevel>(level) };
         let slice = unsafe { slice::from_raw_parts_mut(msg.cast::<u8>(), len) };
         let msg = unsafe { str::from_utf8_unchecked(slice) };
-        let func = unsafe { &mut *func.cast::<F>() };
-        let mut func = AssertUnwindSafe(func);
-        if catch_unwind(move || func(level, msg)).is_err() {
+
+        let holder = unsafe { &mut *func.cast::<LogCallback>() };
+        let mut callback_in_catch_unwind = AssertUnwindSafe(&mut holder.callback);
+        if catch_unwind(move || callback_in_catch_unwind(level, msg)).is_err() {
             process::abort();
         }
     }

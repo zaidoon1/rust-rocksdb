@@ -1836,7 +1836,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         K: AsRef<[u8]>,
         V: AsRef<[u8]>,
     {
-        self.put_opt(key.as_ref(), value.as_ref(), &WriteOptions::default())
+        self.put_opt(key, value, &WriteOptions::default())
     }
 
     pub fn put_cf<K, V>(&self, cf: &impl AsColumnFamilyRef, key: K, value: V) -> Result<(), Error>
@@ -1844,7 +1844,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         K: AsRef<[u8]>,
         V: AsRef<[u8]>,
     {
-        self.put_cf_opt(cf, key.as_ref(), value.as_ref(), &WriteOptions::default())
+        self.put_cf_opt(cf, key, value, &WriteOptions::default())
     }
 
     /// Set the database entry for "key" to "value".
@@ -1899,7 +1899,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         K: AsRef<[u8]>,
         V: AsRef<[u8]>,
     {
-        self.merge_opt(key.as_ref(), value.as_ref(), &WriteOptions::default())
+        self.merge_opt(key, value, &WriteOptions::default())
     }
 
     pub fn merge_cf<K, V>(&self, cf: &impl AsColumnFamilyRef, key: K, value: V) -> Result<(), Error>
@@ -1907,11 +1907,11 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         K: AsRef<[u8]>,
         V: AsRef<[u8]>,
     {
-        self.merge_cf_opt(cf, key.as_ref(), value.as_ref(), &WriteOptions::default())
+        self.merge_cf_opt(cf, key, value, &WriteOptions::default())
     }
 
     pub fn delete<K: AsRef<[u8]>>(&self, key: K) -> Result<(), Error> {
-        self.delete_opt(key.as_ref(), &WriteOptions::default())
+        self.delete_opt(key, &WriteOptions::default())
     }
 
     pub fn delete_cf<K: AsRef<[u8]>>(
@@ -1919,7 +1919,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         cf: &impl AsColumnFamilyRef,
         key: K,
     ) -> Result<(), Error> {
-        self.delete_cf_opt(cf, key.as_ref(), &WriteOptions::default())
+        self.delete_cf_opt(cf, key, &WriteOptions::default())
     }
 
     /// Remove the database entry (if any) for "key".
@@ -1930,7 +1930,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         key: K,
         ts: S,
     ) -> Result<(), Error> {
-        self.delete_with_ts_opt(key.as_ref(), ts.as_ref(), &WriteOptions::default())
+        self.delete_with_ts_opt(key, ts, &WriteOptions::default())
     }
 
     /// Delete with timestamp in a specific column family.
@@ -1942,7 +1942,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         key: K,
         ts: S,
     ) -> Result<(), Error> {
-        self.delete_cf_with_ts_opt(cf, key.as_ref(), ts.as_ref(), &WriteOptions::default())
+        self.delete_cf_with_ts_opt(cf, key, ts, &WriteOptions::default())
     }
 
     /// Remove the database entry for "key" with WriteOptions.
@@ -2073,7 +2073,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
     ///
     /// See single_delete_opt() for detailed behavior and restrictions.
     pub fn single_delete<K: AsRef<[u8]>>(&self, key: K) -> Result<(), Error> {
-        self.single_delete_opt(key.as_ref(), &WriteOptions::default())
+        self.single_delete_opt(key, &WriteOptions::default())
     }
 
     /// Remove the database entry for "key" from a specific column family.
@@ -2084,7 +2084,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         cf: &impl AsColumnFamilyRef,
         key: K,
     ) -> Result<(), Error> {
-        self.single_delete_cf_opt(cf, key.as_ref(), &WriteOptions::default())
+        self.single_delete_cf_opt(cf, key, &WriteOptions::default())
     }
 
     /// Remove the database entry for "key".
@@ -2098,7 +2098,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         key: K,
         ts: S,
     ) -> Result<(), Error> {
-        self.single_delete_with_ts_opt(key.as_ref(), ts.as_ref(), &WriteOptions::default())
+        self.single_delete_with_ts_opt(key, ts, &WriteOptions::default())
     }
 
     /// Remove the database entry for "key" from a specific column family.
@@ -2113,7 +2113,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         key: K,
         ts: S,
     ) -> Result<(), Error> {
-        self.single_delete_cf_with_ts_opt(cf, key.as_ref(), ts.as_ref(), &WriteOptions::default())
+        self.single_delete_cf_with_ts_opt(cf, key, ts, &WriteOptions::default())
     }
 
     /// Runs a manual compaction on the Range of keys given. This is not likely to be needed for typical usage.

@@ -124,6 +124,7 @@ jobs:
     name: ${{ matrix.build }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         build: [Linux, Linux-ARM, macOS, Windows]
         include:
@@ -173,8 +174,36 @@ jobs:
         if: runner.os == 'Linux'
         run: chmod -R a+w .
 
-      - name: Free disk space
-        run: cargo clean
+  test-jemalloc:
+    name: Test with jemalloc - ${{ matrix.build }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        build: [Linux, Linux-ARM, macOS]
+        include:
+          - build: Linux
+            os: ubuntu-latest
+          - build: Linux-ARM
+            os: ubuntu-24.04-arm
+          - build: macOS
+            os: macos-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          prefix-key: "v1-rust-jemalloc"
+
+      - uses: taiki-e/install-action@nextest
+
+      - name: Initialize submodules
+        run: git submodule update --init --recursive
 
       - name: Mark working directory as read-only
         if: runner.os == 'Linux'
@@ -184,10 +213,41 @@ jobs:
           chmod -R a-w .
           chmod -R a+w target Cargo.lock
 
-      - name: Run rocksdb tests (jemalloc)
-        if: runner.os != 'Windows'
+      - name: Run rocksdb tests with jemalloc
         run: cargo nextest run --all --features jemalloc
 
       - name: Mark working directory as writable
         if: runner.os == 'Linux'
         run: chmod -R a+w .
+
+  test-sanitizers:
+    name: Test with AddressSanitizer
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          prefix-key: "v1-rust-asan"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm clang
+
+      - name: Run tests with AddressSanitizer
+        env:
+          RUSTFLAGS: -Zsanitizer=address
+          RUSTDOCFLAGS: -Zsanitizer=address
+          ASAN_OPTIONS: detect_leaks=0:abort_on_error=1:print_stats=1
+        run: |
+          cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu --all --lib --bins

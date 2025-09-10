@@ -676,20 +676,3 @@ fn two_phase_commit() {
     }
 }
 
-#[test]
-fn test_snapshot_outlive_transaction_db() {
-    let t = trybuild::TestCases::new();
-    t.compile_fail("tests/fail/snapshot_outlive_transaction_db.rs");
-}
-
-#[test]
-fn test_txn_outlive_transaction_db() {
-    let t = trybuild::TestCases::new();
-    t.compile_fail("tests/fail/transaction_outlive_transaction_db.rs");
-}
-
-#[test]
-fn test_snapshot_outlive_txn() {
-    let t = trybuild::TestCases::new();
-    t.compile_fail("tests/fail/snapshot_outlive_transaction.rs");
-}

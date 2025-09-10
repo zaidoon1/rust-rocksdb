@@ -28,22 +28,36 @@ exclude = [
 ]
 
 [features]
-default = ["static", "bindgen/runtime"]
+# Default: vendored build with static linking
+default = ["vendored", "static", "bindgen-runtime"]
+
+# Linking strategy features (mutually exclusive)
+static = ["libz-sys?/static", "bzip2-sys?/static"]  # Prefer static linking
+dynamic = []  # Prefer dynamic linking
+static-only = ["static"]  # Force static linking only
+
+# Build source features
+vendored = []  # Build from vendored sources (default)
+no-vendor = ["bindgen-runtime"]  # Force system library usage (needs bindgen)
+
 jemalloc = ["tikv-jemalloc-sys"]
-static = ["libz-sys?/static", "bzip2-sys?/static"]
 bindgen-runtime = ["bindgen/runtime"]
 bindgen-static = ["bindgen/static"]
-mt_static = []
+mt_static = []  # MSVC static runtime
 io-uring = ["pkg-config"]
+
+# Compression features
 snappy = []
 lz4 = ["lz4-sys"]
 zstd = ["zstd-sys"]
 zlib = ["libz-sys"]
 bzip2 = ["bzip2-sys"]
-rtti = []
-malloc-usable-size = []
 zstd-static-linking-only = []
-lto = []
+
+# Advanced features
+rtti = []  # Enable RTTI support
+malloc-usable-size = []  # Enable malloc_usable_size
+lto = []  # Link-time optimization (requires clang)
 
 [dependencies]
 libc = "0.2"

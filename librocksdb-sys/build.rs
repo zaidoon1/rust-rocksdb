@@ -73,6 +73,12 @@ fn build_rocksdb() {
     config.include("rocksdb/");
     config.include("rocksdb/third-party/gtest-1.8.1/fused-src/");
 
+    // Enable -fno-builtin-memcmp for better performance on non-MSVC
+    // This makes the compiler use libc's optimized memcmp instead of generating its own
+    if !target.contains("msvc") && !target.contains("windows") {
+        config.flag_if_supported("-fno-builtin-memcmp");
+    }
+
     if cfg!(feature = "snappy") {
         config.define("SNAPPY", Some("1"));
         config.include("snappy/");
@@ -133,6 +139,15 @@ fn build_rocksdb() {
     config.include(".");
     config.define("NDEBUG", Some("1"));
 
+    // Test and enable 128-bit integer extension if available
+    // This improves performance for certain hash functions and checksums
+    if config
+        .is_flag_supported("-DHAVE_UINT128_EXTENSION")
+        .unwrap_or(false)
+    {
+        config.define("HAVE_UINT128_EXTENSION", None);
+    }
+
     let mut lib_sources = include_str!("rocksdb_lib_sources.txt")
         .trim()
         .split('\n')
@@ -158,20 +173,26 @@ fn build_rocksdb() {
         }
         if target_features.contains(&"sse4.2") {
             config.flag_if_supported("-msse4.2");
+            // SSE4.2 enables hardware CRC32C which significantly improves checksum performance
+            config.define("HAVE_SSE42", None);
         }
         // Pass along additional target features as defined in
         // build_tools/build_detect_platform.
         if target_features.contains(&"avx2") {
             config.flag_if_supported("-mavx2");
+            config.define("HAVE_AVX2", None);
         }
         if target_features.contains(&"bmi1") {
             config.flag_if_supported("-mbmi");
+            config.define("HAVE_BMI", None);
         }
         if target_features.contains(&"lzcnt") {
             config.flag_if_supported("-mlzcnt");
+            config.define("HAVE_LZCNT", None);
         }
         if !target.contains("android") && target_features.contains(&"pclmulqdq") {
             config.flag_if_supported("-mpclmul");
+            config.define("HAVE_PCLMUL", None);
         }
     }
 
@@ -190,6 +211,9 @@ fn build_rocksdb() {
         config.define("OS_MACOSX", None);
         config.define("ROCKSDB_PLATFORM_POSIX", None);
         config.define("ROCKSDB_LIB_IO_POSIX", None);
+
+        // Enable F_FULLFSYNC for better data durability on macOS
+        config.define("HAVE_FULLFSYNC", None);
     } else if target.contains("android") {
         config.define("OS_ANDROID", None);
         config.define("ROCKSDB_PLATFORM_POSIX", None);
@@ -212,6 +236,16 @@ fn build_rocksdb() {
         if check_getauxval_supported() {
             config.define("ROCKSDB_AUXV_GETAUXVAL_PRESENT", None);
         }
+
+        // Enable additional Linux-specific optimizations
+        // PTHREAD_MUTEX_ADAPTIVE_NP provides better mutex performance under contention
+        config.define("ROCKSDB_PTHREAD_ADAPTIVE_MUTEX", None);
+
+        // Enable fallocate for faster file preallocation
+        config.define("ROCKSDB_FALLOCATE_PRESENT", None);
+
+        // Enable sync_file_range for more efficient syncing
+        config.define("ROCKSDB_RANGESYNC_PRESENT", None);
     } else if target.contains("dragonfly") {
         config.define("OS_DRAGONFLYBSD", None);
         config.define("ROCKSDB_PLATFORM_POSIX", None);
@@ -333,8 +367,32 @@ fn build_rocksdb() {
     config.cpp(true);
     config.flag_if_supported("-std=c++17");
 
+    // Enable C++17 aligned new for better memory allocation performance
+    if config.is_flag_supported("-faligned-new").unwrap_or(false) {
+        config.flag("-faligned-new");
+        config.define("HAVE_ALIGNED_NEW", None);
+    }
+
+    // Add warning flag for 64-to-32 bit truncation issues (helps catch bugs)
+    if !target.contains("freebsd") && !target.contains("openbsd") {
+        config.flag_if_supported("-Wshorten-64-to-32");
+    }
+
     if !target.contains("windows") {
         config.flag("-include").flag("cstdint");
+    }
+
+    // Optimize for the current CPU architecture when not cross-compiling
+    // This can significantly improve performance by using all available CPU features
+    if env::var("CARGO_CFG_TARGET_ARCH").unwrap() == env::var("HOST_ARCH").unwrap_or_default()
+        && env::var("ROCKSDB_PORTABLE").unwrap_or_default() != "1"
+    {
+        if target.contains("x86_64") {
+            config.flag_if_supported("-march=native");
+        } else if target.contains("aarch64") || target.contains("arm64") {
+            // ARM architectures benefit from architecture-specific tuning
+            config.flag_if_supported("-mcpu=native");
+        }
     }
 
     // By default `cc` will link C++ standard library automatically,

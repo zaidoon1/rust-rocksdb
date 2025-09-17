@@ -481,12 +481,30 @@ impl BlockBasedOptions {
         }
     }
 
-    /// If cache_index_and_filter_blocks is enabled, cache index and filter blocks with high priority.
-    /// If set to true, depending on implementation of block cache,
-    /// index and filter blocks may be less likely to be evicted than data blocks.
+    /// Whether to put index/filter blocks in the block cache. When false,
+    /// each "table reader" object will pre-load index/filter blocks during
+    /// table initialization. Index and filter partition blocks always use
+    /// block cache regardless of this option.
+    ///
+    /// Default: false
     pub fn set_cache_index_and_filter_blocks(&mut self, v: bool) {
         unsafe {
             ffi::rocksdb_block_based_options_set_cache_index_and_filter_blocks(
+                self.inner,
+                c_uchar::from(v),
+            );
+        }
+    }
+
+    /// If `cache_index_and_filter_blocks` is enabled, cache index and filter
+    /// blocks with high priority. Depending on the block cache implementation,
+    /// index, filter, and other metadata blocks may be less likely to be
+    /// evicted than data blocks when this is set to true.
+    ///
+    /// Default: true.
+    pub fn set_cache_index_and_filter_blocks_with_high_priority(&mut self, v: bool) {
+        unsafe {
+            ffi::rocksdb_block_based_options_set_cache_index_and_filter_blocks_with_high_priority(
                 self.inner,
                 c_uchar::from(v),
             );
@@ -532,7 +550,7 @@ impl BlockBasedOptions {
     /// blocks are pinned and only evicted from cache when the table reader is
     /// freed. This is not limited to l0 in LSM tree.
     ///
-    /// Default: false.
+    /// Default: true.
     pub fn set_pin_top_level_index_and_filter(&mut self, v: bool) {
         unsafe {
             ffi::rocksdb_block_based_options_set_pin_top_level_index_and_filter(
@@ -654,7 +672,7 @@ impl BlockBasedOptions {
     /// https://github.com/facebook/rocksdb/wiki/RocksDB-Bloom-Filter#reducing-internal-fragmentation)
     /// for more information.
     ///
-    /// Defaults to false.
+    /// Default: true.
     /// # Examples
     ///
     /// ```

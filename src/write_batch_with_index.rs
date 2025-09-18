@@ -1,7 +1,7 @@
 use crate::db::DBInner;
 use crate::{
-    ffi, AsColumnFamilyRef, DBAccess, DBCommon, DBPinnableSlice, DBRawIteratorWithThreadMode,
-    Error, Options, ReadOptions, ThreadMode,
+    cf_options::ColumnFamilyOptions, ffi, AsColumnFamilyRef, DBAccess, DBCommon, DBPinnableSlice,
+    DBRawIteratorWithThreadMode, Error, ReadOptions, ThreadMode,
 };
 use libc::{c_char, c_uchar, size_t};
 
@@ -47,7 +47,11 @@ impl WriteBatchWithIndex {
         self.len() == 0
     }
 
-    pub fn get_from_batch<K>(&self, key: K, options: &Options) -> Result<Option<Vec<u8>>, Error>
+    pub fn get_from_batch<K>(
+        &self,
+        key: K,
+        options: &ColumnFamilyOptions,
+    ) -> Result<Option<Vec<u8>>, Error>
     where
         K: AsRef<[u8]>,
     {
@@ -78,7 +82,7 @@ impl WriteBatchWithIndex {
         &self,
         cf: &impl AsColumnFamilyRef,
         key: K,
-        options: &Options,
+        options: &ColumnFamilyOptions,
     ) -> Result<Option<Vec<u8>>, Error>
     where
         K: AsRef<[u8]>,

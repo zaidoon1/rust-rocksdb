@@ -1,4 +1,6 @@
-use rust_rocksdb::{ColumnFamilyDescriptor, Options, ReadOptions, WriteOptions, DB};
+use rust_rocksdb::{
+    ColumnFamilyDescriptor, ColumnFamilyOptions, DBOptions, ReadOptions, WriteOptions, DB,
+};
 
 mod util;
 use util::DBPath;
@@ -50,12 +52,12 @@ fn test_single_delete_opt() {
 fn test_single_delete_cf() {
     let path = DBPath::new("_rust_rocksdb_test_single_delete_cf");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
 
-        let cf1_descriptor = ColumnFamilyDescriptor::new("cf1", Options::default());
-        let cf2_descriptor = ColumnFamilyDescriptor::new("cf2", Options::default());
+        let cf1_descriptor = ColumnFamilyDescriptor::new("cf1", ColumnFamilyOptions::default());
+        let cf2_descriptor = ColumnFamilyDescriptor::new("cf2", ColumnFamilyOptions::default());
 
         let db =
             DB::open_cf_descriptors(&opts, &path, vec![cf1_descriptor, cf2_descriptor]).unwrap();
@@ -91,11 +93,11 @@ fn test_single_delete_cf() {
 fn test_single_delete_cf_opt() {
     let path = DBPath::new("_rust_rocksdb_test_single_delete_cf_opt");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
 
-        let cf_descriptor = ColumnFamilyDescriptor::new("cf1", Options::default());
+        let cf_descriptor = ColumnFamilyDescriptor::new("cf1", ColumnFamilyOptions::default());
         let db = DB::open_cf_descriptors(&opts, &path, vec![cf_descriptor]).unwrap();
 
         let cf = db.cf_handle("cf1").unwrap();
@@ -114,13 +116,14 @@ fn test_single_delete_cf_opt() {
 fn test_single_delete_with_ts() {
     let path = DBPath::new("_rust_rocksdb_test_single_delete_with_ts");
     {
-        let mut opts = Options::default();
-        opts.create_if_missing(true);
+        let mut db_opts = DBOptions::default();
+        db_opts.create_if_missing(true);
 
         // Set up user-defined timestamp
         let comparator_name = "test_comparator";
 
-        opts.set_comparator_with_ts(
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_comparator_with_ts(
             comparator_name,
             8, // timestamp size
             Box::new(util::U64Comparator::compare),
@@ -128,7 +131,12 @@ fn test_single_delete_with_ts() {
             Box::new(util::U64Comparator::compare_without_ts),
         );
 
-        let db = DB::open(&opts, &path).unwrap();
+        let db = DB::open_cf_descriptors(
+            &db_opts,
+            &path,
+            vec![ColumnFamilyDescriptor::new("default", cf_opts)],
+        )
+        .unwrap();
 
         let key = b"k1";
         let val1 = b"v1";
@@ -164,13 +172,14 @@ fn test_single_delete_with_ts() {
 fn test_single_delete_with_ts_opt() {
     let path = DBPath::new("_rust_rocksdb_test_single_delete_with_ts_opt");
     {
-        let mut opts = Options::default();
-        opts.create_if_missing(true);
+        let mut db_opts = DBOptions::default();
+        db_opts.create_if_missing(true);
 
         // Set up user-defined timestamp
         let comparator_name = "test_comparator";
 
-        opts.set_comparator_with_ts(
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_comparator_with_ts(
             comparator_name,
             8, // timestamp size
             Box::new(util::U64Comparator::compare),
@@ -178,7 +187,12 @@ fn test_single_delete_with_ts_opt() {
             Box::new(util::U64Comparator::compare_without_ts),
         );
 
-        let db = DB::open(&opts, &path).unwrap();
+        let db = DB::open_cf_descriptors(
+            &db_opts,
+            &path,
+            vec![ColumnFamilyDescriptor::new("default", cf_opts)],
+        )
+        .unwrap();
         let write_opts = WriteOptions::default();
 
         let key = b"k1";
@@ -203,14 +217,14 @@ fn test_single_delete_with_ts_opt() {
 fn test_single_delete_cf_with_ts() {
     let path = DBPath::new("_rust_rocksdb_test_single_delete_cf_with_ts");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
 
         // Set up user-defined timestamp
         let comparator_name = "test_comparator";
 
-        let mut cf_opts = Options::default();
+        let mut cf_opts = ColumnFamilyOptions::default();
         cf_opts.set_comparator_with_ts(
             comparator_name,
             8, // timestamp size
@@ -258,14 +272,14 @@ fn test_single_delete_cf_with_ts() {
 fn test_single_delete_cf_with_ts_opt() {
     let path = DBPath::new("_rust_rocksdb_test_single_delete_cf_with_ts_opt");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
 
         // Set up user-defined timestamp
         let comparator_name = "test_comparator";
 
-        let mut cf_opts = Options::default();
+        let mut cf_opts = ColumnFamilyOptions::default();
         cf_opts.set_comparator_with_ts(
             comparator_name,
             8, // timestamp size

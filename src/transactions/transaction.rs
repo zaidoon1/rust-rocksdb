@@ -133,7 +133,7 @@ impl<DB> Transaction<'_, DB> {
     /// the [`Busy`] kind may be returned if the transaction
     /// could not guarantee that there are no write conflicts.
     /// An error of the [`TryAgain`] kind may be returned if the memtable
-    /// history size is not large enough (see [`Options::set_max_write_buffer_size_to_maintain`]).
+    /// history size is not large enough (see [`ColumnFamilyOptions::set_max_write_buffer_size_to_maintain`]).
     ///
     /// [`Expired`]: crate::ErrorKind::Expired
     /// [`TransactionOptions`]: crate::TransactionOptions
@@ -141,7 +141,7 @@ impl<DB> Transaction<'_, DB> {
     /// [`OptimisticTransactionDB`]: crate::OptimisticTransactionDB
     /// [`Busy`]: crate::ErrorKind::Busy
     /// [`TryAgain`]: crate::ErrorKind::TryAgain
-    /// [`Options::set_max_write_buffer_size_to_maintain`]: crate::Options::set_max_write_buffer_size_to_maintain
+    /// [`ColumnFamilyOptions::set_max_write_buffer_size_to_maintain`]: crate::ColumnFamilyOptions::set_max_write_buffer_size_to_maintain
     pub fn commit(self) -> Result<(), Error> {
         unsafe {
             ffi_try!(ffi::rocksdb_transaction_commit(self.inner));

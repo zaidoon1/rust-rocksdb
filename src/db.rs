@@ -14,15 +14,16 @@
 //
 
 use crate::{
+    cf_options::ColumnFamilyOptions,
     column_family::AsColumnFamilyRef,
     column_family::BoundColumnFamily,
     column_family::UnboundColumnFamily,
-    db_options::OptionsMustOutliveDB,
+    db_options::{DBOptions, OptionsMustOutliveDB},
     ffi,
     ffi_util::{from_cstr, opt_bytes_to_ptr, raw_data, to_cpath, CStrLike},
     ColumnFamily, ColumnFamilyDescriptor, CompactOptions, DBIteratorWithThreadMode,
     DBPinnableSlice, DBRawIteratorWithThreadMode, DBWALIterator, Direction, Error, FlushOptions,
-    IngestExternalFileOptions, IteratorMode, Options, ReadOptions, SnapshotWithThreadMode,
+    IngestExternalFileOptions, IteratorMode, ReadOptions, SnapshotWithThreadMode,
     WaitForCompactOptions, WriteBatch, WriteBatchWithIndex, WriteOptions,
     DEFAULT_COLUMN_FAMILY_NAME,
 };
@@ -366,19 +367,19 @@ enum AccessType<'a> {
 impl<T: ThreadMode> DBWithThreadMode<T> {
     /// Opens a database with default options.
     pub fn open_default<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         Self::open(&opts, path)
     }
 
     /// Opens the database with the specified options.
-    pub fn open<P: AsRef<Path>>(opts: &Options, path: P) -> Result<Self, Error> {
+    pub fn open<P: AsRef<Path>>(opts: &DBOptions, path: P) -> Result<Self, Error> {
         Self::open_cf(opts, path, None::<&str>)
     }
 
     /// Opens the database for read only with the specified options.
     pub fn open_for_read_only<P: AsRef<Path>>(
-        opts: &Options,
+        opts: &DBOptions,
         path: P,
         error_if_log_file_exist: bool,
     ) -> Result<Self, Error> {
@@ -387,7 +388,7 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
 
     /// Opens the database as a secondary.
     pub fn open_as_secondary<P: AsRef<Path>>(
-        opts: &Options,
+        opts: &DBOptions,
         primary_path: P,
         secondary_path: P,
     ) -> Result<Self, Error> {
@@ -399,7 +400,7 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
     /// This applies the given `ttl` to all column families created without an explicit TTL.
     /// See [`DB::open_cf_descriptors_with_ttl`] for more control over individual column family TTLs.
     pub fn open_with_ttl<P: AsRef<Path>>(
-        opts: &Options,
+        opts: &DBOptions,
         path: P,
         ttl: Duration,
     ) -> Result<Self, Error> {
@@ -408,9 +409,9 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
 
     /// Opens the database with a Time to Live compaction filter and column family names.
     ///
-    /// Column families opened using this function will be created with default `Options`.
+    /// Column families opened using this function will be created with default `ColumnFamilyOptions`.
     pub fn open_cf_with_ttl<P, I, N>(
-        opts: &Options,
+        opts: &DBOptions,
         path: P,
         cfs: I,
         ttl: Duration,
@@ -420,9 +421,12 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
         I: IntoIterator<Item = N>,
         N: AsRef<str>,
     {
-        let cfs = cfs
-            .into_iter()
-            .map(|name| ColumnFamilyDescriptor::new(name.as_ref(), Options::default()));
+        let cfs = cfs.into_iter().map(|name| {
+            ColumnFamilyDescriptor::new(
+                name.as_ref(),
+                crate::cf_options::ColumnFamilyOptions::default(),
+            )
+        });
 
         Self::open_cf_descriptors_with_ttl(opts, path, cfs, ttl)
     }
@@ -434,14 +438,14 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
     /// Column families will inherit this TTL by default, unless their descriptor explicitly
     /// sets a different TTL using [`ColumnFamilyTtl::Duration`] or opts out using [`ColumnFamilyTtl::Disabled`].
     ///
-    /// *NOTE*: The `default` column family is opened with `Options::default()` unless
+    /// *NOTE*: The `default` column family is opened with `ColumnFamilyOptions::default()` unless
     /// explicitly configured within the `cfs` iterator.
     /// To customize the `default` column family's options, include a `ColumnFamilyDescriptor`
     /// with the name "default" in the `cfs` iterator.
     ///
     /// If you want to open `default` cf with different options, set them explicitly in `cfs`.
     pub fn open_cf_descriptors_with_ttl<P, I>(
-        opts: &Options,
+        opts: &DBOptions,
         path: P,
         cfs: I,
         ttl: Duration,
@@ -455,27 +459,30 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
 
     /// Opens a database with the given database options and column family names.
     ///
-    /// Column families opened using this function will be created with default `Options`.
-    pub fn open_cf<P, I, N>(opts: &Options, path: P, cfs: I) -> Result<Self, Error>
+    /// Column families opened using this function will be created with default `ColumnFamilyOptions`.
+    pub fn open_cf<P, I, N>(opts: &DBOptions, path: P, cfs: I) -> Result<Self, Error>
     where
         P: AsRef<Path>,
         I: IntoIterator<Item = N>,
         N: AsRef<str>,
     {
-        let cfs = cfs
-            .into_iter()
-            .map(|name| ColumnFamilyDescriptor::new(name.as_ref(), Options::default()));
+        let cfs = cfs.into_iter().map(|name| {
+            ColumnFamilyDescriptor::new(
+                name.as_ref(),
+                crate::cf_options::ColumnFamilyOptions::default(),
+            )
+        });
 
         Self::open_cf_descriptors_internal(opts, path, cfs, &AccessType::ReadWrite)
     }
 
     /// Opens a database with the given database options and column family names.
     ///
-    /// Column families opened using given `Options`.
-    pub fn open_cf_with_opts<P, I, N>(opts: &Options, path: P, cfs: I) -> Result<Self, Error>
+    /// Column families opened using given `DBOptions`.
+    pub fn open_cf_with_opts<P, I, N>(opts: &DBOptions, path: P, cfs: I) -> Result<Self, Error>
     where
         P: AsRef<Path>,
-        I: IntoIterator<Item = (N, Options)>,
+        I: IntoIterator<Item = (N, crate::cf_options::ColumnFamilyOptions)>,
         N: AsRef<str>,
     {
         let cfs = cfs
@@ -486,10 +493,10 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
     }
 
     /// Opens a database for read only with the given database options and column family names.
-    /// *NOTE*: `default` column family is opened with `Options::default()`.
+    /// *NOTE*: `default` column family is opened with `ColumnFamilyOptions::default()`.
     /// If you want to open `default` cf with different options, set them explicitly in `cfs`.
     pub fn open_cf_for_read_only<P, I, N>(
-        opts: &Options,
+        opts: &DBOptions,
         path: P,
         cfs: I,
         error_if_log_file_exist: bool,
@@ -499,9 +506,12 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
         I: IntoIterator<Item = N>,
         N: AsRef<str>,
     {
-        let cfs = cfs
-            .into_iter()
-            .map(|name| ColumnFamilyDescriptor::new(name.as_ref(), Options::default()));
+        let cfs = cfs.into_iter().map(|name| {
+            ColumnFamilyDescriptor::new(
+                name.as_ref(),
+                crate::cf_options::ColumnFamilyOptions::default(),
+            )
+        });
 
         Self::open_cf_descriptors_internal(
             opts,
@@ -514,17 +524,17 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
     }
 
     /// Opens a database for read only with the given database options and column family names.
-    /// *NOTE*: `default` column family is opened with `Options::default()`.
+    /// *NOTE*: `default` column family is opened with `ColumnFamilyOptions::default()`.
     /// If you want to open `default` cf with different options, set them explicitly in `cfs`.
     pub fn open_cf_with_opts_for_read_only<P, I, N>(
-        db_opts: &Options,
+        db_opts: &DBOptions,
         path: P,
         cfs: I,
         error_if_log_file_exist: bool,
     ) -> Result<Self, Error>
     where
         P: AsRef<Path>,
-        I: IntoIterator<Item = (N, Options)>,
+        I: IntoIterator<Item = (N, crate::cf_options::ColumnFamilyOptions)>,
         N: AsRef<str>,
     {
         let cfs = cfs
@@ -543,10 +553,10 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
 
     /// Opens a database for ready only with the given database options and
     /// column family descriptors.
-    /// *NOTE*: `default` column family is opened with `Options::default()`.
+    /// *NOTE*: `default` column family is opened with `ColumnFamilyOptions::default()`.
     /// If you want to open `default` cf with different options, set them explicitly in `cfs`.
     pub fn open_cf_descriptors_read_only<P, I>(
-        opts: &Options,
+        opts: &DBOptions,
         path: P,
         cfs: I,
         error_if_log_file_exist: bool,
@@ -566,10 +576,10 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
     }
 
     /// Opens the database as a secondary with the given database options and column family names.
-    /// *NOTE*: `default` column family is opened with `Options::default()`.
+    /// *NOTE*: `default` column family is opened with `DBOptions::default()`.
     /// If you want to open `default` cf with different options, set them explicitly in `cfs`.
     pub fn open_cf_as_secondary<P, I, N>(
-        opts: &Options,
+        opts: &DBOptions,
         primary_path: P,
         secondary_path: P,
         cfs: I,
@@ -579,9 +589,12 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
         I: IntoIterator<Item = N>,
         N: AsRef<str>,
     {
-        let cfs = cfs
-            .into_iter()
-            .map(|name| ColumnFamilyDescriptor::new(name.as_ref(), Options::default()));
+        let cfs = cfs.into_iter().map(|name| {
+            ColumnFamilyDescriptor::new(
+                name.as_ref(),
+                crate::cf_options::ColumnFamilyOptions::default(),
+            )
+        });
 
         Self::open_cf_descriptors_internal(
             opts,
@@ -595,10 +608,10 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
 
     /// Opens the database as a secondary with the given database options and
     /// column family descriptors.
-    /// *NOTE*: `default` column family is opened with `Options::default()`.
+    /// *NOTE*: `default` column family is opened with `DBOptions::default()`.
     /// If you want to open `default` cf with different options, set them explicitly in `cfs`.
     pub fn open_cf_descriptors_as_secondary<P, I>(
-        opts: &Options,
+        opts: &DBOptions,
         path: P,
         secondary_path: P,
         cfs: I,
@@ -618,9 +631,9 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
     }
 
     /// Opens a database with the given database options and column family descriptors.
-    /// *NOTE*: `default` column family is opened with `Options::default()`.
+    /// *NOTE*: `default` column family is opened with `DBOptions::default()`.
     /// If you want to open `default` cf with different options, set them explicitly in `cfs`.
-    pub fn open_cf_descriptors<P, I>(opts: &Options, path: P, cfs: I) -> Result<Self, Error>
+    pub fn open_cf_descriptors<P, I>(opts: &DBOptions, path: P, cfs: I) -> Result<Self, Error>
     where
         P: AsRef<Path>,
         I: IntoIterator<Item = ColumnFamilyDescriptor>,
@@ -630,7 +643,7 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
 
     /// Internal implementation for opening RocksDB.
     fn open_cf_descriptors_internal<P, I>(
-        opts: &Options,
+        opts: &DBOptions,
         path: P,
         cfs: I,
         access_type: &AccessType,
@@ -663,7 +676,7 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
             if !cfs_v.iter().any(|cf| cf.name == DEFAULT_COLUMN_FAMILY_NAME) {
                 cfs_v.push(ColumnFamilyDescriptor {
                     name: String::from(DEFAULT_COLUMN_FAMILY_NAME),
-                    options: Options::default(),
+                    options: crate::cf_options::ColumnFamilyOptions::default(),
                     ttl: ColumnFamilyTtl::SameAsDb,
                 });
             }
@@ -719,7 +732,7 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
     }
 
     fn open_raw(
-        opts: &Options,
+        opts: &DBOptions,
         cpath: &CString,
         access_type: &AccessType,
     ) -> Result<*mut ffi::rocksdb_t, Error> {
@@ -754,7 +767,7 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
 
     #[allow(clippy::pedantic)]
     fn open_cf_raw(
-        opts: &Options,
+        opts: &DBOptions,
         cpath: &CString,
         cfs_v: &[ColumnFamilyDescriptor],
         cfnames: &[*const c_char],
@@ -907,7 +920,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         }
     }
 
-    pub fn list_cf<P: AsRef<Path>>(opts: &Options, path: P) -> Result<Vec<String>, Error> {
+    pub fn list_cf<P: AsRef<Path>>(opts: &DBOptions, path: P) -> Result<Vec<String>, Error> {
         let cpath = to_cpath(path)?;
         let mut length = 0;
 
@@ -927,7 +940,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         }
     }
 
-    pub fn destroy<P: AsRef<Path>>(opts: &Options, path: P) -> Result<(), Error> {
+    pub fn destroy<P: AsRef<Path>>(opts: &DBOptions, path: P) -> Result<(), Error> {
         let cpath = to_cpath(path)?;
         unsafe {
             ffi_try!(ffi::rocksdb_destroy_db(opts.inner, cpath.as_ptr()));
@@ -935,7 +948,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         Ok(())
     }
 
-    pub fn repair<P: AsRef<Path>>(opts: &Options, path: P) -> Result<(), Error> {
+    pub fn repair<P: AsRef<Path>>(opts: &DBOptions, path: P) -> Result<(), Error> {
         let cpath = to_cpath(path)?;
         unsafe {
             ffi_try!(ffi::rocksdb_repair_db(opts.inner, cpath.as_ptr()));
@@ -1425,7 +1438,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
     fn create_inner_cf_handle(
         &self,
         name: impl CStrLike,
-        opts: &Options,
+        opts: &ColumnFamilyOptions,
     ) -> Result<*mut ffi::rocksdb_column_family_handle_t, Error> {
         let cf_name = name.bake().map_err(|err| {
             Error::new(format!(
@@ -2772,7 +2785,11 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
 
 impl<I: DBInner> DBCommon<SingleThreaded, I> {
     /// Creates column family with given name and options
-    pub fn create_cf<N: AsRef<str>>(&mut self, name: N, opts: &Options) -> Result<(), Error> {
+    pub fn create_cf<N: AsRef<str>>(
+        &mut self,
+        name: N,
+        opts: &ColumnFamilyOptions,
+    ) -> Result<(), Error> {
         let inner = self.create_inner_cf_handle(name.as_ref(), opts)?;
         self.cfs
             .cfs
@@ -2801,7 +2818,11 @@ impl<I: DBInner> DBCommon<SingleThreaded, I> {
 
 impl<I: DBInner> DBCommon<MultiThreaded, I> {
     /// Creates column family with given name and options
-    pub fn create_cf<N: AsRef<str>>(&self, name: N, opts: &Options) -> Result<(), Error> {
+    pub fn create_cf<N: AsRef<str>>(
+        &self,
+        name: N,
+        opts: &ColumnFamilyOptions,
+    ) -> Result<(), Error> {
         // Note that we acquire the cfs lock before inserting: otherwise we might race
         // another caller who observed the handle as missing.
         let mut cfs = self.cfs.cfs.write();

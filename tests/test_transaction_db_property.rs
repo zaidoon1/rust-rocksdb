@@ -16,18 +16,18 @@ mod util;
 
 use pretty_assertions::assert_eq;
 
-use rust_rocksdb::{properties, Options, TransactionDB, TransactionDBOptions};
+use rust_rocksdb::{properties, DBOptions, TransactionDB, TransactionDBOptions};
 use util::DBPath;
 
 #[test]
 fn transaction_db_property_test() {
     let path = DBPath::new("_rust_rocksdb_transaction_db_property_test");
     {
-        let mut options = Options::default();
-        options.create_if_missing(true);
-        options.enable_statistics();
+        let mut opts = DBOptions::default();
+        opts.create_if_missing(true);
+        opts.enable_statistics();
         let tx_db_options = TransactionDBOptions::default();
-        let db = TransactionDB::open(&options, &tx_db_options, &path).unwrap();
+        let db = TransactionDB::open(&opts, &tx_db_options, &path).unwrap();
 
         db.put("key1", "value1").unwrap();
         db.put("key2", "value2").unwrap();
@@ -45,7 +45,7 @@ fn transaction_db_property_test() {
 fn transaction_db_int_property_test() {
     let path = DBPath::new("_rust_rocksdb_transaction_db_int_property_test");
     {
-        let mut options = Options::default();
+        let mut options = DBOptions::default();
         options.create_if_missing(true);
         options.enable_statistics();
         let tx_db_options = TransactionDBOptions::default();

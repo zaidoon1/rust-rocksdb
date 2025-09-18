@@ -26,7 +26,7 @@ pub type WriteBatch = WriteBatchWithTransaction<false>;
 /// Making an atomic commit of several writes:
 ///
 /// ```
-/// use rust_rocksdb::{DB, Options, WriteBatchWithTransaction};
+/// use rust_rocksdb::{DB, DBOptions, WriteBatchWithTransaction};
 ///
 /// let tempdir = tempfile::Builder::new()
 ///     .prefix("_path_for_rocksdb_storage1")
@@ -45,7 +45,7 @@ pub type WriteBatch = WriteBatchWithTransaction<false>;
 ///
 ///     db.write(&batch); // Atomically commits the batch
 /// }
-/// let _ = DB::destroy(&Options::default(), path);
+/// let _ = DB::destroy(&DBOptions::default(), path);
 /// ```
 ///
 /// [`Transaction`]: crate::Transaction

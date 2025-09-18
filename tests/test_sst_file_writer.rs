@@ -16,7 +16,9 @@ mod util;
 
 use pretty_assertions::assert_eq;
 
-use rust_rocksdb::{Error, Options, ReadOptions, SstFileWriter, DB};
+use rust_rocksdb::{
+    ColumnFamilyDescriptor, ColumnFamilyOptions, DBOptions, Error, ReadOptions, SstFileWriter, DB,
+};
 use util::{DBPath, U64Comparator, U64Timestamp};
 
 #[test]
@@ -28,7 +30,7 @@ fn sst_file_writer_works() {
         .expect("Failed to create temporary path for file writer.");
     let writer_path = dir.path().join("filewriter");
     {
-        let opts = Options::default();
+        let opts = ColumnFamilyOptions::default();
         let mut writer = SstFileWriter::create(&opts);
         writer.open(&writer_path).unwrap();
         writer.put(b"k1", b"v1").unwrap();
@@ -64,7 +66,7 @@ fn sst_file_writer_with_ts_works() {
     let ts2 = U64Timestamp::new(2);
     let ts3 = U64Timestamp::new(3);
     {
-        let mut opts = Options::default();
+        let mut opts = ColumnFamilyOptions::default();
         opts.set_comparator_with_ts(
             U64Comparator::NAME,
             U64Timestamp::SIZE,
@@ -84,12 +86,13 @@ fn sst_file_writer_with_ts_works() {
     }
 
     {
-        let _ = DB::destroy(&Options::default(), &db_path);
+        let _ = DB::destroy(&DBOptions::default(), &db_path);
 
-        let mut db_opts = Options::default();
+        let mut db_opts = DBOptions::default();
         db_opts.create_missing_column_families(true);
         db_opts.create_if_missing(true);
-        db_opts.set_comparator_with_ts(
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_comparator_with_ts(
             U64Comparator::NAME,
             U64Timestamp::SIZE,
             Box::new(U64Comparator::compare),
@@ -97,7 +100,12 @@ fn sst_file_writer_with_ts_works() {
             Box::new(U64Comparator::compare_without_ts),
         );
 
-        let db = DB::open(&db_opts, &db_path).unwrap();
+        let db = DB::open_cf_descriptors(
+            &db_opts,
+            &db_path,
+            vec![ColumnFamilyDescriptor::new("default", cf_opts)],
+        )
+        .unwrap();
         db.ingest_external_file(vec![&writer_path]).unwrap();
         db.delete_with_ts(b"k3", ts3).unwrap();
 

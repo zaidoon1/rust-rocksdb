@@ -15,7 +15,7 @@ use crate::{
 ///  for more details
 ///
 ///  [CompactionFilter]: ../compaction_filter/trait.CompactionFilter.html
-///  [set_compaction_filter_factory]: ../struct.Options.html#method.set_compaction_filter_factory
+///  [set_compaction_filter_factory]: ../cf_options/struct.ColumnFamilyOptions.html#method.set_compaction_filter_factory
 pub trait CompactionFilterFactory {
     type Filter: CompactionFilter;
 
@@ -97,7 +97,7 @@ where
 mod tests {
     use super::*;
     use crate::compaction_filter::Decision;
-    use crate::{Options, DB};
+    use crate::{ColumnFamilyOptions, DBOptions, DB};
     use std::ffi::CString;
 
     struct CountFilter(u16, CString);
@@ -136,11 +136,12 @@ mod tests {
             .tempdir()
             .expect("Failed to create temporary path for the _rust_rocksdb_filter_factory_test.");
         let path = tempdir.path();
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
-        opts.set_compaction_filter_factory(TestFactory(CString::new("TestFactory").unwrap()));
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_compaction_filter_factory(TestFactory(CString::new("TestFactory").unwrap()));
         {
-            let db = DB::open(&opts, path).unwrap();
+            let db = DB::open_cf_with_opts(&opts, path, [("default", cf_opts)]).unwrap();
             let _r = db.put(b"k1", b"a");
             let _r = db.put(b"_rk", b"b");
             let _r = db.put(b"%k", b"c");

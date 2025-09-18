@@ -15,7 +15,9 @@
 mod util;
 
 use pretty_assertions::assert_eq;
-use rust_rocksdb::{merge_operator::MergeFn, DBCompactionStyle, MergeOperands, Options, DB};
+use rust_rocksdb::{
+    merge_operator::MergeFn, ColumnFamilyOptions, DBCompactionStyle, DBOptions, MergeOperands, DB,
+};
 use serde::{Deserialize, Serialize};
 use util::DBPath;
 
@@ -41,14 +43,15 @@ fn test_provided_merge(
 
 #[test]
 fn merge_test() {
-    use crate::{Options, DB};
+    use crate::{DBOptions, DB};
 
     let db_path = DBPath::new("_rust_rocksdb_merge_test");
-    let mut opts = Options::default();
-    opts.create_if_missing(true);
-    opts.set_merge_operator_associative("test operator", test_provided_merge);
+    let mut db_opts = DBOptions::default();
+    db_opts.create_if_missing(true);
+    let mut cf_opts = ColumnFamilyOptions::default();
+    cf_opts.set_merge_operator_associative("test operator", test_provided_merge);
 
-    let db = DB::open(&opts, &db_path).unwrap();
+    let db = DB::open_cf_with_opts(&db_opts, &db_path, [("default", cf_opts)]).unwrap();
     let p = db.put(b"k1", b"a");
     assert!(p.is_ok());
     let _ = db.merge(b"k1", b"b");
@@ -138,18 +141,19 @@ fn counting_merge_test() {
     use std::{sync::Arc, thread};
 
     let db_path = DBPath::new("_rust_rocksdb_partial_merge_test");
-    let mut opts = Options::default();
-    opts.create_if_missing(true);
-    opts.set_compaction_style(DBCompactionStyle::Universal);
-    opts.set_min_write_buffer_number_to_merge(10);
+    let mut db_opts = DBOptions::default();
+    db_opts.create_if_missing(true);
+    let mut cf_opts = ColumnFamilyOptions::default();
+    cf_opts.set_compaction_style(DBCompactionStyle::Universal);
+    cf_opts.set_min_write_buffer_number_to_merge(10);
 
-    opts.set_merge_operator(
+    cf_opts.set_merge_operator(
         "sort operator",
         test_counting_full_merge,
         test_counting_partial_merge,
     );
 
-    let db = Arc::new(DB::open(&opts, &db_path).unwrap());
+    let db = Arc::new(DB::open_cf_with_opts(&db_opts, &db_path, [("default", cf_opts)]).unwrap());
     let _ = db.delete(b"k1");
     let _ = db.delete(b"k2");
     let _ = db.merge(b"k1", b"a");
@@ -254,14 +258,16 @@ fn failed_merge_test() {
     ) -> Option<Vec<u8>> {
         None
     }
-    use crate::{Options, DB};
+    use crate::{DBOptions, DB};
 
     let db_path = DBPath::new("_rust_rocksdb_failed_merge_test");
-    let mut opts = Options::default();
-    opts.create_if_missing(true);
-    opts.set_merge_operator_associative("test operator", test_failing_merge);
+    let mut db_opts = DBOptions::default();
+    db_opts.create_if_missing(true);
+    let mut cf_opts = ColumnFamilyOptions::default();
+    cf_opts.set_merge_operator_associative("test operator", test_failing_merge);
 
-    let db = DB::open(&opts, &db_path).expect("open with a merge operator");
+    let db = DB::open_cf_with_opts(&db_opts, &db_path, [("default", cf_opts)])
+        .expect("open with a merge operator");
     db.put(b"key", b"value").expect("put_ok");
     let res = db.merge(b"key", b"new value");
     match res.and_then(|_e| db.get(b"key")) {
@@ -294,17 +300,18 @@ fn make_merge_max_with_limit(limit: u64) -> impl MergeFn + Clone {
 
 #[test]
 fn test_merge_state() {
-    use {Options, DB};
+    use {DBOptions, DB};
     let tempdir = tempfile::Builder::new()
         .prefix("_rust_rocksdb_merge_test_state")
         .tempdir()
         .expect("Failed to create temporary path for the _rust_rocksdb_merge_test_state.");
     let path = tempdir.path();
-    let mut opts = Options::default();
-    opts.create_if_missing(true);
-    opts.set_merge_operator_associative("max-limit-12", make_merge_max_with_limit(12));
+    let mut db_opts = DBOptions::default();
+    db_opts.create_if_missing(true);
+    let mut cf_opts = ColumnFamilyOptions::default();
+    cf_opts.set_merge_operator_associative("max-limit-12", make_merge_max_with_limit(12));
     {
-        let db = DB::open(&opts, path).unwrap();
+        let db = DB::open_cf_with_opts(&db_opts, path, [("default", cf_opts.clone())]).unwrap();
         let p = db.put(b"k1", 1u64.to_ne_bytes());
         assert!(p.is_ok());
         let _ = db.merge(b"k1", 7u64.to_ne_bytes());
@@ -323,11 +330,11 @@ fn test_merge_state() {
         assert!(db.delete(b"k1").is_ok());
         assert!(db.get(b"k1").unwrap().is_none());
     }
-    assert!(DB::destroy(&opts, path).is_ok());
+    assert!(DB::destroy(&db_opts, path).is_ok());
 
-    opts.set_merge_operator_associative("max-limit-128", make_merge_max_with_limit(128));
+    cf_opts.set_merge_operator_associative("max-limit-128", make_merge_max_with_limit(128));
     {
-        let db = DB::open(&opts, path).unwrap();
+        let db = DB::open_cf_with_opts(&db_opts, path, [("default", cf_opts)]).unwrap();
         let p = db.put(b"k1", 1u64.to_ne_bytes());
         assert!(p.is_ok());
         let _ = db.merge(b"k1", 7u64.to_ne_bytes());
@@ -346,5 +353,5 @@ fn test_merge_state() {
         assert!(db.delete(b"k1").is_ok());
         assert!(db.get(b"k1").unwrap().is_none());
     }
-    assert!(DB::destroy(&opts, path).is_ok());
+    assert!(DB::destroy(&db_opts, path).is_ok());
 }

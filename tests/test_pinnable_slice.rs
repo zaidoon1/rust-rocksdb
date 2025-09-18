@@ -16,14 +16,14 @@ mod util;
 
 use pretty_assertions::assert_eq;
 
-use rust_rocksdb::{Options, DB};
+use rust_rocksdb::{DBOptions, DB};
 use util::DBPath;
 
 #[test]
 fn test_pinnable_slice() {
     let path = DBPath::new("_rust_rocksdb_pinnable_slice_test");
 
-    let mut opts = Options::default();
+    let mut opts = DBOptions::default();
     opts.create_if_missing(true);
     let db = DB::open(&opts, &path).unwrap();
 
@@ -44,7 +44,7 @@ fn test_pinnable_slice() {
 fn test_snapshot_pinnable_slice() {
     let path = DBPath::new("_rust_rocksdb_snapshot_pinnable_slice_test");
 
-    let mut opts = Options::default();
+    let mut opts = DBOptions::default();
     opts.create_if_missing(true);
     let db = DB::open(&opts, &path).unwrap();
 

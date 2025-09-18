@@ -69,9 +69,8 @@ pub trait CompactionFilter {
 /// This function takes the level of compaction, the key, and the existing value
 /// and returns the decision about how to handle the Key-Value pair.
 ///
-///  See [Options::set_compaction_filter][set_compaction_filter] for more details
-///
-///  [set_compaction_filter]: ../struct.Options.html#method.set_compaction_filter
+///  Configure via `ColumnFamilyOptions::set_compaction_filter` when opening a DB with
+///  column family descriptors.
 pub trait CompactionFilterFn: FnMut(u32, &[u8], &[u8]) -> Decision {}
 impl<F> CompactionFilterFn for F where F: FnMut(u32, &[u8], &[u8]) -> Decision + Send + 'static {}
 
@@ -162,18 +161,19 @@ fn test_filter(level: u32, key: &[u8], value: &[u8]) -> Decision {
 
 #[test]
 fn compaction_filter_test() {
-    use crate::{Options, DB};
+    use crate::{ColumnFamilyOptions, DBOptions, DB};
 
     let tempdir = tempfile::Builder::new()
         .prefix("_rust_rocksdb_filter_test")
         .tempdir()
         .expect("Failed to create temporary path for the _rust_rocksdb_filter_test");
     let path = tempdir.path();
-    let mut opts = Options::default();
+    let mut opts = DBOptions::default();
     opts.create_if_missing(true);
-    opts.set_compaction_filter("test", test_filter);
+    let mut cf_opts = ColumnFamilyOptions::default();
+    cf_opts.set_compaction_filter("test", test_filter);
     {
-        let db = DB::open(&opts, path).unwrap();
+        let db = DB::open_cf_with_opts(&opts, path, [("default", cf_opts)]).unwrap();
         let _r = db.put(b"k1", b"a");
         let _r = db.put(b"_k", b"b");
         let _r = db.put(b"%k", b"c");

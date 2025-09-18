@@ -16,7 +16,7 @@ mod util;
 
 use pretty_assertions::assert_eq;
 
-use rust_rocksdb::{Direction, IteratorMode, MemtableFactory, Options, DB};
+use rust_rocksdb::{ColumnFamilyOptions, DBOptions, Direction, IteratorMode, MemtableFactory, DB};
 use util::{assert_iter, assert_iter_reversed, pair, DBPath};
 
 #[test]
@@ -122,11 +122,12 @@ fn test_prefix_iterator() {
 
         let prefix_extractor = rust_rocksdb::SliceTransform::create_fixed_prefix(3);
 
-        let mut opts = Options::default();
-        opts.create_if_missing(true);
-        opts.set_prefix_extractor(prefix_extractor);
+        let mut db_opts = DBOptions::default();
+        db_opts.create_if_missing(true);
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_prefix_extractor(prefix_extractor);
 
-        let db = DB::open(&opts, &n).unwrap();
+        let db = DB::open_cf_with_opts(&db_opts, &n, [("default", cf_opts)]).unwrap();
 
         assert!(db.put(A1, A1).is_ok());
         assert!(db.put(A2, A2).is_ok());
@@ -164,11 +165,12 @@ fn test_prefix_iterator_uses_full_prefix() {
 
         let prefix_extractor = rust_rocksdb::SliceTransform::create_fixed_prefix(1);
 
-        let mut opts = Options::default();
-        opts.create_if_missing(true);
-        opts.set_prefix_extractor(prefix_extractor);
+        let mut db_opts = DBOptions::default();
+        db_opts.create_if_missing(true);
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_prefix_extractor(prefix_extractor);
 
-        let db = DB::open(&opts, &path).unwrap();
+        let db = DB::open_cf_with_opts(&db_opts, &path, [("default", cf_opts)]).unwrap();
 
         for (key, value) in &data {
             assert!(db.put(key, *value).is_ok());
@@ -201,13 +203,14 @@ fn test_full_iterator() {
             branching_factor: 4,
         };
 
-        let mut opts = Options::default();
-        opts.create_if_missing(true);
-        opts.set_prefix_extractor(prefix_extractor);
-        opts.set_allow_concurrent_memtable_write(false);
-        opts.set_memtable_factory(factory);
+        let mut db_opts = DBOptions::default();
+        db_opts.create_if_missing(true);
+        db_opts.set_allow_concurrent_memtable_write(false);
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_prefix_extractor(prefix_extractor);
+        cf_opts.set_memtable_factory(factory);
 
-        let db = DB::open(&opts, &path).unwrap();
+        let db = DB::open_cf_with_opts(&db_opts, &path, [("default", cf_opts)]).unwrap();
 
         assert!(db.put(A1, A1).is_ok());
         assert!(db.put(A2, A2).is_ok());
@@ -236,7 +239,7 @@ fn custom_iter(db: &'_ DB) -> impl Iterator<Item = usize> + '_ {
 fn test_custom_iterator() {
     let path = DBPath::new("_rust_rocksdb_custom_iterator_test");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         let db = DB::open(&opts, &path).unwrap();
         let _data = custom_iter(&db).collect::<Vec<usize>>();

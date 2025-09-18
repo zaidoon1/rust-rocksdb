@@ -18,9 +18,9 @@ mod util;
 use pretty_assertions::assert_eq;
 
 use rust_rocksdb::{
-    CuckooTableOptions, DBAccess, Direction, Error, ErrorKind, IteratorMode, Options, ReadOptions,
-    SliceTransform, TransactionDB, TransactionDBOptions, TransactionOptions,
-    WriteBatchWithTransaction, WriteOptions, DB,
+    ColumnFamilyDescriptor, ColumnFamilyOptions, CuckooTableOptions, DBAccess, DBOptions,
+    Direction, Error, ErrorKind, IteratorMode, ReadOptions, SliceTransform, TransactionDB,
+    TransactionDBOptions, TransactionOptions, WriteBatchWithTransaction, WriteOptions, DB,
 };
 use util::DBPath;
 
@@ -45,7 +45,7 @@ fn open_default() {
 fn open_cf() {
     let path = DBPath::new("_rust_rocksdb_transaction_db_open_cf");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
         let db: TransactionDB = TransactionDB::open_cf(
@@ -168,7 +168,7 @@ fn multi_get_cf() {
     let path = DBPath::new("_rust_rocksdb_multi_get_cf");
 
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
         let db: TransactionDB = TransactionDB::open_cf(
@@ -215,7 +215,7 @@ fn multi_get_cf() {
 fn destroy_on_open() {
     let path = DBPath::new("_rust_rocksdb_transaction_db_destroy_on_open");
     let _db: TransactionDB = TransactionDB::open_default(&path).unwrap();
-    let opts = Options::default();
+    let opts = DBOptions::default();
     // The TransactionDB will still be open when we try to destroy it and the lock should fail.
     match DB::destroy(&opts, &path) {
         Err(s) => {
@@ -352,13 +352,20 @@ fn snapshot_test() {
 fn prefix_extract_and_iterate_test() {
     let path = DBPath::new("_rust_rocksdb_transaction_db_prefix_extract_and_iterate");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
-        opts.set_prefix_extractor(SliceTransform::create_fixed_prefix(2));
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_prefix_extractor(SliceTransform::create_fixed_prefix(2));
         let txn_db_opts = TransactionDBOptions::default();
 
-        let db: TransactionDB = TransactionDB::open(&opts, &txn_db_opts, &path).unwrap();
+        let db: TransactionDB = TransactionDB::open_cf_descriptors(
+            &opts,
+            &txn_db_opts,
+            &path,
+            [ColumnFamilyDescriptor::new("default", cf_opts)],
+        )
+        .unwrap();
         db.put(b"p1_k1", b"v1").unwrap();
         db.put(b"p2_k2", b"v2").unwrap();
         db.put(b"p1_k3", b"v3").unwrap();
@@ -384,7 +391,7 @@ fn cuckoo() {
     let path = DBPath::new("_rust_rocksdb_transaction_db_cuckoo");
 
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         let txn_db_opts = TransactionDBOptions::default();
         let mut factory_opts = CuckooTableOptions::default();
         factory_opts.set_hash_ratio(0.8);
@@ -393,10 +400,18 @@ fn cuckoo() {
         factory_opts.set_identity_as_first_hash(true);
         factory_opts.set_use_module_hash(false);
 
-        opts.set_cuckoo_table_factory(&factory_opts);
         opts.create_if_missing(true);
 
-        let db: TransactionDB = TransactionDB::open(&opts, &txn_db_opts, &path).unwrap();
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_cuckoo_table_factory(&factory_opts);
+
+        let db: TransactionDB = TransactionDB::open_cf_descriptors(
+            &opts,
+            &txn_db_opts,
+            &path,
+            [ColumnFamilyDescriptor::new("default", cf_opts)],
+        )
+        .unwrap();
         db.put(b"k1", b"v1").unwrap();
         db.put(b"k2", b"v2").unwrap();
         let r: Result<Option<Vec<u8>>, Error> = db.get(b"k1");
@@ -414,7 +429,7 @@ fn cuckoo() {
 fn transaction() {
     let path = DBPath::new("_rust_rocksdb_transaction_db_transaction");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         let mut txn_db_opts = TransactionDBOptions::default();
         txn_db_opts.set_txn_lock_timeout(10);
@@ -539,7 +554,7 @@ fn transaction_rollback() {
 fn transaction_cf() {
     let path = DBPath::new("_rust_rocksdb_transaction_db_transaction_cf");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
         let db: TransactionDB = TransactionDB::open_cf(
@@ -625,7 +640,7 @@ fn two_phase_commit() {
         assert_eq!(err.kind(), ErrorKind::InvalidArgument);
     }
 
-    DB::destroy(&Options::default(), &path).unwrap();
+    DB::destroy(&DBOptions::default(), &path).unwrap();
 
     {
         let db: TransactionDB = TransactionDB::open_default(&path).unwrap();

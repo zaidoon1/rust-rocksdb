@@ -16,7 +16,10 @@ mod util;
 
 use pretty_assertions::assert_eq;
 
-use rust_rocksdb::{perf, Options, TransactionDB, TransactionDBOptions};
+use rust_rocksdb::{
+    perf, ColumnFamilyDescriptor, ColumnFamilyOptions, DBOptions, TransactionDB,
+    TransactionDBOptions,
+};
 use util::DBPath;
 
 #[cfg(not(feature = "multi-threaded-cf"))]
@@ -28,19 +31,25 @@ type DefaultThreadMode = rust_rocksdb::MultiThreaded;
 fn test_transaction_db_memory_usage() {
     let path = DBPath::new("_rust_rocksdb_transaction_db_memory_usage_test");
     {
-        let mut options = Options::default();
+        let mut options = DBOptions::default();
         options.create_if_missing(true);
         options.enable_statistics();
 
-        // setup cache:
+        // setup cache & CF table factory:
         let cache = rust_rocksdb::Cache::new_lru_cache(1 << 20); // 1 MB cache
         let mut block_based_options = rust_rocksdb::BlockBasedOptions::default();
         block_based_options.set_block_cache(&cache);
-        options.set_block_based_table_factory(&block_based_options);
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_block_based_table_factory(&block_based_options);
 
         let tx_db_options = TransactionDBOptions::default();
-        let db: TransactionDB<DefaultThreadMode> =
-            TransactionDB::open(&options, &tx_db_options, &path).unwrap();
+        let db: TransactionDB<DefaultThreadMode> = TransactionDB::open_cf_descriptors(
+            &options,
+            &tx_db_options,
+            &path,
+            [ColumnFamilyDescriptor::new("default", cf_opts)],
+        )
+        .unwrap();
 
         let mut builder = perf::MemoryUsageBuilder::new().unwrap();
         builder.add_tx_db(&db);

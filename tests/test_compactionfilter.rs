@@ -16,7 +16,7 @@ mod util;
 
 use pretty_assertions::assert_eq;
 
-use rust_rocksdb::{CompactionDecision, Options, DB};
+use rust_rocksdb::{ColumnFamilyOptions, CompactionDecision, DBOptions, DB};
 use util::DBPath;
 
 #[cfg(test)]
@@ -33,11 +33,12 @@ fn test_filter(level: u32, key: &[u8], value: &[u8]) -> CompactionDecision {
 #[test]
 fn compaction_filter_test() {
     let path = DBPath::new("_rust_rocksdb_filter_test");
-    let mut opts = Options::default();
+    let mut opts = DBOptions::default();
     opts.create_if_missing(true);
-    opts.set_compaction_filter("test", test_filter);
+    let mut cf_opts = ColumnFamilyOptions::default();
+    cf_opts.set_compaction_filter("test", test_filter);
     {
-        let db = DB::open(&opts, &path).unwrap();
+        let db = DB::open_cf_with_opts(&opts, &path, [("default", cf_opts)]).unwrap();
         let _ = db.put(b"k1", b"a");
         let _ = db.put(b"_k", b"b");
         let _ = db.put(b"%k", b"c");

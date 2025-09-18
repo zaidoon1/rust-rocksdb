@@ -25,7 +25,7 @@ pub type Snapshot<'a> = SnapshotWithThreadMode<'a, DB>;
 /// # Examples
 ///
 /// ```
-/// use rust_rocksdb::{DB, IteratorMode, Options};
+/// use rust_rocksdb::{DB, IteratorMode, DBOptions};
 ///
 /// let tempdir = tempfile::Builder::new()
 ///     .prefix("_path_for_rocksdb_storage3")
@@ -37,7 +37,7 @@ pub type Snapshot<'a> = SnapshotWithThreadMode<'a, DB>;
 ///     let snapshot = db.snapshot(); // Creates a longer-term snapshot of the DB, but closed when goes out of scope
 ///     let mut iter = snapshot.iterator(IteratorMode::Start); // Make as many iterators as you'd like from one snapshot
 /// }
-/// let _ = DB::destroy(&Options::default(), path);
+/// let _ = DB::destroy(&DBOptions::default(), path);
 /// ```
 ///
 pub struct SnapshotWithThreadMode<'a, D: DBAccess> {

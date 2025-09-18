@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use rust_rocksdb::{DBAccess, DBRawIteratorWithThreadMode, Error, Options, DB};
+use rust_rocksdb::{DBAccess, DBOptions, DBRawIteratorWithThreadMode, Error, DB};
 
 /// Temporary database path which calls DB::Destroy when DBPath is dropped.
 pub struct DBPath {
@@ -29,7 +29,7 @@ impl DBPath {
 
 impl Drop for DBPath {
     fn drop(&mut self) {
-        let opts = Options::default();
+        let opts = DBOptions::default();
         DB::destroy(&opts, &self.path).expect("Failed to destroy temporary DB");
     }
 }

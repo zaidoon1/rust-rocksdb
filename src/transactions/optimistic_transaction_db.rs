@@ -19,12 +19,14 @@ use libc::{c_char, c_int, size_t};
 
 use crate::column_family::ColumnFamilyTtl;
 use crate::{
+    cf_options::ColumnFamilyOptions,
     db::{DBCommon, DBInner},
+    db_options::DBOptions,
     ffi,
     ffi_util::to_cpath,
     write_batch::WriteBatchWithTransaction,
-    AsColumnFamilyRef, ColumnFamilyDescriptor, Error, OptimisticTransactionOptions, Options,
-    ThreadMode, Transaction, WriteOptions, DEFAULT_COLUMN_FAMILY_NAME,
+    AsColumnFamilyRef, ColumnFamilyDescriptor, Error, OptimisticTransactionOptions, ThreadMode,
+    Transaction, WriteOptions, DEFAULT_COLUMN_FAMILY_NAME,
 };
 
 /// A type alias to RocksDB Optimistic Transaction DB.
@@ -41,7 +43,7 @@ use crate::{
 /// # Examples
 ///
 /// ```
-/// use rust_rocksdb::{DB, Options, OptimisticTransactionDB, SingleThreaded};
+/// use rust_rocksdb::{DB, DBOptions, OptimisticTransactionDB, SingleThreaded};
 /// let tempdir = tempfile::Builder::new()
 ///     .prefix("_path_for_optimistic_transaction_db")
 ///     .tempdir()
@@ -57,7 +59,7 @@ use crate::{
 ///     txn.put(b"key3", b"value3");
 ///     txn.commit().unwrap();
 /// }
-/// let _ = DB::destroy(&Options::default(), path);
+/// let _ = DB::destroy(&DBOptions::default(), path);
 /// ```
 ///
 /// [`SingleThreaded`]: crate::SingleThreaded
@@ -92,23 +94,23 @@ impl Drop for OptimisticTransactionDBInner {
 impl<T: ThreadMode> OptimisticTransactionDB<T> {
     /// Opens a database with default options.
     pub fn open_default<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         Self::open(&opts, path)
     }
 
     /// Opens the database with the specified options.
-    pub fn open<P: AsRef<Path>>(opts: &Options, path: P) -> Result<Self, Error> {
+    pub fn open<P: AsRef<Path>>(opts: &DBOptions, path: P) -> Result<Self, Error> {
         Self::open_cf(opts, path, None::<&str>)
     }
 
     /// Opens a database with the given database options and column family names.
     ///
-    /// Column families opened using this function will be created with default `Options`.
-    /// *NOTE*: `default` column family will be opened with the `Options::default()`.
+    /// Column families opened using this function will be created with default `ColumnFamilyOptions`.
+    /// *NOTE*: `default` column family will be opened with the `ColumnFamilyOptions::default()`.
     /// If you want to open `default` column family with custom options, use `open_cf_descriptors` and
     /// provide a `ColumnFamilyDescriptor` with the desired options.
-    pub fn open_cf<P, I, N>(opts: &Options, path: P, cfs: I) -> Result<Self, Error>
+    pub fn open_cf<P, I, N>(opts: &DBOptions, path: P, cfs: I) -> Result<Self, Error>
     where
         P: AsRef<Path>,
         I: IntoIterator<Item = N>,
@@ -116,13 +118,13 @@ impl<T: ThreadMode> OptimisticTransactionDB<T> {
     {
         let cfs = cfs
             .into_iter()
-            .map(|name| ColumnFamilyDescriptor::new(name.as_ref(), Options::default()));
+            .map(|name| ColumnFamilyDescriptor::new(name.as_ref(), ColumnFamilyOptions::default()));
 
         Self::open_cf_descriptors_internal(opts, path, cfs)
     }
 
     /// Opens a database with the given database options and column family descriptors.
-    pub fn open_cf_descriptors<P, I>(opts: &Options, path: P, cfs: I) -> Result<Self, Error>
+    pub fn open_cf_descriptors<P, I>(opts: &DBOptions, path: P, cfs: I) -> Result<Self, Error>
     where
         P: AsRef<Path>,
         I: IntoIterator<Item = ColumnFamilyDescriptor>,
@@ -131,7 +133,7 @@ impl<T: ThreadMode> OptimisticTransactionDB<T> {
     }
 
     /// Internal implementation for opening RocksDB.
-    fn open_cf_descriptors_internal<P, I>(opts: &Options, path: P, cfs: I) -> Result<Self, Error>
+    fn open_cf_descriptors_internal<P, I>(opts: &DBOptions, path: P, cfs: I) -> Result<Self, Error>
     where
         P: AsRef<Path>,
         I: IntoIterator<Item = ColumnFamilyDescriptor>,
@@ -160,7 +162,7 @@ impl<T: ThreadMode> OptimisticTransactionDB<T> {
             if !cfs_v.iter().any(|cf| cf.name == DEFAULT_COLUMN_FAMILY_NAME) {
                 cfs_v.push(ColumnFamilyDescriptor {
                     name: String::from(DEFAULT_COLUMN_FAMILY_NAME),
-                    options: Options::default(),
+                    options: ColumnFamilyOptions::default(),
                     ttl: ColumnFamilyTtl::SameAsDb,
                 });
             }
@@ -218,7 +220,7 @@ impl<T: ThreadMode> OptimisticTransactionDB<T> {
     }
 
     fn open_raw(
-        opts: &Options,
+        opts: &DBOptions,
         cpath: &CString,
     ) -> Result<*mut ffi::rocksdb_optimistictransactiondb_t, Error> {
         unsafe {
@@ -231,7 +233,7 @@ impl<T: ThreadMode> OptimisticTransactionDB<T> {
     }
 
     fn open_cf_raw(
-        opts: &Options,
+        opts: &DBOptions,
         cpath: &CString,
         cfs_v: &[ColumnFamilyDescriptor],
         cfnames: &[*const c_char],

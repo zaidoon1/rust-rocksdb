@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{db::MultiThreaded, ffi, Options};
+use crate::{cf_options::ColumnFamilyOptions, db::MultiThreaded, ffi};
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -28,7 +28,7 @@ pub const DEFAULT_COLUMN_FAMILY_NAME: &str = "default";
 /// A description of the column family, containing the name and `Options`.
 pub struct ColumnFamilyDescriptor {
     pub(crate) name: String,
-    pub(crate) options: Options,
+    pub(crate) options: ColumnFamilyOptions,
     pub(crate) ttl: ColumnFamilyTtl,
 }
 
@@ -36,7 +36,7 @@ impl ColumnFamilyDescriptor {
     /// Create a new column family descriptor with the specified name and options.
     /// *WARNING*:
     /// Will use [`ColumnFamilyTtl::SameAsDb`] as ttl.
-    pub fn new<S>(name: S, options: Options) -> Self
+    pub fn new<S>(name: S, options: ColumnFamilyOptions) -> Self
     where
         S: Into<String>,
     {
@@ -50,7 +50,7 @@ impl ColumnFamilyDescriptor {
     /// Create a new column family descriptor with the specified name, options, and ttl.
     /// *WARNING*:
     /// The ttl is applied only when DB is opened with [`crate::db::DB::open_with_ttl()`].
-    pub fn new_with_ttl<S>(name: S, options: Options, ttl: ColumnFamilyTtl) -> Self
+    pub fn new_with_ttl<S>(name: S, options: ColumnFamilyOptions, ttl: ColumnFamilyTtl) -> Self
     where
         S: Into<String>,
     {

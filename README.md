@@ -37,12 +37,12 @@ rust-rocksdb = "0.43"
 ### Basic Example
 
 ```rust
-use rust_rocksdb::{DB, Options};
+use rust_rocksdb::{DB, DBOptions};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Open database
     let path = "./my_db";
-    let mut opts = Options::default();
+    let mut opts = DBOptions::default();
     opts.create_if_missing(true);
     let db = DB::open(&opts, path)?;
 
@@ -67,9 +67,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Working with Iterators
 
 ```rust
-use rust_rocksdb::{DB, Options, IteratorMode};
+use rust_rocksdb::{DB, DBOptions, IteratorMode};
 
-let db = DB::open(&Options::default(), path)?;
+let db = DB::open(&DBOptions::default(), path)?;
 
 // Insert some data
 db.put(b"key1", b"value1")?;
@@ -98,13 +98,13 @@ for (key, value) in iter {
 ### Using Column Families
 
 ```rust
-use rust_rocksdb::{DB, Options, ColumnFamilyDescriptor};
+use rust_rocksdb::{DB, DBOptions, ColumnFamilyOptions, ColumnFamilyDescriptor};
 
-let mut opts = Options::default();
+let mut opts = DBOptions::default();
 opts.create_if_missing(true);
 
 // Define column families
-let cf_opts = Options::default();
+let cf_opts = ColumnFamilyOptions::default();
 let cf_descriptors = vec![
     ColumnFamilyDescriptor::new("users", cf_opts.clone()),
     ColumnFamilyDescriptor::new("posts", cf_opts),
@@ -127,9 +127,9 @@ let user = db.get_cf(&users_cf, b"user:1")?;
 ### Using Transactions
 
 ```rust
-use rust_rocksdb::{TransactionDB, TransactionDBOptions, TransactionOptions, Options, WriteOptions};
+use rust_rocksdb::{TransactionDB, TransactionDBOptions, TransactionOptions, DBOptions, WriteOptions};
 
-let mut opts = Options::default();
+let mut opts = DBOptions::default();
 opts.create_if_missing(true);
 
 let txn_db_opts = TransactionDBOptions::default();

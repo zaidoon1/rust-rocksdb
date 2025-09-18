@@ -229,13 +229,13 @@ pub fn get_memory_usage_stats(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Options, DB};
+    use crate::{DBOptions, DB};
     use tempfile::TempDir;
 
     #[test]
     fn test_perf_context_with_db_operations() {
         let temp_dir = TempDir::new().unwrap();
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         let db = DB::open(&opts, temp_dir.path()).unwrap();
 

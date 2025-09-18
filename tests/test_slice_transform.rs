@@ -16,7 +16,7 @@ mod util;
 
 use pretty_assertions::assert_eq;
 
-use rust_rocksdb::{Options, SliceTransform, DB};
+use rust_rocksdb::{ColumnFamilyOptions, DBOptions, SliceTransform, DB};
 use util::{assert_iter, pair, DBPath};
 
 #[test]
@@ -34,11 +34,12 @@ pub fn test_slice_transform() {
 
         let prefix_extractor = SliceTransform::create("first_three", first_three, None);
 
-        let mut opts = Options::default();
-        opts.create_if_missing(true);
-        opts.set_prefix_extractor(prefix_extractor);
+        let mut db_opts = DBOptions::default();
+        db_opts.create_if_missing(true);
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_prefix_extractor(prefix_extractor);
 
-        let db = DB::open(&opts, &db_path).unwrap();
+        let db = DB::open_cf_with_opts(&db_opts, &db_path, [("default", cf_opts)]).unwrap();
 
         assert!(db.put(A1, A1).is_ok());
         assert!(db.put(A2, A2).is_ok());
@@ -62,16 +63,17 @@ fn test_no_in_domain() {
 
     let db_path = DBPath::new("_rust_rocksdb_prefix_test");
     {
-        let mut opts = Options::default();
-        opts.create_if_missing(true);
-        opts.set_prefix_extractor(SliceTransform::create(
+        let mut db_opts = DBOptions::default();
+        db_opts.create_if_missing(true);
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_prefix_extractor(SliceTransform::create(
             "test slice transform",
             extract_suffix,
             None,
         ));
-        opts.set_memtable_prefix_bloom_ratio(0.1);
+        cf_opts.set_memtable_prefix_bloom_ratio(0.1);
 
-        let db = DB::open(&opts, &db_path).unwrap();
+        let db = DB::open_cf_with_opts(&db_opts, &db_path, [("default", cf_opts)]).unwrap();
         db.put(b"key_sfx1", b"a").unwrap();
         db.put(b"key_sfx2", b"b").unwrap();
 

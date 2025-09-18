@@ -1,6 +1,6 @@
 mod util;
 
-use rust_rocksdb::{CompactOptions, Options, ReadOptions, DB};
+use rust_rocksdb::{ColumnFamilyOptions, CompactOptions, DBOptions, ReadOptions, DB};
 use std::cmp::Ordering;
 use std::iter::FromIterator;
 use util::{U64Comparator, U64Timestamp};
@@ -22,12 +22,13 @@ pub fn write_to_db_with_comparator(compare_fn: Box<CompareFn>) -> Vec<String> {
         .expect("Failed to create temporary path for the _path_for_rocksdb_storage");
     let path = tempdir.path();
     {
-        let mut db_opts = Options::default();
+        let mut db_opts = DBOptions::default();
 
         db_opts.create_missing_column_families(true);
         db_opts.create_if_missing(true);
-        db_opts.set_comparator("cname", compare_fn);
-        let db = DB::open(&db_opts, path).unwrap();
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_comparator("cname", compare_fn);
+        let db = DB::open_cf_with_opts(&db_opts, path, [("default", cf_opts)]).unwrap();
         db.put(b"a-key", b"a-value").unwrap();
         db.put(b"b-key", b"b-value").unwrap();
         let mut iter = db.raw_iterator();
@@ -40,7 +41,7 @@ pub fn write_to_db_with_comparator(compare_fn: Box<CompareFn>) -> Vec<String> {
             iter.next();
         }
     }
-    let _ = DB::destroy(&Options::default(), path);
+    let _ = DB::destroy(&DBOptions::default(), path);
     result_vec
 }
 
@@ -80,20 +81,21 @@ fn test_comparator_with_ts() {
         .tempdir()
         .expect("Failed to create temporary path for the _path_for_rocksdb_storage_with_ts.");
     let path = tempdir.path();
-    let _ = DB::destroy(&Options::default(), path);
+    let _ = DB::destroy(&DBOptions::default(), path);
 
     {
-        let mut db_opts = Options::default();
+        let mut db_opts = DBOptions::default();
         db_opts.create_missing_column_families(true);
         db_opts.create_if_missing(true);
-        db_opts.set_comparator_with_ts(
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_comparator_with_ts(
             U64Comparator::NAME,
             U64Timestamp::SIZE,
             Box::new(U64Comparator::compare),
             Box::new(U64Comparator::compare_ts),
             Box::new(U64Comparator::compare_without_ts),
         );
-        let db = DB::open(&db_opts, path).unwrap();
+        let db = DB::open_cf_with_opts(&db_opts, path, [("default", cf_opts)]).unwrap();
 
         let key = b"hello";
         let val1 = b"world0";
@@ -162,7 +164,7 @@ fn test_comparator_with_ts() {
         assert!(db.get_opt(key, &opts).is_err());
     }
 
-    let _ = DB::destroy(&Options::default(), path);
+    let _ = DB::destroy(&DBOptions::default(), path);
 }
 
 #[test]
@@ -172,14 +174,14 @@ fn test_comparator_with_column_family_with_ts() {
         .tempdir()
         .expect("Failed to create temporary path for the _path_for_rocksdb_storage_with_column_family_with_ts.");
     let path = tempdir.path();
-    let _ = DB::destroy(&Options::default(), path);
+    let _ = DB::destroy(&DBOptions::default(), path);
 
     {
-        let mut db_opts = Options::default();
+        let mut db_opts = DBOptions::default();
         db_opts.create_missing_column_families(true);
         db_opts.create_if_missing(true);
 
-        let mut cf_opts = Options::default();
+        let mut cf_opts = ColumnFamilyOptions::default();
         cf_opts.set_comparator_with_ts(
             U64Comparator::NAME,
             U64Timestamp::SIZE,
@@ -265,5 +267,5 @@ fn test_comparator_with_column_family_with_ts() {
         assert!(db.get_cf_opt(&cf, key, &opts).is_err());
     }
 
-    let _ = DB::destroy(&Options::default(), path);
+    let _ = DB::destroy(&DBOptions::default(), path);
 }

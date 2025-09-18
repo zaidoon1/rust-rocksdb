@@ -17,7 +17,8 @@ mod util;
 use pretty_assertions::assert_eq;
 
 use rust_rocksdb::{
-    ColumnFamilyDescriptor, MergeOperands, Options, DB, DEFAULT_COLUMN_FAMILY_NAME,
+    ColumnFamilyDescriptor, ColumnFamilyOptions, DBOptions, MergeOperands, DB,
+    DEFAULT_COLUMN_FAMILY_NAME,
 };
 use rust_rocksdb::{TransactionDB, TransactionDBOptions};
 use util::DBPath;
@@ -52,14 +53,15 @@ fn test_column_family() {
 
     // should be able to create column families
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
-        opts.set_merge_operator_associative("test operator", test_provided_merge);
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_merge_operator_associative("test operator", test_provided_merge);
         #[cfg(feature = "multi-threaded-cf")]
-        let db = DB::open(&opts, &n).unwrap();
+        let db = DB::open_cf_with_opts(&opts, &n, [("default", cf_opts.clone())]).unwrap();
         #[cfg(not(feature = "multi-threaded-cf"))]
-        let mut db = DB::open(&opts, &n).unwrap();
-        let opts = Options::default();
+        let mut db = DB::open_cf_with_opts(&opts, &n, [("default", cf_opts)]).unwrap();
+        let opts = ColumnFamilyOptions::default();
         match db.create_cf("cf1", &opts) {
             Ok(()) => println!("cf1 created successfully"),
             Err(e) => {
@@ -70,8 +72,7 @@ fn test_column_family() {
 
     // should fail to open db without specifying same column families
     {
-        let mut opts = Options::default();
-        opts.set_merge_operator_associative("test operator", test_provided_merge);
+        let opts = DBOptions::default();
         match DB::open(&opts, &n) {
             Ok(_db) => panic!(
                 "should not have opened DB successfully without \
@@ -84,8 +85,7 @@ fn test_column_family() {
 
     // should properly open db when specifying all column families
     {
-        let mut opts = Options::default();
-        opts.set_merge_operator_associative("test operator", test_provided_merge);
+        let opts = DBOptions::default();
         match DB::open_cf(&opts, &n, ["cf1"]) {
             Ok(_db) => println!("successfully opened db with column family"),
             Err(e) => panic!("failed to open db with column family: {e}"),
@@ -94,7 +94,7 @@ fn test_column_family() {
 
     // should be able to list a cf
     {
-        let opts = Options::default();
+        let opts = DBOptions::default();
         let vec = DB::list_cf(&opts, &n);
         match vec {
             Ok(vec) => assert_eq!(vec, vec![DEFAULT_COLUMN_FAMILY_NAME, "cf1"]),
@@ -109,9 +109,9 @@ fn test_column_family() {
     // should be able to drop a cf
     {
         #[cfg(feature = "multi-threaded-cf")]
-        let db = DB::open_cf(&Options::default(), &n, ["cf1"]).unwrap();
+        let db = DB::open_cf(&DBOptions::default(), &n, ["cf1"]).unwrap();
         #[cfg(not(feature = "multi-threaded-cf"))]
-        let mut db = DB::open_cf(&Options::default(), &n, ["cf1"]).unwrap();
+        let mut db = DB::open_cf(&DBOptions::default(), &n, ["cf1"]).unwrap();
 
         match db.drop_cf("cf1") {
             Ok(_) => println!("cf1 successfully dropped."),
@@ -126,14 +126,13 @@ fn test_column_family_with_transactiondb() {
 
     // should be able to create column families
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
-        opts.set_merge_operator_associative("test operator", test_provided_merge);
         #[cfg(feature = "multi-threaded-cf")]
         let db = TransactionDB::open(&opts, &TransactionDBOptions::default(), &n).unwrap();
         #[cfg(not(feature = "multi-threaded-cf"))]
         let db = TransactionDB::open(&opts, &TransactionDBOptions::default(), &n).unwrap();
-        let opts = Options::default();
+        let opts = ColumnFamilyOptions::default();
         match db.create_cf("cf1", &opts) {
             Ok(()) => println!("cf1 created successfully"),
             Err(e) => {
@@ -144,8 +143,7 @@ fn test_column_family_with_transactiondb() {
 
     // should fail to open db without specifying same column families
     {
-        let mut opts = Options::default();
-        opts.set_merge_operator_associative("test operator", test_provided_merge);
+        let opts = DBOptions::default();
         #[cfg(feature = "multi-threaded-cf")]
         let db = TransactionDB::<MultiThreaded>::open(&opts, &TransactionDBOptions::default(), &n);
         #[cfg(not(feature = "multi-threaded-cf"))]
@@ -162,8 +160,7 @@ fn test_column_family_with_transactiondb() {
 
     // should properly open db when specifying all column families
     {
-        let mut opts = Options::default();
-        opts.set_merge_operator_associative("test operator", test_provided_merge);
+        let opts = DBOptions::default();
         let cfs = &["cf1"];
         #[cfg(feature = "multi-threaded-cf")]
         let db = TransactionDB::<MultiThreaded>::open_cf(
@@ -187,7 +184,7 @@ fn test_column_family_with_transactiondb() {
 
     // should be able to list a cf
     {
-        let opts = Options::default();
+        let opts = DBOptions::default();
         let vec = DB::list_cf(&opts, &n);
         match vec {
             Ok(vec) => assert_eq!(vec, vec![DEFAULT_COLUMN_FAMILY_NAME, "cf1"]),
@@ -197,7 +194,7 @@ fn test_column_family_with_transactiondb() {
 
     // should be able to drop a cf
     {
-        let opts = Options::default();
+        let opts = DBOptions::default();
         let cfs = &["cf1"];
         #[cfg(feature = "multi-threaded-cf")]
         let db = TransactionDB::<MultiThreaded>::open_cf(
@@ -222,7 +219,7 @@ fn test_column_family_with_transactiondb() {
     }
     // should not be able to open cf after dropping.
     {
-        let opts = Options::default();
+        let opts = DBOptions::default();
         let cfs = &["cf1"];
         #[cfg(feature = "multi-threaded-cf")]
         let db = TransactionDB::<MultiThreaded>::open_cf(
@@ -249,19 +246,19 @@ fn test_can_open_db_with_results_of_list_cf() {
     let n = DBPath::new("_rust_rocksdb_cftest_with_list_cf");
 
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         #[cfg(feature = "multi-threaded-cf")]
         let db = DB::open(&opts, &n).unwrap();
         #[cfg(not(feature = "multi-threaded-cf"))]
         let mut db = DB::open(&opts, &n).unwrap();
-        let opts = Options::default();
+        let opts = ColumnFamilyOptions::default();
 
         assert!(db.create_cf("cf1", &opts).is_ok());
     }
 
     {
-        let options = Options::default();
+        let options = DBOptions::default();
         let cfs = DB::list_cf(&options, &n).unwrap();
         let db = DB::open_cf(&options, &n, cfs).unwrap();
 
@@ -275,7 +272,7 @@ fn test_create_missing_column_family() {
 
     // should be able to create new column families when opening a new database
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
 
@@ -291,15 +288,15 @@ fn test_open_column_family_with_opts() {
     let n = DBPath::new("_rust_rocksdb_open_cf_with_opts");
 
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
 
         // We can use different parameters for different column family.
-        let mut cf1_opts = Options::default();
+        let mut cf1_opts = ColumnFamilyOptions::default();
         cf1_opts.set_min_write_buffer_number(2);
         cf1_opts.set_min_write_buffer_number_to_merge(4);
-        let mut cf2_opts = Options::default();
+        let mut cf2_opts = ColumnFamilyOptions::default();
         cf2_opts.set_min_write_buffer_number(5);
         cf2_opts.set_min_write_buffer_number_to_merge(10);
 
@@ -317,9 +314,14 @@ fn test_merge_operator() {
     let n = DBPath::new("_rust_rocksdb_cftest_merge");
     // TODO should be able to write, read, merge, batch, and iterate over a cf
     {
-        let mut opts = Options::default();
-        opts.set_merge_operator_associative("test operator", test_provided_merge);
-        let db = match DB::open_cf(&opts, &n, ["cf1"]) {
+        let opts = DBOptions::default();
+        let mut cf1_opts = ColumnFamilyOptions::default();
+        cf1_opts.set_merge_operator_associative("test operator", test_provided_merge);
+        let db = match DB::open_cf_descriptors(
+            &opts,
+            &n,
+            [ColumnFamilyDescriptor::new("cf1", cf1_opts)],
+        ) {
             Ok(db) => {
                 println!("successfully opened db with column family");
                 db
@@ -378,11 +380,11 @@ fn test_provided_merge(
 fn test_column_family_with_options() {
     let n = DBPath::new("_rust_rocksdb_cf_with_optionstest");
     {
-        let mut cfopts = Options::default();
+        let mut cfopts = ColumnFamilyOptions::default();
         cfopts.set_max_write_buffer_number(16);
         let cf_descriptor = ColumnFamilyDescriptor::new("cf1", cfopts);
 
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
 
@@ -396,11 +398,10 @@ fn test_column_family_with_options() {
     }
 
     {
-        let mut cfopts = Options::default();
+        let mut cfopts = ColumnFamilyOptions::default();
         cfopts.set_max_write_buffer_number(16);
         let cf_descriptor = ColumnFamilyDescriptor::new("cf1", cfopts);
-
-        let opts = Options::default();
+        let opts = DBOptions::default();
         let cfs = vec![cf_descriptor];
 
         match DB::open_cf_descriptors(&opts, &n, cfs) {
@@ -416,16 +417,18 @@ fn test_column_family_with_options() {
 fn test_create_duplicate_column_family() {
     let n = DBPath::new("_rust_rocksdb_create_duplicate_column_family");
     {
-        let mut opts = Options::default();
-        opts.create_if_missing(true);
-        opts.create_missing_column_families(true);
+        let mut db_opts = DBOptions::default();
+        db_opts.create_if_missing(true);
+        db_opts.create_missing_column_families(true);
 
         #[cfg(feature = "multi-threaded-cf")]
-        let db = DB::open_cf(&opts, &n, ["cf1"]).unwrap();
+        let db = DB::open(&db_opts, &n).unwrap();
         #[cfg(not(feature = "multi-threaded-cf"))]
-        let mut db = DB::open_cf(&opts, &n, ["cf1"]).unwrap();
+        let mut db = DB::open(&db_opts, &n).unwrap();
 
-        assert!(db.create_cf("cf1", &opts).is_err());
+        let cf_opts = ColumnFamilyOptions::default();
+        db.create_cf("cf1", &cf_opts).unwrap();
+        assert!(db.create_cf("cf1", &cf_opts).is_err());
     }
 }
 
@@ -433,7 +436,7 @@ fn test_create_duplicate_column_family() {
 fn test_no_leaked_column_family() {
     let n = DBPath::new("_rust_rocksdb_no_leaked_column_family");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
 
@@ -455,7 +458,8 @@ fn test_no_leaked_column_family() {
         // possible leak via large dir.
         for cf_index in 0..20 {
             let cf_name = format!("cf{cf_index}");
-            db.create_cf(&cf_name, &Options::default()).unwrap();
+            db.create_cf(&cf_name, &ColumnFamilyOptions::default())
+                .unwrap();
             let cf = db.cf_handle(&cf_name).unwrap();
 
             let mut batch = rust_rocksdb::WriteBatch::default();

@@ -1,6 +1,6 @@
 mod util;
 
-use rust_rocksdb::{event_listener::*, FlushOptions, Options, DB};
+use rust_rocksdb::{event_listener::*, ColumnFamilyOptions, DBOptions, FlushOptions, DB};
 use std::io::Write;
 use std::path::Path;
 use std::sync::atomic::*;
@@ -125,11 +125,11 @@ impl EventListener for BackgroundErrorCounter {
 fn test_event_listener_stall_conditions_changed() {
     let path = DBPath::new("_rust_rocksdb_event_listener_stall_conditions");
 
-    let mut opts = Options::default();
+    let mut opts = DBOptions::default();
     let counter = StallEventCounter::default();
     opts.add_event_listener(counter.clone());
     opts.create_if_missing(true);
-    let mut cf_opts = Options::default();
+    let mut cf_opts = ColumnFamilyOptions::default();
     cf_opts.set_level_zero_slowdown_writes_trigger(1);
     cf_opts.set_level_zero_stop_writes_trigger(1);
     cf_opts.set_level_zero_file_num_compaction_trigger(1);
@@ -171,7 +171,7 @@ fn test_event_listener_stall_conditions_changed() {
 fn test_event_listener_basic() {
     let path = DBPath::new("_rust_rocksdb_event_listener_flush");
 
-    let mut opts = Options::default();
+    let mut opts = DBOptions::default();
     let counter = EventCounter::default();
     opts.add_event_listener(counter.clone());
     opts.create_if_missing(true);
@@ -213,7 +213,7 @@ fn test_event_listener_basic() {
 fn test_event_listener_background_error() {
     let path = DBPath::new("_rust_rocksdb_event_listener_background_error");
 
-    let mut opts = Options::default();
+    let mut opts = DBOptions::default();
     let counter = BackgroundErrorCounter::default();
     opts.add_event_listener(counter.clone());
     opts.create_if_missing(true);
@@ -242,7 +242,7 @@ impl EventListener for BackgroundErrorCleaner {
 fn test_event_listener_status_reset() {
     let path = DBPath::new("_rust_rocksdb_event_listener_background_error");
 
-    let mut opts = Options::default();
+    let mut opts = DBOptions::default();
     let cleaner = BackgroundErrorCleaner::default();
     let counter = cleaner.0.clone();
     opts.add_event_listener(cleaner.clone());

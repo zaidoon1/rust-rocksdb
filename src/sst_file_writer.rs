@@ -13,7 +13,7 @@
 // limitations under the License.
 //`
 
-use crate::{ffi, ffi_util::to_cpath, Error, Options};
+use crate::{cf_options::ColumnFamilyOptions, ffi, ffi_util::to_cpath, Error};
 
 use libc::{self, c_char, size_t};
 use std::{ffi::CString, marker::PhantomData, path::Path};
@@ -24,7 +24,7 @@ pub struct SstFileWriter<'a> {
     pub(crate) inner: *mut ffi::rocksdb_sstfilewriter_t,
     // Options are needed to be alive when calling open(),
     // so let's make sure it doesn't get, dropped for the lifetime of SstFileWriter
-    phantom: PhantomData<&'a Options>,
+    phantom: PhantomData<&'a ColumnFamilyOptions>,
 }
 
 unsafe impl Send for SstFileWriter<'_> {}
@@ -51,7 +51,7 @@ impl Default for EnvOptions {
 
 impl<'a> SstFileWriter<'a> {
     /// Initializes SstFileWriter with given DB options.
-    pub fn create(opts: &'a Options) -> Self {
+    pub fn create(opts: &'a ColumnFamilyOptions) -> Self {
         let env_options = EnvOptions::default();
 
         let writer = Self::create_raw(opts, &env_options);
@@ -62,7 +62,10 @@ impl<'a> SstFileWriter<'a> {
         }
     }
 
-    fn create_raw(opts: &Options, env_opts: &EnvOptions) -> *mut ffi::rocksdb_sstfilewriter_t {
+    fn create_raw(
+        opts: &ColumnFamilyOptions,
+        env_opts: &EnvOptions,
+    ) -> *mut ffi::rocksdb_sstfilewriter_t {
         unsafe { ffi::rocksdb_sstfilewriter_create(env_opts.inner, opts.inner) }
     }
 

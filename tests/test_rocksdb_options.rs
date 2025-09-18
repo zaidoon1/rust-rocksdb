@@ -21,8 +21,9 @@ use std::{
 };
 
 use rust_rocksdb::{
-    checkpoint::Checkpoint, BlockBasedOptions, BlockBasedPinningTier, Cache, DBCompactionPri,
-    DBCompressionType, DataBlockIndexType, Env, LruCacheOptions, Options, ReadOptions, DB,
+    checkpoint::Checkpoint, BlockBasedOptions, BlockBasedPinningTier, Cache, ColumnFamilyOptions,
+    DBCompactionPri, DBCompressionType, DBOptions, DataBlockIndexType, Env, LruCacheOptions,
+    ReadOptions, DB,
 };
 use util::DBPath;
 
@@ -30,12 +31,12 @@ use util::DBPath;
 fn test_load_latest() {
     let n = DBPath::new("_rust_rocksdb_test_load_latest");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
         let _ = DB::open_cf(&opts, &n, vec!["cf0", "cf1"]).unwrap();
     }
-    let (_, cfs) = Options::load_latest(
+    let (_, cfs) = DBOptions::load_latest(
         &n,
         Env::new().unwrap(),
         true,
@@ -51,10 +52,11 @@ fn test_load_latest() {
 fn test_set_num_levels() {
     let n = DBPath::new("_rust_rocksdb_test_set_num_levels");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
-        opts.set_num_levels(2);
-        let _db = DB::open(&opts, &n).unwrap();
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_num_levels(2);
+        let _db = DB::open_cf_with_opts(&opts, &n, [("default", cf_opts)]).unwrap();
     }
 }
 
@@ -62,7 +64,7 @@ fn test_set_num_levels() {
 fn test_increase_parallelism() {
     let n = DBPath::new("_rust_rocksdb_test_increase_parallelism");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         opts.increase_parallelism(4);
         let _db = DB::open(&opts, &n).unwrap();
@@ -73,10 +75,11 @@ fn test_increase_parallelism() {
 fn test_set_level_compaction_dynamic_level_bytes() {
     let n = DBPath::new("_rust_rocksdb_test_set_level_compaction_dynamic_level_bytes");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
-        opts.set_level_compaction_dynamic_level_bytes(true);
-        let _db = DB::open(&opts, &n).unwrap();
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_level_compaction_dynamic_level_bytes(true);
+        let _db = DB::open_cf_with_opts(&opts, &n, [("default", cf_opts)]).unwrap();
     }
 }
 
@@ -85,7 +88,7 @@ fn test_block_based_options() {
     let path = "_rust_rocksdb_test_block_based_options";
     let n = DBPath::new(path);
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
 
         let mut block_opts = BlockBasedOptions::default();
@@ -97,8 +100,9 @@ fn test_block_based_options() {
         block_opts.set_partition_pinning_tier(BlockBasedPinningTier::All);
         block_opts.set_unpartitioned_pinning_tier(BlockBasedPinningTier::All);
 
-        opts.set_block_based_table_factory(&block_opts);
-        let _db = DB::open(&opts, &n).unwrap();
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_block_based_table_factory(&block_opts);
+        let _db = DB::open_cf_with_opts(&opts, &n, [("default", cf_opts)]).unwrap();
 
         // read the setting from the LOG file
         let mut rocksdb_log = fs::File::open(format!("{}/LOG", (&n).as_ref().to_str().unwrap()))
@@ -114,7 +118,7 @@ fn test_block_based_options() {
     }
 
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
 
         let mut block_opts = BlockBasedOptions::default();
@@ -123,8 +127,9 @@ fn test_block_based_options() {
         block_opts.set_partition_pinning_tier(BlockBasedPinningTier::All);
         block_opts.set_unpartitioned_pinning_tier(BlockBasedPinningTier::None);
 
-        opts.set_block_based_table_factory(&block_opts);
-        let _db = DB::open(&opts, &n).unwrap();
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_block_based_table_factory(&block_opts);
+        let _db = DB::open_cf_with_opts(&opts, &n, [("default", cf_opts)]).unwrap();
     }
 }
 
@@ -143,12 +148,14 @@ fn test_set_data_block_index_type() {
 
     // Default is `BinarySearch`
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
 
         let block_opts = BlockBasedOptions::default();
-        opts.set_block_based_table_factory(&block_opts);
-        let _db = DB::open(&opts, &n).expect("open a db works");
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_block_based_table_factory(&block_opts);
+        let _db =
+            DB::open_cf_with_opts(&opts, &n, [("default", cf_opts)]).expect("open a db works");
 
         let mut rocksdb_log = fs::File::open(format!("{}/LOG", (&n).as_ref().to_str().unwrap()))
             .expect("rocksdb creates a LOG file");
@@ -162,14 +169,16 @@ fn test_set_data_block_index_type() {
 
     // Setting the index type and hash table utilization ratio works
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(false);
 
         let mut block_opts = BlockBasedOptions::default();
         block_opts.set_data_block_index_type(DataBlockIndexType::BinaryAndHash);
         block_opts.set_data_block_hash_ratio(0.35);
-        opts.set_block_based_table_factory(&block_opts);
-        let _db = DB::open(&opts, &n).expect("open a db works");
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_block_based_table_factory(&block_opts);
+        let _db =
+            DB::open_cf_with_opts(&opts, &n, [("default", cf_opts)]).expect("open a db works");
 
         let mut rocksdb_log = fs::File::open(format!("{}/LOG", (&n).as_ref().to_str().unwrap()))
             .expect("rocksdb creates a LOG file");
@@ -187,11 +196,12 @@ fn test_set_data_block_index_type() {
 fn set_compression_options_zstd_max_train_bytes() {
     let path = DBPath::new("_rust_set_compression_options_zstd_max_train_bytes");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
-        opts.set_compression_options(4, 5, 6, 7);
-        opts.set_zstd_max_train_bytes(100);
-        let _db = DB::open(&opts, &path).unwrap();
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_compression_options(4, 5, 6, 7);
+        cf_opts.set_zstd_max_train_bytes(100);
+        let _db = DB::open_cf_with_opts(&opts, &path, [("default", cf_opts)]).unwrap();
     }
 }
 
@@ -199,7 +209,7 @@ fn set_compression_options_zstd_max_train_bytes() {
 fn set_wal_compression_zstd() {
     let path = DBPath::new("_set_wal_compression_zstd");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         opts.set_wal_compression_type(DBCompressionType::None);
         opts.set_wal_compression_type(DBCompressionType::Zstd);
@@ -211,7 +221,7 @@ fn set_wal_compression_zstd() {
 #[should_panic(expected = "Lz4 is not supported for WAL compression")]
 fn set_wal_compression_unsupported() {
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         opts.set_wal_compression_type(DBCompressionType::Lz4);
     }
@@ -220,10 +230,11 @@ fn set_wal_compression_unsupported() {
 fn test_compression_type(ty: DBCompressionType) {
     let path = DBPath::new("_test_compression_type");
 
-    let mut opts = Options::default();
-    opts.set_compression_type(ty);
+    let mut opts = DBOptions::default();
     opts.create_if_missing(true);
-    let db = DB::open(&opts, &path);
+    let mut cf_opts = ColumnFamilyOptions::default();
+    cf_opts.set_compression_type(ty);
+    let db = DB::open_cf_with_opts(&opts, &path, [("default", cf_opts)]);
 
     let should_open = match ty {
         DBCompressionType::None => true,
@@ -276,10 +287,11 @@ fn test_zstd_compression() {
 fn test_add_compact_on_deletion_collector_factory() {
     let n = DBPath::new("_rust_rocksdb_test_add_compact_on_deletion_collector_factory");
 
-    let mut opts = Options::default();
+    let mut opts = DBOptions::default();
     opts.create_if_missing(true);
-    opts.add_compact_on_deletion_collector_factory(5, 10, 0.5);
-    let _db = DB::open(&opts, &n).unwrap();
+    let mut cf_opts = ColumnFamilyOptions::default();
+    cf_opts.add_compact_on_deletion_collector_factory(5, 10, 0.5);
+    let _db = DB::open_cf_with_opts(&opts, &n, [("default", cf_opts)]).unwrap();
 
     let mut rocksdb_log = fs::File::open(format!("{}/LOG", (&n).as_ref().to_str().unwrap()))
         .expect("rocksdb creates a LOG file");
@@ -294,7 +306,7 @@ fn test_add_compact_on_deletion_collector_factory() {
 fn test_set_avoid_unnecessary_blocking_io() {
     let path = DBPath::new("_set_avoid_unnecessary_blocking_io");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         opts.set_avoid_unnecessary_blocking_io(true);
         let db = DB::open(&opts, &path).unwrap();
@@ -308,7 +320,7 @@ fn test_set_track_and_verify_wals_in_manifest() {
     let path = DBPath::new("_set_track_and_verify_wals_in_manifest");
 
     // test the defaults and the setter/accessor
-    let mut opts = Options::default();
+    let mut opts = DBOptions::default();
     assert!(!opts.get_track_and_verify_wals_in_manifest());
     opts.set_track_and_verify_wals_in_manifest(true);
     assert!(opts.get_track_and_verify_wals_in_manifest());
@@ -328,10 +340,11 @@ fn test_set_track_and_verify_wals_in_manifest() {
 fn test_set_periodic_compaction_seconds() {
     let path = DBPath::new("_set_periodic_compaction_seconds");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
-        opts.set_periodic_compaction_seconds(5);
-        let _db = DB::open(&opts, &path).unwrap();
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_periodic_compaction_seconds(5);
+        let _db = DB::open_cf_with_opts(&opts, &path, [("default", cf_opts)]).unwrap();
     }
 }
 
@@ -339,10 +352,11 @@ fn test_set_periodic_compaction_seconds() {
 fn test_set_ttl() {
     let path = DBPath::new("_set_ttl");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
-        opts.set_ttl(5);
-        let _db = DB::open(&opts, &path).unwrap();
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_ttl(5);
+        let _db = DB::open_cf_with_opts(&opts, &path, [("default", cf_opts)]).unwrap();
     }
 }
 
@@ -350,7 +364,7 @@ fn test_set_ttl() {
 fn test_set_options_from_string() {
     let path = DBPath::new("_set_options_from_string");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         opts.set_options_from_string("compaction_pri=kOldestSmallestSeqFirst")
             .expect("option compaction_pri is set");
@@ -363,7 +377,7 @@ fn test_set_options_from_string() {
 fn test_set_options_from_string_failure() {
     let path = DBPath::new("_set_options_from_string");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         opts.set_options_from_string("compaction_prikOldestSmallestSeqFirst")
             .unwrap();
@@ -375,7 +389,7 @@ fn test_set_options_from_string_failure() {
 fn test_set_ratelimiter() {
     let path = DBPath::new("_set_ratelimiter");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         opts.set_ratelimiter(1024000, 1000, 1);
         let db = DB::open(&opts, &path).unwrap();
@@ -385,7 +399,7 @@ fn test_set_ratelimiter() {
     }
 
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         opts.set_auto_tuned_ratelimiter(1024000, 1000, 1);
         let db = DB::open(&opts, &path).unwrap();
@@ -399,10 +413,11 @@ fn test_set_ratelimiter() {
 fn test_set_compaction_pri() {
     let path = DBPath::new("_set_compaction_pri");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
-        opts.set_compaction_pri(DBCompactionPri::RoundRobin);
-        let _db = DB::open(&opts, &path).unwrap();
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_compaction_pri(DBCompactionPri::RoundRobin);
+        let _db = DB::open_cf_with_opts(&opts, &path, [("default", cf_opts)]).unwrap();
     }
 }
 
@@ -411,7 +426,7 @@ fn test_set_blob_cache() {
     let path = DBPath::new("_set_blob_cache");
     let cache = Cache::new_hyper_clock_cache(1024 * 1024, 4 * 1024);
 
-    let mut opts = Options::default();
+    let mut opts = DBOptions::default();
     opts.create_if_missing(true);
     opts.set_enable_blob_files(true);
     opts.set_min_blob_size(16);
@@ -439,7 +454,7 @@ fn test_lru_cache_custom_opts() {
     lru_opts.set_num_shard_bits(2);
     let cache = Cache::new_lru_cache_opts(&lru_opts);
 
-    let mut opts = Options::default();
+    let mut opts = DBOptions::default();
     opts.create_if_missing(true);
     opts.set_row_cache(&cache);
 
@@ -502,7 +517,7 @@ fn test_set_callback_logger() {
 
     let msgs = Arc::new(AtomicUsize::new(0));
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
 
         // passing a static function compiles without any magic
@@ -530,7 +545,7 @@ fn test_set_callback_logger() {
 
     // check that level filtering works: set the level to Info and expect 0 debug messages
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         let debug_msgs = Arc::new(AtomicUsize::new(0));
         let closure_debug_msgs = debug_msgs.clone();
         opts.set_callback_logger(rust_rocksdb::LogLevel::Info, move |level, _msg| {
@@ -549,7 +564,7 @@ fn test_set_callback_logger() {
     assert_eq!(0, UnsafeLoggerCheck::get_drop_count());
     let opts = {
         let unsafe_logger_check = UnsafeLoggerCheck::new();
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
 
         let closure_msgs = msgs.clone();
@@ -592,7 +607,7 @@ fn test_set_write_dbid_to_manifest() {
     let path = DBPath::new("_set_write_dbid_to_manifest");
 
     // test the defaults and the setter/accessor
-    let mut opts = Options::default();
+    let mut opts = DBOptions::default();
     assert!(opts.get_write_dbid_to_manifest());
     opts.set_write_dbid_to_manifest(false);
     assert!(!opts.get_write_dbid_to_manifest());
@@ -625,10 +640,11 @@ fn test_set_write_dbid_to_manifest() {
 fn test_set_memtable_op_scan_flush_trigger() {
     let path = DBPath::new("_set_memtable_op_scan_flush_trigger");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
-        opts.set_memtable_op_scan_flush_trigger(5);
-        let _db = DB::open(&opts, &path).unwrap();
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_memtable_op_scan_flush_trigger(5);
+        let _db = DB::open_cf_with_opts(&opts, &path, [("default", cf_opts)]).unwrap();
     }
 }
 
@@ -636,10 +652,11 @@ fn test_set_memtable_op_scan_flush_trigger() {
 fn test_set_memtable_avg_op_scan_flush_trigger() {
     let path = DBPath::new("_set_memtable_avg_op_scan_flush_trigger");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
-        opts.set_memtable_avg_op_scan_flush_trigger(5);
-        let _db = DB::open(&opts, &path).unwrap();
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_memtable_avg_op_scan_flush_trigger(5);
+        let _db = DB::open_cf_with_opts(&opts, &path, [("default", cf_opts)]).unwrap();
     }
 }
 
@@ -647,7 +664,7 @@ fn test_set_memtable_avg_op_scan_flush_trigger() {
 fn jemalloc_init() {
     let path = DBPath::new("_jemalloc_init");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         let _db = DB::open(&opts, &path).unwrap();
     }

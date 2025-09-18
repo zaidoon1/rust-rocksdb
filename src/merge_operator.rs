@@ -16,7 +16,7 @@
 //! rustic merge operator
 //!
 //! ```
-//! use rust_rocksdb::{Options, DB, MergeOperands};
+//! use rust_rocksdb::{DBOptions, ColumnFamilyOptions, DB, MergeOperands};
 //!
 //! fn concat_merge(new_key: &[u8],
 //!                 existing_val: Option<&[u8]>,
@@ -42,12 +42,12 @@
 //!    .tempdir()
 //!    .expect("Failed to create temporary path for the _rust_path_to_rocksdb");
 //!let path = tempdir.path();
-//!let mut opts = Options::default();
-//!
+//!let mut opts = DBOptions::default();
 //!opts.create_if_missing(true);
-//!opts.set_merge_operator_associative("test operator", concat_merge);
+//!let mut cf_opts = ColumnFamilyOptions::default();
+//!cf_opts.set_merge_operator_associative("test operator", concat_merge);
 //!{
-//!    let db = DB::open(&opts, path).unwrap();
+//!    let db = DB::open_cf_with_opts(&opts, path, [("default", cf_opts)]).unwrap();
 //!    let p = db.put(b"k1", b"a");
 //!    db.merge(b"k1", b"b");
 //!    db.merge(b"k1", b"c");

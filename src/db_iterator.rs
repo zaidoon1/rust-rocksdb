@@ -31,7 +31,7 @@ pub type DBRawIterator<'a> = DBRawIteratorWithThreadMode<'a, DB>;
 /// Rust [`std::iter::Iterator`].
 ///
 /// ```
-/// use rust_rocksdb::{DB, Options};
+/// use rust_rocksdb::{DB, DBOptions};
 ///
 /// let tempdir = tempfile::Builder::new()
 ///     .prefix("_path_for_rocksdb_storage4")
@@ -72,7 +72,7 @@ pub type DBRawIterator<'a> = DBRawIteratorWithThreadMode<'a, DB>;
 ///         iter.prev();
 ///     }
 /// }
-/// let _ = DB::destroy(&Options::default(), path);
+/// let _ = DB::destroy(&DBOptions::default(), path);
 /// ```
 pub struct DBRawIteratorWithThreadMode<'a, D: DBAccess> {
     inner: std::ptr::NonNull<ffi::rocksdb_iterator_t>,
@@ -154,7 +154,7 @@ impl<'a, D: DBAccess> DBRawIteratorWithThreadMode<'a, D> {
     /// # Examples
     ///
     /// ```rust
-    /// use rust_rocksdb::{DB, Options};
+    /// use rust_rocksdb::{DB, DBOptions};
     ///
     /// let tempdir = tempfile::Builder::new()
     ///     .prefix("_path_for_rocksdb_storage5")
@@ -182,7 +182,7 @@ impl<'a, D: DBAccess> DBRawIteratorWithThreadMode<'a, D> {
     ///         // There are no keys in the database
     ///     }
     /// }
-    /// let _ = DB::destroy(&Options::default(), path);
+    /// let _ = DB::destroy(&DBOptions::default(), path);
     /// ```
     pub fn seek_to_first(&mut self) {
         unsafe {
@@ -195,7 +195,7 @@ impl<'a, D: DBAccess> DBRawIteratorWithThreadMode<'a, D> {
     /// # Examples
     ///
     /// ```rust
-    /// use rust_rocksdb::{DB, Options};
+    /// use rust_rocksdb::{DB, DBOptions};
     ///
     /// let tempdir = tempfile::Builder::new()
     ///     .prefix("_path_for_rocksdb_storage6")
@@ -223,7 +223,7 @@ impl<'a, D: DBAccess> DBRawIteratorWithThreadMode<'a, D> {
     ///         // There are no keys in the database
     ///     }
     /// }
-    /// let _ = DB::destroy(&Options::default(), path);
+    /// let _ = DB::destroy(&DBOptions::default(), path);
     /// ```
     pub fn seek_to_last(&mut self) {
         unsafe {
@@ -239,7 +239,7 @@ impl<'a, D: DBAccess> DBRawIteratorWithThreadMode<'a, D> {
     /// # Examples
     ///
     /// ```rust
-    /// use rust_rocksdb::{DB, Options};
+    /// use rust_rocksdb::{DB, DBOptions};
     ///
     /// let tempdir = tempfile::Builder::new()
     ///     .prefix("_path_for_rocksdb_storage7")
@@ -259,7 +259,7 @@ impl<'a, D: DBAccess> DBRawIteratorWithThreadMode<'a, D> {
     ///         // There are no keys in the database
     ///     }
     /// }
-    /// let _ = DB::destroy(&Options::default(), path);
+    /// let _ = DB::destroy(&DBOptions::default(), path);
     /// ```
     pub fn seek<K: AsRef<[u8]>>(&mut self, key: K) {
         let key = key.as_ref();
@@ -282,7 +282,7 @@ impl<'a, D: DBAccess> DBRawIteratorWithThreadMode<'a, D> {
     /// # Examples
     ///
     /// ```rust
-    /// use rust_rocksdb::{DB, Options};
+    /// use rust_rocksdb::{DB, DBOptions};
     ///
     /// let tempdir = tempfile::Builder::new()
     ///     .prefix("_path_for_rocksdb_storage8")
@@ -302,7 +302,7 @@ impl<'a, D: DBAccess> DBRawIteratorWithThreadMode<'a, D> {
     ///         // There are no keys in the database
     ///     }
     /// }
-    /// let _ = DB::destroy(&Options::default(), path);
+    /// let _ = DB::destroy(&DBOptions::default(), path);
     /// ```
     pub fn seek_for_prev<K: AsRef<[u8]>>(&mut self, key: K) {
         let key = key.as_ref();
@@ -406,7 +406,7 @@ pub type DBIterator<'a> = DBIteratorWithThreadMode<'a, DB>;
 /// RocksDB's API, which can provide better performance and more features.
 ///
 /// ```
-/// use rust_rocksdb::{DB, Direction, IteratorMode, Options};
+/// use rust_rocksdb::{DB, Direction, IteratorMode, DBOptions};
 ///
 /// let tempdir = tempfile::Builder::new()
 ///     .prefix("_path_for_rocksdb_storage2")
@@ -439,7 +439,7 @@ pub type DBIterator<'a> = DBIteratorWithThreadMode<'a, DB>;
 ///         println!("Saw {:?} {:?}", key, value);
 ///     }
 /// }
-/// let _ = DB::destroy(&Options::default(), path);
+/// let _ = DB::destroy(&DBOptions::default(), path);
 /// ```
 pub struct DBIteratorWithThreadMode<'a, D: DBAccess> {
     raw: DBRawIteratorWithThreadMode<'a, D>,

@@ -16,9 +16,10 @@
 mod util;
 
 use rust_rocksdb::{
-    CuckooTableOptions, DBAccess, Direction, Error, ErrorKind, IteratorMode,
-    OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions, SingleThreaded,
-    SliceTransform, SnapshotWithThreadMode, WriteBatchWithTransaction, WriteOptions, DB,
+    ColumnFamilyDescriptor, ColumnFamilyOptions, CuckooTableOptions, DBAccess, DBOptions,
+    Direction, Error, ErrorKind, IteratorMode, OptimisticTransactionDB,
+    OptimisticTransactionOptions, ReadOptions, SingleThreaded, SliceTransform,
+    SnapshotWithThreadMode, WriteBatchWithTransaction, WriteOptions, DB,
 };
 use util::DBPath;
 
@@ -43,7 +44,7 @@ fn open_default() {
 fn open_cf() {
     let path = DBPath::new("_rust_rocksdb_optimistic_transaction_db_open_cf");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
         let db: OptimisticTransactionDB<SingleThreaded> =
@@ -146,7 +147,7 @@ fn multi_get_cf() {
     let path = DBPath::new("_rust_rocksdb_multi_get_cf");
 
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
         let db: OptimisticTransactionDB =
@@ -188,7 +189,7 @@ fn multi_get_cf() {
 fn destroy_on_open() {
     let path = DBPath::new("_rust_rocksdb_optimistic_transaction_db_destroy_on_open");
     let _db: OptimisticTransactionDB = OptimisticTransactionDB::open_default(&path).unwrap();
-    let opts = Options::default();
+    let opts = DBOptions::default();
     // The TransactionDB will still be open when we try to destroy it and the lock should fail.
     match DB::destroy(&opts, &path) {
         Err(s) => {
@@ -325,12 +326,18 @@ fn snapshot_test() {
 fn prefix_extract_and_iterate_test() {
     let path = DBPath::new("_rust_rocksdb_optimistic_transaction_db_prefix_extract_and_iterate");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
-        opts.set_prefix_extractor(SliceTransform::create_fixed_prefix(2));
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_prefix_extractor(SliceTransform::create_fixed_prefix(2));
 
-        let db: OptimisticTransactionDB = OptimisticTransactionDB::open(&opts, &path).unwrap();
+        let db: OptimisticTransactionDB = OptimisticTransactionDB::open_cf_descriptors(
+            &opts,
+            &path,
+            [ColumnFamilyDescriptor::new("default", cf_opts)],
+        )
+        .unwrap();
         db.put(b"p1_k1", b"v1").unwrap();
         db.put(b"p2_k2", b"v2").unwrap();
         db.put(b"p1_k3", b"v3").unwrap();
@@ -356,18 +363,23 @@ fn cuckoo() {
     let path = DBPath::new("_rust_rocksdb_optimistic_transaction_db_cuckoo");
 
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         let mut factory_opts = CuckooTableOptions::default();
         factory_opts.set_hash_ratio(0.8);
         factory_opts.set_max_search_depth(20);
         factory_opts.set_cuckoo_block_size(10);
         factory_opts.set_identity_as_first_hash(true);
         factory_opts.set_use_module_hash(false);
-
-        opts.set_cuckoo_table_factory(&factory_opts);
         opts.create_if_missing(true);
-
-        let db: OptimisticTransactionDB = OptimisticTransactionDB::open(&opts, &path).unwrap();
+        // CF-level cuckoo table factory
+        let mut cf_opts = ColumnFamilyOptions::default();
+        cf_opts.set_cuckoo_table_factory(&factory_opts);
+        let db: OptimisticTransactionDB = OptimisticTransactionDB::open_cf_descriptors(
+            &opts,
+            &path,
+            [ColumnFamilyDescriptor::new("default", cf_opts)],
+        )
+        .unwrap();
         db.put(b"k1", b"v1").unwrap();
         db.put(b"k2", b"v2").unwrap();
         let r: Result<Option<Vec<u8>>, Error> = db.get(b"k1");
@@ -385,7 +397,7 @@ fn cuckoo() {
 fn transaction() {
     let path = DBPath::new("_rust_rocksdb_optimistic_transaction_db_transaction");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         let db: OptimisticTransactionDB = OptimisticTransactionDB::open(&opts, &path).unwrap();
 
@@ -518,7 +530,7 @@ fn transaction_rollback() {
 fn transaction_cf() {
     let path = DBPath::new("_rust_rocksdb_optimistic_transaction_db_transaction_cf");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
         let db: OptimisticTransactionDB =
@@ -586,7 +598,7 @@ fn transaction_snapshot() {
 fn delete_range_test() {
     let path = DBPath::new("_rust_rocksdb_optimistic_transaction_db_delete_range_test");
     {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
 

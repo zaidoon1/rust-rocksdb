@@ -28,16 +28,17 @@ use std::ffi::CStr;
 
 use crate::column_family::ColumnFamilyTtl;
 use crate::{
+    cf_options::ColumnFamilyOptions,
     column_family::UnboundColumnFamily,
     db::{convert_values, DBAccess},
-    db_options::OptionsMustOutliveDB,
+    db_options::{DBOptions, OptionsMustOutliveDB},
     ffi,
     ffi_util::to_cpath,
     AsColumnFamilyRef, BoundColumnFamily, ColumnFamily, ColumnFamilyDescriptor,
     DBIteratorWithThreadMode, DBPinnableSlice, DBRawIteratorWithThreadMode, Direction, Error,
-    IteratorMode, MultiThreaded, Options, ReadOptions, SingleThreaded, SnapshotWithThreadMode,
-    ThreadMode, Transaction, TransactionDBOptions, TransactionOptions, WriteBatchWithTransaction,
-    WriteOptions, DB, DEFAULT_COLUMN_FAMILY_NAME,
+    IteratorMode, MultiThreaded, ReadOptions, SingleThreaded, SnapshotWithThreadMode, ThreadMode,
+    Transaction, TransactionDBOptions, TransactionOptions, WriteBatchWithTransaction, WriteOptions,
+    DB, DEFAULT_COLUMN_FAMILY_NAME,
 };
 use ffi::rocksdb_transaction_t;
 use libc::{c_char, c_int, c_void, size_t};
@@ -56,7 +57,7 @@ type DefaultThreadMode = crate::MultiThreaded;
 /// if feature `multi-threaded-cf` is not enabled.
 ///
 /// ```
-/// use rust_rocksdb::{DB, Options, TransactionDB, SingleThreaded};
+/// use rust_rocksdb::{DB, DBOptions, TransactionDB, SingleThreaded};
 /// let tempdir = tempfile::Builder::new()
 ///     .prefix("_path_for_transaction_db")
 ///     .tempdir()
@@ -72,7 +73,7 @@ type DefaultThreadMode = crate::MultiThreaded;
 ///     txn.put(b"key3", b"value3");
 ///     txn.commit().unwrap();
 /// }
-/// let _ = DB::destroy(&Options::default(), path);
+/// let _ = DB::destroy(&DBOptions::default(), path);
 /// ```
 ///
 /// [`SingleThreaded`]: crate::SingleThreaded
@@ -176,7 +177,7 @@ impl<T: ThreadMode> DBAccess for TransactionDB<T> {
 impl<T: ThreadMode> TransactionDB<T> {
     /// Opens a database with default options.
     pub fn open_default<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
-        let mut opts = Options::default();
+        let mut opts = DBOptions::default();
         opts.create_if_missing(true);
         let txn_db_opts = TransactionDBOptions::default();
         Self::open(&opts, &txn_db_opts, path)
@@ -184,7 +185,7 @@ impl<T: ThreadMode> TransactionDB<T> {
 
     /// Opens the database with the specified options.
     pub fn open<P: AsRef<Path>>(
-        opts: &Options,
+        opts: &DBOptions,
         txn_db_opts: &TransactionDBOptions,
         path: P,
     ) -> Result<Self, Error> {
@@ -195,7 +196,7 @@ impl<T: ThreadMode> TransactionDB<T> {
     ///
     /// Column families opened using this function will be created with default `Options`.
     pub fn open_cf<P, I, N>(
-        opts: &Options,
+        opts: &DBOptions,
         txn_db_opts: &TransactionDBOptions,
         path: P,
         cfs: I,
@@ -207,14 +208,14 @@ impl<T: ThreadMode> TransactionDB<T> {
     {
         let cfs = cfs
             .into_iter()
-            .map(|name| ColumnFamilyDescriptor::new(name.as_ref(), Options::default()));
+            .map(|name| ColumnFamilyDescriptor::new(name.as_ref(), ColumnFamilyOptions::default()));
 
         Self::open_cf_descriptors_internal(opts, txn_db_opts, path, cfs)
     }
 
     /// Opens a database with the given database options and column family descriptors.
     pub fn open_cf_descriptors<P, I>(
-        opts: &Options,
+        opts: &DBOptions,
         txn_db_opts: &TransactionDBOptions,
         path: P,
         cfs: I,
@@ -228,7 +229,7 @@ impl<T: ThreadMode> TransactionDB<T> {
 
     /// Internal implementation for opening RocksDB.
     fn open_cf_descriptors_internal<P, I>(
-        opts: &Options,
+        db_opts: &DBOptions,
         txn_db_opts: &TransactionDBOptions,
         path: P,
         cfs: I,
@@ -238,7 +239,7 @@ impl<T: ThreadMode> TransactionDB<T> {
         I: IntoIterator<Item = ColumnFamilyDescriptor>,
     {
         let cfs: Vec<_> = cfs.into_iter().collect();
-        let outlive = iter::once(opts.outlive.clone())
+        let outlive = iter::once(db_opts.outlive.clone())
             .chain(cfs.iter().map(|cf| cf.options.outlive.clone()))
             .collect();
 
@@ -254,14 +255,14 @@ impl<T: ThreadMode> TransactionDB<T> {
         let mut cf_map = BTreeMap::new();
 
         if cfs.is_empty() {
-            db = Self::open_raw(opts, txn_db_opts, &cpath)?;
+            db = Self::open_raw(db_opts, txn_db_opts, &cpath)?;
         } else {
             let mut cfs_v = cfs;
             // Always open the default column family.
             if !cfs_v.iter().any(|cf| cf.name == DEFAULT_COLUMN_FAMILY_NAME) {
                 cfs_v.push(ColumnFamilyDescriptor {
                     name: String::from(DEFAULT_COLUMN_FAMILY_NAME),
-                    options: Options::default(),
+                    options: ColumnFamilyOptions::default(),
                     ttl: ColumnFamilyTtl::SameAsDb, // it will have ttl specified in `DBWithThreadMode::open_with_ttl`
                 });
             }
@@ -283,7 +284,7 @@ impl<T: ThreadMode> TransactionDB<T> {
                 .collect();
 
             db = Self::open_cf_raw(
-                opts,
+                db_opts,
                 txn_db_opts,
                 &cpath,
                 &cfs_v,
@@ -330,7 +331,7 @@ impl<T: ThreadMode> TransactionDB<T> {
     }
 
     fn open_raw(
-        opts: &Options,
+        opts: &DBOptions,
         txn_db_opts: &TransactionDBOptions,
         cpath: &CString,
     ) -> Result<*mut ffi::rocksdb_transactiondb_t, Error> {
@@ -345,7 +346,7 @@ impl<T: ThreadMode> TransactionDB<T> {
     }
 
     fn open_cf_raw(
-        opts: &Options,
+        opts: &DBOptions,
         txn_db_opts: &TransactionDBOptions,
         cpath: &CString,
         cfs_v: &[ColumnFamilyDescriptor],
@@ -370,7 +371,7 @@ impl<T: ThreadMode> TransactionDB<T> {
     fn create_inner_cf_handle(
         &self,
         name: &str,
-        opts: &Options,
+        opts: &ColumnFamilyOptions,
     ) -> Result<*mut ffi::rocksdb_column_family_handle_t, Error> {
         let cf_name = CString::new(name.as_bytes()).map_err(|_| {
             Error::new("Failed to convert path to CString when creating cf".to_owned())
@@ -385,15 +386,15 @@ impl<T: ThreadMode> TransactionDB<T> {
         })
     }
 
-    pub fn list_cf<P: AsRef<Path>>(opts: &Options, path: P) -> Result<Vec<String>, Error> {
+    pub fn list_cf<P: AsRef<Path>>(opts: &DBOptions, path: P) -> Result<Vec<String>, Error> {
         DB::list_cf(opts, path)
     }
 
-    pub fn destroy<P: AsRef<Path>>(opts: &Options, path: P) -> Result<(), Error> {
+    pub fn destroy<P: AsRef<Path>>(opts: &DBOptions, path: P) -> Result<(), Error> {
         DB::destroy(opts, path)
     }
 
-    pub fn repair<P: AsRef<Path>>(opts: &Options, path: P) -> Result<(), Error> {
+    pub fn repair<P: AsRef<Path>>(opts: &DBOptions, path: P) -> Result<(), Error> {
         DB::repair(opts, path)
     }
 
@@ -981,7 +982,11 @@ impl<T: ThreadMode> TransactionDB<T> {
 
 impl TransactionDB<SingleThreaded> {
     /// Creates column family with given name and options.
-    pub fn create_cf<N: AsRef<str>>(&mut self, name: N, opts: &Options) -> Result<(), Error> {
+    pub fn create_cf<N: AsRef<str>>(
+        &mut self,
+        name: N,
+        opts: &ColumnFamilyOptions,
+    ) -> Result<(), Error> {
         let inner = self.create_inner_cf_handle(name.as_ref(), opts)?;
         self.cfs
             .cfs
@@ -1005,7 +1010,11 @@ impl TransactionDB<SingleThreaded> {
 
 impl TransactionDB<MultiThreaded> {
     /// Creates column family with given name and options.
-    pub fn create_cf<N: AsRef<str>>(&self, name: N, opts: &Options) -> Result<(), Error> {
+    pub fn create_cf<N: AsRef<str>>(
+        &self,
+        name: N,
+        opts: &ColumnFamilyOptions,
+    ) -> Result<(), Error> {
         // Note that we acquire the cfs lock before inserting: otherwise we might race
         // another caller who observed the handle as missing.
         let mut cfs = self.cfs.cfs.write();

@@ -16,7 +16,7 @@ mod util;
 
 use pretty_assertions::assert_eq;
 
-use rust_rocksdb::{checkpoint::Checkpoint, Options, DB};
+use rust_rocksdb::{checkpoint::Checkpoint, DBOptions, DB};
 use util::DBPath;
 
 #[test]
@@ -26,7 +26,7 @@ pub fn test_single_checkpoint() {
     // Create DB with some data
     let db_path = DBPath::new(&format!("{PATH_PREFIX}db1"));
 
-    let mut opts = Options::default();
+    let mut opts = DBOptions::default();
     opts.create_if_missing(true);
     let db = DB::open(&opts, &db_path).unwrap();
 
@@ -56,7 +56,7 @@ pub fn test_multi_checkpoints() {
     // Create DB with some data
     let db_path = DBPath::new(&format!("{PATH_PREFIX}db1"));
 
-    let mut opts = Options::default();
+    let mut opts = DBOptions::default();
     opts.create_if_missing(true);
     let db = DB::open(&opts, &db_path).unwrap();
 

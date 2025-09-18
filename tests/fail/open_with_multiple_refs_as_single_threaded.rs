@@ -1,10 +1,10 @@
-use rust_rocksdb::{DBWithThreadMode, Options, SingleThreaded};
+use rust_rocksdb::{DBWithThreadMode, ColumnFamilyOptions, SingleThreaded};
 
 fn main() {
     let db = DBWithThreadMode::<SingleThreaded>::open_default("/path/to/dummy").unwrap();
     let db_ref1 = &db;
     let db_ref2 = &db;
-    let opts = Options::default();
+    let opts = ColumnFamilyOptions::default();
     db_ref1.create_cf("cf1", &opts).unwrap();
     db_ref2.create_cf("cf2", &opts).unwrap();
 }

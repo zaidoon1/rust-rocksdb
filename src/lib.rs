@@ -18,7 +18,7 @@
 //! # Examples
 //!
 //! ```
-//! use rust_rocksdb::{DB, Options};
+//! use rust_rocksdb::{DB, DBOptions};
 //! // NB: db is automatically closed at end of lifetime
 //! let tempdir = tempfile::Builder::new()
 //!     .prefix("_path_for_rocksdb_storage")
@@ -35,24 +35,24 @@
 //!    }
 //!    db.delete(b"my key").unwrap();
 //! }
-//! let _ = DB::destroy(&Options::default(), path);
+//! let _ = DB::destroy(&DBOptions::default(), path);
 //! ```
 //!
 //! Opening a database and a single column family with custom options:
 //!
 //! ```
-//! use rust_rocksdb::{DB, ColumnFamilyDescriptor, Options};
+//! use rust_rocksdb::{DB, ColumnFamilyDescriptor, DBOptions, ColumnFamilyOptions};
 //!
 //! let tempdir = tempfile::Builder::new()
 //!     .prefix("_path_for_rocksdb_storage_with_cfs")
 //!     .tempdir()
 //!     .expect("Failed to create temporary path for the _path_for_rocksdb_storage_with_cfs.");
 //! let path = tempdir.path();
-//! let mut cf_opts = Options::default();
+//! let mut cf_opts = ColumnFamilyOptions::default();
 //! cf_opts.set_max_write_buffer_number(16);
 //! let cf = ColumnFamilyDescriptor::new("cf1", cf_opts);
 //!
-//! let mut db_opts = Options::default();
+//! let mut db_opts = DBOptions::default();
 //! db_opts.create_missing_column_families(true);
 //! db_opts.create_if_missing(true);
 //! {
@@ -86,6 +86,7 @@ mod ffi_util;
 
 pub mod backup;
 mod cache;
+mod cf_options;
 pub mod checkpoint;
 mod column_family;
 pub mod compaction_filter;
@@ -113,6 +114,7 @@ mod write_buffer_manager;
 
 pub use crate::{
     cache::Cache,
+    cf_options::ColumnFamilyOptions,
     column_family::{
         AsColumnFamilyRef, BoundColumnFamily, ColumnFamily, ColumnFamilyDescriptor,
         ColumnFamilyRef, ColumnFamilyTtl, DEFAULT_COLUMN_FAMILY_NAME,
@@ -129,10 +131,11 @@ pub use crate::{
     db_options::{
         BlockBasedIndexType, BlockBasedOptions, BlockBasedPinningTier, BottommostLevelCompaction,
         ChecksumType, CompactOptions, CuckooTableOptions, DBCompactionPri, DBCompactionStyle,
-        DBCompressionType, DBPath, DBRecoveryMode, DataBlockIndexType, FifoCompactOptions,
-        FlushOptions, IngestExternalFileOptions, KeyEncodingType, LogLevel, LruCacheOptions,
-        MemtableFactory, Options, PlainTableFactoryOptions, RateLimiterMode, ReadOptions, ReadTier,
-        UniversalCompactOptions, UniversalCompactionStopStyle, WaitForCompactOptions, WriteOptions,
+        DBCompressionType, DBOptions, DBPath, DBRecoveryMode, DataBlockIndexType,
+        FifoCompactOptions, FlushOptions, IngestExternalFileOptions, KeyEncodingType, LogLevel,
+        LruCacheOptions, MemtableFactory, PlainTableFactoryOptions, RateLimiterMode, ReadOptions,
+        ReadTier, UniversalCompactOptions, UniversalCompactionStopStyle, WaitForCompactOptions,
+        WriteOptions,
     },
     db_pinnable_slice::DBPinnableSlice,
     env::Env,
@@ -255,9 +258,10 @@ mod test {
     use super::{
         column_family::UnboundColumnFamily,
         env::{Env, EnvWrapper},
-        BlockBasedOptions, BoundColumnFamily, ColumnFamily, ColumnFamilyDescriptor, DBIterator,
-        DBRawIterator, IngestExternalFileOptions, Options, PlainTableFactoryOptions, ReadOptions,
-        Snapshot, SstFileWriter, WriteBatch, WriteOptions, DB,
+        BlockBasedOptions, BoundColumnFamily, ColumnFamily, ColumnFamilyDescriptor,
+        ColumnFamilyOptions, DBIterator, DBOptions, DBRawIterator, IngestExternalFileOptions,
+        PlainTableFactoryOptions, ReadOptions, Snapshot, SstFileWriter, WriteBatch, WriteOptions,
+        DB,
     };
 
     #[test]
@@ -273,7 +277,8 @@ mod test {
         is_send::<DBIterator<'_>>();
         is_send::<DBRawIterator<'_>>();
         is_send::<Snapshot>();
-        is_send::<Options>();
+        is_send::<DBOptions>();
+        is_send::<ColumnFamilyOptions>();
         is_send::<ReadOptions>();
         is_send::<WriteOptions>();
         is_send::<IngestExternalFileOptions>();
@@ -309,7 +314,8 @@ mod test {
 
         is_sync::<DB>();
         is_sync::<Snapshot>();
-        is_sync::<Options>();
+        is_sync::<DBOptions>();
+        is_sync::<ColumnFamilyOptions>();
         is_sync::<ReadOptions>();
         is_sync::<WriteOptions>();
         is_sync::<IngestExternalFileOptions>();

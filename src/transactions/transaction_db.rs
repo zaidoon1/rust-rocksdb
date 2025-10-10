@@ -401,6 +401,37 @@ impl<T: ThreadMode> TransactionDB<T> {
         self.path.as_path()
     }
 
+    pub fn create_checkpoint<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
+        self.create_checkpoint_with_log_size(path, 0)
+    }
+
+    pub fn create_checkpoint_with_log_size<P: AsRef<Path>>(
+        &self,
+        path: P,
+        log_size_for_flush: u64,
+    ) -> Result<(), Error> {
+        let path_ref = path.as_ref();
+        if path_ref.exists() {
+            return Err(Error::new(format!(
+                "Checkpoint path already exists: {}",
+                path_ref.display()
+            )));
+        }
+        let cpath = to_cpath(path_ref)?;
+
+        unsafe {
+            let base_db: *mut ffi::rocksdb_t = ffi::rocksdb_transactiondb_get_base_db(self.inner);
+            if base_db.is_null() {
+                return Err(Error::new("rocksdb_transactiondb_get_base_db returned null".to_owned()));
+            }
+
+            let ckpt = ffi_try!(ffi::rocksdb_checkpoint_object_create(base_db));
+            let () = ffi_try!(ffi::rocksdb_checkpoint_create(ckpt, cpath.as_ptr(), log_size_for_flush));
+            ffi::rocksdb_checkpoint_object_destroy(ckpt);
+        }
+        Ok(())
+    }
+
     /// Creates a transaction with default options.
     pub fn transaction(&'_ self) -> Transaction<'_, Self> {
         self.transaction_opt(&WriteOptions::default(), &TransactionOptions::default())

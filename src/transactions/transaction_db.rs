@@ -1115,6 +1115,21 @@ impl TransactionDB<MultiThreaded> {
         )
     }
 
+    pub fn property_value_cf(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        name: impl CStrLike,
+    ) -> Result<Option<String>, Error> {
+        Self::property_value_impl(
+            name,
+            |prop_name| unsafe {
+                let base_db = ffi::rocksdb_transactiondb_get_base_db(self.inner);
+                ffi::rocksdb_property_value_cf(base_db, cf.inner(), prop_name)
+            },
+            |str_value| Ok(str_value.to_owned()),
+        )
+    }
+
     fn parse_property_int_value(value: &str) -> Result<u64, Error> {
         value.parse::<u64>().map_err(|err| {
             Error::new(format!(

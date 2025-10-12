@@ -33,14 +33,19 @@ use crate::{
     db_options::OptionsMustOutliveDB,
     ffi,
     ffi_util::to_cpath,
-    AsColumnFamilyRef, BoundColumnFamily, ColumnFamily, ColumnFamilyDescriptor,
+    AsColumnFamilyRef, BoundColumnFamily, ColumnFamily, ColumnFamilyDescriptor, CompactOptions, FlushOptions,
     DBIteratorWithThreadMode, DBPinnableSlice, DBRawIteratorWithThreadMode, Direction, Error,
     IteratorMode, MultiThreaded, Options, ReadOptions, SingleThreaded, SnapshotWithThreadMode,
     ThreadMode, Transaction, TransactionDBOptions, TransactionOptions, WriteBatchWithTransaction,
     WriteOptions, DB, DEFAULT_COLUMN_FAMILY_NAME,
 };
 use ffi::rocksdb_transaction_t;
-use libc::{c_char, c_int, c_void, size_t};
+use libc::{c_char, c_int, c_uchar, c_void, size_t};
+
+#[inline]
+fn opt_bytes_to_ptr_len<T: AsRef<[u8]>>(opt: Option<T>) -> (*const c_char, size_t) {
+    match opt { Some(v) => { let s = v.as_ref(); (s.as_ptr() as *const c_char, s.len() as size_t) }, None => (ptr::null(), 0) }
+}
 
 #[cfg(not(feature = "multi-threaded-cf"))]
 type DefaultThreadMode = crate::SingleThreaded;
@@ -1006,6 +1011,75 @@ impl<T: ThreadMode> TransactionDB<T> {
         }
         // Since `_cf` is dropped here, the column family handle is destroyed
         // and any resources (mem, files) are reclaimed.
+        Ok(())
+    }
+
+    /// Runs a manual compaction on the Range of keys given on the
+    /// given column family. This is not likely to be needed for typical usage.
+    pub fn compact_range_cf<S: AsRef<[u8]>, E: AsRef<[u8]>>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        start: Option<S>,
+        end: Option<E>,
+    ) {
+        unsafe {
+            let (start_ptr, start_len) = opt_bytes_to_ptr_len(start);
+            let (end_ptr,   end_len)   = opt_bytes_to_ptr_len(end);
+            let base_db = ffi::rocksdb_transactiondb_get_base_db(self.inner);
+            ffi::rocksdb_compact_range_cf(
+                base_db,
+                cf.inner(),
+                start_ptr, start_len, end_ptr, end_len,
+            );
+        }
+    }
+
+    /// Same as `compact_range_cf` but with custom options.
+    pub fn compact_range_cf_opt<S: AsRef<[u8]>, E: AsRef<[u8]>>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        start: Option<S>,
+        end: Option<E>,
+        opts: &CompactOptions,
+    ) {
+        unsafe {
+            let (start_ptr, start_len) = opt_bytes_to_ptr_len(start);
+            let (end_ptr,   end_len)   = opt_bytes_to_ptr_len(end);
+            let base_db = ffi::rocksdb_transactiondb_get_base_db(self.inner);
+            ffi::rocksdb_compact_range_cf_opt(
+                base_db,
+                cf.inner(),
+                opts.inner,
+                start_ptr, start_len, end_ptr, end_len
+            );
+        }
+    }
+
+    pub fn flush_wal(&self, sync: bool) -> Result<(), Error> {
+        unsafe {
+            let base = ffi::rocksdb_transactiondb_get_base_db(self.inner);
+            ffi_try!(ffi::rocksdb_flush_wal(base, c_uchar::from(sync)));
+        }
+        Ok(())
+    }
+
+    pub fn flush(&self) -> Result<(), Error> {
+        let mut fo = FlushOptions::default();
+        fo.set_wait(true);
+        unsafe {
+            let base = ffi::rocksdb_transactiondb_get_base_db(self.inner);
+            ffi_try!(ffi::rocksdb_flush(base, fo.inner));
+        }
+        Ok(())
+    }
+
+    pub fn flush_cf(&self, cf: &impl AsColumnFamilyRef) -> Result<(), Error> {
+        let mut fo = FlushOptions::default();
+        fo.set_wait(true);
+        unsafe {
+            let base = ffi::rocksdb_transactiondb_get_base_db(self.inner);
+            ffi_try!(ffi::rocksdb_flush_cf(base, fo.inner, cf.inner()));
+        }
         Ok(())
     }
 }

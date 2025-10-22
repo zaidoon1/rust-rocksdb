@@ -183,10 +183,14 @@ iterable_named_enum! {
         RemoteCompactWriteBytes("rocksdb.remote.compact.write.bytes"),
         HotFileReadBytes("rocksdb.hot.file.read.bytes"),
         WarmFileReadBytes("rocksdb.warm.file.read.bytes"),
+        CoolFileReadBytes("rocksdb.cool.file.read.bytes"),
         ColdFileReadBytes("rocksdb.cold.file.read.bytes"),
+        IceFileReadBytes("rocksdb.ice.file.read.bytes"),
         HotFileReadCount("rocksdb.hot.file.read.count"),
         WarmFileReadCount("rocksdb.warm.file.read.count"),
+        CoolFileReadCount("rocksdb.cool.file.read.count"),
         ColdFileReadCount("rocksdb.cold.file.read.count"),
+        IceFileReadCount("rocksdb.ice.file.read.count"),
         LastLevelReadBytes("rocksdb.last.level.read.bytes"),
         LastLevelReadCount("rocksdb.last.level.read.count"),
         NonLastLevelReadBytes("rocksdb.non.last.level.read.bytes"),
@@ -221,5 +225,6 @@ iterable_named_enum! {
         FileReadCorruptionRetryCount("rocksdb.file.read.corruption.retry.count"),
         FileReadCorruptionRetrySuccessCount("rocksdb.file.read.corruption.retry.success.count"),
         NumberWbwiIngest("rocksdb.number.wbwi.ingest"),
+        SstUserDefinedIndexLoadFailCount("rocksdb.sst.user.defined.index.load.fail.count"),
     }
 }

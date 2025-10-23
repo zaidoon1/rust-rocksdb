@@ -1,5 +1,6 @@
+use crate::ffi_util::error_message;
 use crate::{ffi, Error};
-use libc::c_void;
+use libc::{c_char, c_void};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(C)]
@@ -609,10 +610,17 @@ extern "C" fn on_background_error<E: EventListener>(
     status_ptr: *mut ffi::rocksdb_status_ptr_t,
 ) {
     let ctx = unsafe { &*(ctx as *mut E) };
+    let result = unsafe {
+        let mut err: *mut c_char = std::ptr::null_mut();
+        ffi::rocksdb_status_ptr_get_error(status_ptr, &mut err);
+        if err.is_null() {
+            Ok(())
+        } else {
+            Err(error_message(err))
+        }
+    };
     let status = MutableStatus {
-        // TODO: fetch status_ptr error if there is one but need to update
-        // rocksdb c api first
-        result: Ok(()),
+        result,
         ptr: status_ptr,
     };
     ctx.on_background_error(DBBackgroundErrorReason::from(reason), status);

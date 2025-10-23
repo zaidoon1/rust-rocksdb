@@ -46,6 +46,26 @@ fn test_load_latest() {
     assert!(cfs.iter().any(|cf| cf.name() == "cf0"));
     assert!(cfs.iter().any(|cf| cf.name() == "cf1"));
 }
+#[test]
+fn test_add_compact_on_deletion_collector_factory_min_file_size() {
+    let n =
+        DBPath::new("_rust_rocksdb_test_add_compact_on_deletion_collector_factory_min_file_size");
+
+    let mut opts = Options::default();
+    opts.create_if_missing(true);
+    opts.add_compact_on_deletion_collector_factory_min_file_size(5, 10, 0.5, 32 * 1024);
+    let _db = DB::open(&opts, &n).unwrap();
+
+    // We can't easily assert the min_file_size in LOG (not printed),
+    // but the factory ToString is included and should match.
+    let mut rocksdb_log = fs::File::open(format!("{}/LOG", (&n).as_ref().to_str().unwrap()))
+        .expect("rocksdb creates a LOG file");
+    let mut settings = String::new();
+    rocksdb_log
+        .read_to_string(&mut settings)
+        .expect("can read the LOG file");
+    assert!(settings.contains("CompactOnDeletionCollector (Sliding window size = 5 Deletion trigger = 10 Deletion ratio = 0.5)"));
+}
 
 #[test]
 fn test_set_num_levels() {

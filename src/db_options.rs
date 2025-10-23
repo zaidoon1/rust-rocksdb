@@ -24,6 +24,7 @@ use libc::{self, c_char, c_double, c_int, c_uchar, c_uint, c_void, size_t};
 use crate::cache::Cache;
 use crate::column_family::ColumnFamilyTtl;
 use crate::event_listener::{new_event_listener, EventListener};
+use crate::sst_file_manager::SstFileManager;
 use crate::statistics::{Histogram, HistogramData, StatsLevel};
 use crate::write_buffer_manager::WriteBufferManager;
 use crate::{
@@ -59,6 +60,7 @@ pub(crate) struct OptionsMustOutliveDB {
     blob_cache: Option<Cache>,
     block_based: Option<BlockBasedOptionsMustOutliveDB>,
     write_buffer_manager: Option<WriteBufferManager>,
+    sst_file_manager: Option<SstFileManager>,
     log_callback: Option<Arc<LogCallback>>,
 }
 
@@ -73,6 +75,7 @@ impl OptionsMustOutliveDB {
                 .as_ref()
                 .map(BlockBasedOptionsMustOutliveDB::clone),
             write_buffer_manager: self.write_buffer_manager.clone(),
+            sst_file_manager: self.sst_file_manager.clone(),
             log_callback: self.log_callback.clone(),
         }
     }
@@ -3657,6 +3660,26 @@ impl Options {
         }
     }
 
+    /// Like [`Self::add_compact_on_deletion_collector_factory`], but only triggers
+    /// compaction if the SST file size is at least `min_file_size` bytes.
+    pub fn add_compact_on_deletion_collector_factory_min_file_size(
+        &mut self,
+        window_size: size_t,
+        num_dels_trigger: size_t,
+        deletion_ratio: f64,
+        min_file_size: u64,
+    ) {
+        unsafe {
+            ffi::rocksdb_options_add_compact_on_deletion_collector_factory_min_file_size(
+                self.inner,
+                window_size,
+                num_dels_trigger,
+                deletion_ratio,
+                min_file_size,
+            );
+        }
+    }
+
     /// <https://github.com/facebook/rocksdb/wiki/Write-Buffer-Manager>
     /// Write buffer manager helps users control the total memory used by memtables across multiple column families and/or DB instances.
     /// Users can enable this control by 2 ways:
@@ -3673,6 +3696,20 @@ impl Options {
             );
         }
         self.outlive.write_buffer_manager = Some(write_buffer_manager.clone());
+    }
+
+    /// Sets an `SstFileManager` for this `Options`.
+    ///
+    /// SstFileManager tracks and controls total SST file space usage, enabling
+    /// applications to cap disk utilization and throttle deletions.
+    pub fn set_sst_file_manager(&mut self, sst_file_manager: &SstFileManager) {
+        unsafe {
+            ffi::rocksdb_options_set_sst_file_manager(
+                self.inner,
+                sst_file_manager.0.inner.as_ptr(),
+            );
+        }
+        self.outlive.sst_file_manager = Some(sst_file_manager.clone());
     }
 
     /// If true, working thread may avoid doing unnecessary and long-latency

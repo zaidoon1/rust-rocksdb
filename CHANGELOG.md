@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.44.1 (2025-10-23)
+
+- simplify SstFileManager by using default Env internally (zaidoon1)
+
 ## 0.44.0 (2025-10-23)
 
 - upgrade to RocksDB 10.6.0 (zaidoon1)

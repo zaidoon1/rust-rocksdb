@@ -1,15 +1,14 @@
 mod util;
 
 use rust_rocksdb::sst_file_manager::SstFileManager;
-use rust_rocksdb::{Env, FlushOptions, Options, DB};
+use rust_rocksdb::{FlushOptions, Options, DB};
 use util::DBPath;
 
 #[test]
 fn test_sst_file_manager_config_and_sizes() {
     let path = DBPath::new("_rust_rocksdb_test_sst_file_manager_config_and_sizes");
 
-    let env = Env::new().unwrap();
-    let sfm = SstFileManager::new(&env);
+    let sfm = SstFileManager::new();
 
     // Set compaction buffer size (no direct getter, just ensure it doesn't panic).
     sfm.set_compaction_buffer_size(64 * 1024);

@@ -6,6 +6,7 @@ use crate::ffi;
 
 pub(crate) struct SstFileManagerWrapper {
     pub(crate) inner: NonNull<ffi::rocksdb_sst_file_manager_t>,
+    pub(crate) _env: Env,
 }
 
 unsafe impl Send for SstFileManagerWrapper {}
@@ -23,14 +24,16 @@ impl Drop for SstFileManagerWrapper {
 pub struct SstFileManager(pub(crate) Arc<SstFileManagerWrapper>);
 
 impl SstFileManager {
-    /// Creates a new `SstFileManager` bound to the provided `Env`.
+    /// Creates a new `SstFileManager` using the default `Env`.
     ///
     /// SstFileManager tracks and controls total SST file space usage, enabling
     /// applications to cap disk utilization and throttle deletions.
-    pub fn new(env: &Env) -> Self {
+    /// see [docs](https://github.com/facebook/rocksdb/wiki/SST-File-Manager) for more details.
+    pub fn new() -> Self {
+        let env = Env::new().expect("Could not create default Env");
         let inner = NonNull::new(unsafe { ffi::rocksdb_sst_file_manager_create(env.0.inner) })
             .expect("Could not create RocksDB sst file manager");
-        SstFileManager(Arc::new(SstFileManagerWrapper { inner }))
+        SstFileManager(Arc::new(SstFileManagerWrapper { inner, _env: env }))
     }
 
     /// Sets the maximum allowed total SST file size in bytes.
@@ -98,5 +101,11 @@ impl SstFileManager {
     /// Returns the total trash size tracked by this manager in bytes.
     pub fn get_total_trash_size(&self) -> u64 {
         unsafe { ffi::rocksdb_sst_file_manager_get_total_trash_size(self.0.inner.as_ptr()) }
+    }
+}
+
+impl Default for SstFileManager {
+    fn default() -> Self {
+        Self::new()
     }
 }

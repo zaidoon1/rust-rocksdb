@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.44.0 (2025-10-23)
+
+- upgrade to RocksDB 10.6.0 (zaidoon1)
+- feat: expose enable_file_deletions/disable_file_deletions (jszwec)
+- expose SstFileManager and Options::set_sst_file_manager (zaidoon1)
+- add add_compact_on_deletion_collector_factory_min_file_size option (zaidoon1)
+- expose set_cache_index_and_filter_blocks_with_high_priority (zaidoon1)
+- Options.set_callback_logger: Make closure lifetimes safe (evanj)
+- add support for SingleDelete (zaidoon1)
+
 ## 0.43.0 (2025-08-11)
 
 - upgrade to RocksDB 10.5.1 (zaidoon1)

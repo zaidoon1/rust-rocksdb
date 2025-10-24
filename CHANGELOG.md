@@ -6,7 +6,7 @@
 
 ## 0.44.0 (2025-10-23)
 
-- upgrade to RocksDB 10.6.0 (zaidoon1)
+- upgrade to RocksDB 10.7.5 (zaidoon1)
 - feat: expose enable_file_deletions/disable_file_deletions (jszwec)
 - expose SstFileManager and Options::set_sst_file_manager (zaidoon1)
 - add add_compact_on_deletion_collector_factory_min_file_size option (zaidoon1)

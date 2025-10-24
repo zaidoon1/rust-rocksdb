@@ -2853,6 +2853,8 @@ impl<I: DBInner> DBCommon<MultiThreaded, I> {
         import_options: &ImportColumnFamilyOptions,
         metadata: &ExportImportFilesMetaData,
     ) -> Result<(), Error> {
+        // Acquire CF lock upfront, before creating the CF, to avoid a race with concurrent creators
+        let mut cfs = self.cfs.cfs.write();
         let name = column_family_name.as_ref();
         let c_name = CString::new(name).map_err(|err| {
             Error::new(format!(
@@ -2868,7 +2870,7 @@ impl<I: DBInner> DBCommon<MultiThreaded, I> {
                 metadata.inner
             ))
         };
-        self.cfs.cfs.write().insert(
+        cfs.insert(
             column_family_name.as_ref().to_string(),
             Arc::new(UnboundColumnFamily { inner }),
         );
@@ -3089,17 +3091,17 @@ impl ExportImportFilesMetaData {
                 ffi::rocksdb_livefile_set_level(live_file.0, file.level);
 
                 // SAFETY: C strings are copied inside the FFI layer so do not need to be kept alive
-                let c_cf_name = CString::new(file.column_family_name.clone()).map_err(|err| {
+                let c_cf_name = CString::new(file.column_family_name.as_str()).map_err(|err| {
                     Error::new(format!("Unable to convert column family to CString: {err}"))
                 })?;
                 ffi::rocksdb_livefile_set_column_family_name(live_file.0, c_cf_name.as_ptr());
 
-                let c_name = CString::new(file.name.clone()).map_err(|err| {
+                let c_name = CString::new(file.name.as_str()).map_err(|err| {
                     Error::new(format!("Unable to convert file name to CString: {err}"))
                 })?;
                 ffi::rocksdb_livefile_set_name(live_file.0, c_name.as_ptr());
 
-                let c_directory = CString::new(file.directory.clone()).map_err(|err| {
+                let c_directory = CString::new(file.directory.as_str()).map_err(|err| {
                     Error::new(format!("Unable to convert directory to CString: {err}"))
                 })?;
                 ffi::rocksdb_livefile_set_directory(live_file.0, c_directory.as_ptr());
@@ -3139,9 +3141,13 @@ impl ExportImportFilesMetaData {
 
 impl Default for ExportImportFilesMetaData {
     fn default() -> Self {
-        Self {
-            inner: unsafe { ffi::rocksdb_export_import_files_metadata_create() },
-        }
+        let inner = unsafe { ffi::rocksdb_export_import_files_metadata_create() };
+        assert!(
+            !inner.is_null(),
+            "Could not create rocksdb_export_import_files_metadata_t"
+        );
+
+        Self { inner }
     }
 }
 

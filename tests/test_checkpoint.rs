@@ -166,7 +166,7 @@ pub fn test_export_checkpoint_column_family() {
 
     let mut import_metadata = ExportImportFilesMetaData::default();
     import_metadata.set_db_comparator_name(&export_metadata.get_db_comparator_name());
-    import_metadata.set_files(&export_files.to_vec());
+    import_metadata.set_files(&export_files.to_vec()).unwrap();
 
     let cf_opts = Options::default();
     let mut import_opts = ImportColumnFamilyOptions::default();

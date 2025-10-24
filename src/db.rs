@@ -13,6 +13,21 @@
 // limitations under the License.
 //
 
+use std::collections::BTreeMap;
+use std::ffi::{CStr, CString};
+use std::fmt;
+use std::fs;
+use std::iter;
+use std::path::Path;
+use std::path::PathBuf;
+use std::ptr;
+use std::slice;
+use std::str;
+use std::sync::Arc;
+use std::time::Duration;
+
+use crate::column_family::ColumnFamilyTtl;
+use crate::ffi_util::CSlice;
 use crate::{
     column_family::AsColumnFamilyRef,
     column_family::BoundColumnFamily,
@@ -26,23 +41,12 @@ use crate::{
     WaitForCompactOptions, WriteBatch, WriteBatchWithIndex, WriteOptions,
     DEFAULT_COLUMN_FAMILY_NAME,
 };
+use rust_librocksdb_sys::{
+    rocksdb_livefile_destroy, rocksdb_livefile_t, rocksdb_livefiles_destroy, rocksdb_livefiles_t,
+};
 
-use crate::column_family::ColumnFamilyTtl;
-use crate::ffi_util::CSlice;
 use libc::{self, c_char, c_int, c_uchar, c_void, size_t};
 use parking_lot::RwLock;
-use std::collections::BTreeMap;
-use std::ffi::{CStr, CString};
-use std::fmt;
-use std::fs;
-use std::iter;
-use std::path::Path;
-use std::path::PathBuf;
-use std::ptr;
-use std::slice;
-use std::str;
-use std::sync::Arc;
-use std::time::Duration;
 
 /// A range of keys, `start_key` is included, but not `end_key`.
 ///
@@ -2993,6 +2997,46 @@ impl LiveFile {
     }
 }
 
+struct LiveFileGuard(*mut rocksdb_livefile_t);
+
+impl LiveFileGuard {
+    fn into_raw(mut self) -> *mut rocksdb_livefile_t {
+        let ptr = self.0;
+        self.0 = ptr::null_mut();
+        ptr
+    }
+}
+
+impl Drop for LiveFileGuard {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe {
+                rocksdb_livefile_destroy(self.0);
+            }
+        }
+    }
+}
+
+struct LiveFilesGuard(*mut rocksdb_livefiles_t);
+
+impl LiveFilesGuard {
+    fn into_raw(mut self) -> *mut rocksdb_livefiles_t {
+        let ptr = self.0;
+        self.0 = ptr::null_mut();
+        ptr
+    }
+}
+
+impl Drop for LiveFilesGuard {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe {
+                rocksdb_livefiles_destroy(self.0);
+            }
+        }
+    }
+}
+
 /// Metadata returned as output from [`Checkpoint::export_column_family`][export_column_family] and
 /// used as input to [`DB::create_column_family_with_import`].
 ///
@@ -3032,51 +3076,63 @@ impl ExportImportFilesMetaData {
         }
     }
 
-    pub fn set_files(&mut self, files: &Vec<LiveFile>) {
+    pub fn set_files(&mut self, files: &[LiveFile]) -> Result<(), Error> {
+        // Use a non-null empty pointer for zero-length keys
+        static EMPTY: [u8; 0] = [];
+        let empty_ptr = EMPTY.as_ptr() as *const libc::c_char;
+
         unsafe {
-            let livefiles = ffi::rocksdb_livefiles_create();
+            let live_files = LiveFilesGuard(ffi::rocksdb_livefiles_create());
 
             for file in files {
-                let live_file = ffi::rocksdb_livefile_create();
+                let live_file = LiveFileGuard(ffi::rocksdb_livefile_create());
+                ffi::rocksdb_livefile_set_level(live_file.0, file.level);
 
-                // SAFETY: these strings are copied in the FFI layer so do not need to be kept alive
-                let c_column_family_name = CString::new(file.column_family_name.clone()).unwrap();
-                let c_name = CString::new(file.name.clone()).unwrap();
-                let c_directory = CString::new(file.directory.clone()).unwrap();
+                // SAFETY: C strings are copied inside the FFI layer so do not need to be kept alive
+                let c_cf_name = CString::new(file.column_family_name.clone()).map_err(|err| {
+                    Error::new(format!("Unable to convert column family to CString: {err}"))
+                })?;
+                ffi::rocksdb_livefile_set_column_family_name(live_file.0, c_cf_name.as_ptr());
 
-                ffi::rocksdb_livefile_set_column_family_name(
-                    live_file,
-                    c_column_family_name.as_ptr(),
-                );
-                ffi::rocksdb_livefile_set_level(live_file, file.level);
-                ffi::rocksdb_livefile_set_name(live_file, c_name.as_ptr());
-                ffi::rocksdb_livefile_set_directory(live_file, c_directory.as_ptr());
-                ffi::rocksdb_livefile_set_size(live_file, file.size);
-                ffi::rocksdb_livefile_set_smallest_key(
-                    live_file,
-                    file.start_key
-                        .as_ref()
-                        .map_or(ptr::null(), |k| k.as_ptr() as *const libc::c_char),
-                    file.start_key.as_ref().map_or(0, Vec::len),
-                );
+                let c_name = CString::new(file.name.clone()).map_err(|err| {
+                    Error::new(format!("Unable to convert file name to CString: {err}"))
+                })?;
+                ffi::rocksdb_livefile_set_name(live_file.0, c_name.as_ptr());
+
+                let c_directory = CString::new(file.directory.clone()).map_err(|err| {
+                    Error::new(format!("Unable to convert directory to CString: {err}"))
+                })?;
+                ffi::rocksdb_livefile_set_directory(live_file.0, c_directory.as_ptr());
+
+                ffi::rocksdb_livefile_set_size(live_file.0, file.size);
+
+                let (start_key_ptr, start_key_len) = match &file.start_key {
+                    None => (empty_ptr, 0),
+                    Some(key) => (key.as_ptr() as *const libc::c_char, key.len()),
+                };
+                ffi::rocksdb_livefile_set_smallest_key(live_file.0, start_key_ptr, start_key_len);
+
+                let (largest_key_ptr, largest_key_len) = match &file.end_key {
+                    None => (empty_ptr, 0),
+                    Some(key) => (key.as_ptr() as *const libc::c_char, key.len()),
+                };
                 ffi::rocksdb_livefile_set_largest_key(
-                    live_file,
-                    file.end_key
-                        .as_ref()
-                        .map_or(ptr::null(), |k| k.as_ptr() as *const libc::c_char),
-                    file.end_key.as_ref().map_or(0, Vec::len),
+                    live_file.0,
+                    largest_key_ptr,
+                    largest_key_len,
                 );
-                ffi::rocksdb_livefile_set_smallest_seqno(live_file, file.smallest_seqno);
-                ffi::rocksdb_livefile_set_largest_seqno(live_file, file.largest_seqno);
-                ffi::rocksdb_livefile_set_num_entries(live_file, file.num_entries);
-                ffi::rocksdb_livefile_set_num_deletions(live_file, file.num_deletions);
+                ffi::rocksdb_livefile_set_smallest_seqno(live_file.0, file.smallest_seqno);
+                ffi::rocksdb_livefile_set_largest_seqno(live_file.0, file.largest_seqno);
+                ffi::rocksdb_livefile_set_num_entries(live_file.0, file.num_entries);
+                ffi::rocksdb_livefile_set_num_deletions(live_file.0, file.num_deletions);
 
-                // takes ownership of live_file, no need to destroy it after
-                ffi::rocksdb_livefiles_add(livefiles, live_file);
+                // moves ownership of live_files into live_file
+                ffi::rocksdb_livefiles_add(live_files.0, live_file.into_raw());
             }
 
-            // takes ownership of livefiles, no need to destroy it after
-            ffi::rocksdb_export_import_files_metadata_set_files(self.inner, livefiles);
+            // moves ownership of live_files into inner
+            ffi::rocksdb_export_import_files_metadata_set_files(self.inner, live_files.into_raw());
+            Ok(())
         }
     }
 }

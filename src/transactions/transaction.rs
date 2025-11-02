@@ -13,7 +13,7 @@
 // limitations under the License.
 //
 
-use std::{marker::PhantomData, ptr};
+use std::marker::PhantomData;
 
 use crate::{
     db::{convert_values, DBAccess},
@@ -21,6 +21,14 @@ use crate::{
     Direction, Error, IteratorMode, ReadOptions, SnapshotWithThreadMode, WriteBatchWithTransaction,
 };
 use libc::{c_char, c_void, size_t};
+
+// Default options are kept per-thread to avoid re-allocating on every call while
+// also preventing cross-thread sharing. Some RocksDB option wrappers hold
+// pointers into internal buffers and are not safe to share across threads.
+// Using thread_local allows cheap reuse in the common "default options" path
+// without synchronization overhead. Callers who need non-defaults must pass
+// explicit options.
+thread_local! { static DEFAULT_READ_OPTS: ReadOptions = ReadOptions::default(); }
 
 /// RocksDB Transaction.
 ///
@@ -228,14 +236,14 @@ impl<DB> Transaction<'_, DB> {
     ///
     /// [`get_cf_opt`]: Self::get_cf_opt
     pub fn get<K: AsRef<[u8]>>(&self, key: K) -> Result<Option<Vec<u8>>, Error> {
-        self.get_opt(key, &ReadOptions::default())
+        DEFAULT_READ_OPTS.with(|opts| self.get_opt(key, opts))
     }
 
     pub fn get_pinned<K: AsRef<[u8]>>(
         &'_ self,
         key: K,
     ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
-        self.get_pinned_opt(key, &ReadOptions::default())
+        DEFAULT_READ_OPTS.with(|opts| self.get_pinned_opt(key, opts))
     }
 
     /// Get the bytes associated with a key value and the given column family.
@@ -248,7 +256,7 @@ impl<DB> Transaction<'_, DB> {
         cf: &impl AsColumnFamilyRef,
         key: K,
     ) -> Result<Option<Vec<u8>>, Error> {
-        self.get_cf_opt(cf, key, &ReadOptions::default())
+        DEFAULT_READ_OPTS.with(|opts| self.get_cf_opt(cf, key, opts))
     }
 
     pub fn get_pinned_cf<K: AsRef<[u8]>>(
@@ -256,7 +264,7 @@ impl<DB> Transaction<'_, DB> {
         cf: &impl AsColumnFamilyRef,
         key: K,
     ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
-        self.get_pinned_cf_opt(cf, key, &ReadOptions::default())
+        DEFAULT_READ_OPTS.with(|opts| self.get_pinned_cf_opt(cf, key, opts))
     }
 
     /// Get the key and ensure that this transaction will only
@@ -272,7 +280,7 @@ impl<DB> Transaction<'_, DB> {
         key: K,
         exclusive: bool,
     ) -> Result<Option<Vec<u8>>, Error> {
-        self.get_for_update_opt(key, exclusive, &ReadOptions::default())
+        DEFAULT_READ_OPTS.with(|opts| self.get_for_update_opt(key, exclusive, opts))
     }
 
     pub fn get_pinned_for_update<K: AsRef<[u8]>>(
@@ -280,7 +288,7 @@ impl<DB> Transaction<'_, DB> {
         key: K,
         exclusive: bool,
     ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
-        self.get_pinned_for_update_opt(key, exclusive, &ReadOptions::default())
+        DEFAULT_READ_OPTS.with(|opts| self.get_pinned_for_update_opt(key, exclusive, opts))
     }
 
     /// Get the key in the given column family and ensure that this transaction will only
@@ -297,7 +305,7 @@ impl<DB> Transaction<'_, DB> {
         key: K,
         exclusive: bool,
     ) -> Result<Option<Vec<u8>>, Error> {
-        self.get_for_update_cf_opt(cf, key, exclusive, &ReadOptions::default())
+        DEFAULT_READ_OPTS.with(|opts| self.get_for_update_cf_opt(cf, key, exclusive, opts))
     }
 
     pub fn get_pinned_for_update_cf<K: AsRef<[u8]>>(
@@ -306,7 +314,7 @@ impl<DB> Transaction<'_, DB> {
         key: K,
         exclusive: bool,
     ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
-        self.get_pinned_for_update_cf_opt(cf, key, exclusive, &ReadOptions::default())
+        DEFAULT_READ_OPTS.with(|opts| self.get_pinned_for_update_cf_opt(cf, key, exclusive, opts))
     }
 
     /// Returns the bytes associated with a key value with read options.
@@ -508,18 +516,16 @@ impl<DB> Transaction<'_, DB> {
         K: AsRef<[u8]>,
         I: IntoIterator<Item = K>,
     {
-        let (keys, keys_sizes): (Vec<Box<[u8]>>, Vec<_>) = keys
-            .into_iter()
-            .map(|key| {
-                let key = key.as_ref();
-                (Box::from(key), key.len())
-            })
-            .unzip();
-        let ptr_keys: Vec<_> = keys.iter().map(|k| k.as_ptr() as *const c_char).collect();
+        let owned_keys: Vec<K> = keys.into_iter().collect();
+        let keys_sizes: Vec<usize> = owned_keys.iter().map(|k| k.as_ref().len()).collect();
+        let ptr_keys: Vec<*const c_char> = owned_keys
+            .iter()
+            .map(|k| k.as_ref().as_ptr() as *const c_char)
+            .collect();
 
-        let mut values = vec![ptr::null_mut(); keys.len()];
-        let mut values_sizes = vec![0_usize; keys.len()];
-        let mut errors = vec![ptr::null_mut(); keys.len()];
+        let mut values: Vec<*mut c_char> = Vec::with_capacity(ptr_keys.len());
+        let mut values_sizes: Vec<usize> = Vec::with_capacity(ptr_keys.len());
+        let mut errors: Vec<*mut c_char> = Vec::with_capacity(ptr_keys.len());
         unsafe {
             ffi::rocksdb_transaction_multi_get(
                 self.inner,
@@ -531,6 +537,12 @@ impl<DB> Transaction<'_, DB> {
                 values_sizes.as_mut_ptr(),
                 errors.as_mut_ptr(),
             );
+        }
+
+        unsafe {
+            values.set_len(ptr_keys.len());
+            values_sizes.set_len(ptr_keys.len());
+            errors.set_len(ptr_keys.len());
         }
 
         convert_values(values, values_sizes, errors)
@@ -546,7 +558,7 @@ impl<DB> Transaction<'_, DB> {
         I: IntoIterator<Item = (&'b W, K)>,
         W: 'b + AsColumnFamilyRef,
     {
-        self.multi_get_cf_opt(keys, &ReadOptions::default())
+        DEFAULT_READ_OPTS.with(|opts| self.multi_get_cf_opt(keys, opts))
     }
 
     /// Return the values associated with the given keys and column families using read options.
@@ -560,25 +572,22 @@ impl<DB> Transaction<'_, DB> {
         I: IntoIterator<Item = (&'b W, K)>,
         W: 'b + AsColumnFamilyRef,
     {
-        let (cfs_and_keys, keys_sizes): (Vec<(_, Box<[u8]>)>, Vec<_>) = keys
-            .into_iter()
-            .map(|(cf, key)| {
-                let key = key.as_ref();
-                ((cf, Box::from(key)), key.len())
-            })
-            .unzip();
-        let ptr_keys: Vec<_> = cfs_and_keys
+        let cfs_and_owned_keys: Vec<(&'b W, K)> = keys.into_iter().collect();
+        let keys_sizes: Vec<usize> = cfs_and_owned_keys
             .iter()
-            .map(|(_, k)| k.as_ptr() as *const c_char)
+            .map(|(_, k)| k.as_ref().len())
             .collect();
-        let ptr_cfs: Vec<_> = cfs_and_keys
+        let ptr_keys: Vec<*const c_char> = cfs_and_owned_keys
+            .iter()
+            .map(|(_, k)| k.as_ref().as_ptr() as *const c_char)
+            .collect();
+        let ptr_cfs: Vec<*const ffi::rocksdb_column_family_handle_t> = cfs_and_owned_keys
             .iter()
             .map(|(c, _)| c.inner().cast_const())
             .collect();
-
-        let mut values = vec![ptr::null_mut(); ptr_keys.len()];
-        let mut values_sizes = vec![0_usize; ptr_keys.len()];
-        let mut errors = vec![ptr::null_mut(); ptr_keys.len()];
+        let mut values: Vec<*mut c_char> = Vec::with_capacity(ptr_keys.len());
+        let mut values_sizes: Vec<usize> = Vec::with_capacity(ptr_keys.len());
+        let mut errors: Vec<*mut c_char> = Vec::with_capacity(ptr_keys.len());
         unsafe {
             ffi::rocksdb_transaction_multi_get_cf(
                 self.inner,
@@ -591,6 +600,12 @@ impl<DB> Transaction<'_, DB> {
                 values_sizes.as_mut_ptr(),
                 errors.as_mut_ptr(),
             );
+        }
+
+        unsafe {
+            values.set_len(ptr_keys.len());
+            values_sizes.set_len(ptr_keys.len());
+            errors.set_len(ptr_keys.len());
         }
 
         convert_values(values, values_sizes, errors)

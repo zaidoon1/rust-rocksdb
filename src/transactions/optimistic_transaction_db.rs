@@ -27,6 +27,14 @@ use crate::{
     ThreadMode, Transaction, WriteOptions, DEFAULT_COLUMN_FAMILY_NAME,
 };
 
+// Default options are kept per-thread to avoid re-allocating on every call while
+// also preventing cross-thread sharing. Some RocksDB option wrappers hold
+// pointers into internal buffers and are not safe to share across threads.
+// Using thread_local allows cheap reuse in the common "default options" path
+// without synchronization overhead. Callers who need non-defaults must pass
+// explicit options.
+thread_local! { static DEFAULT_WRITE_OPTS: WriteOptions = WriteOptions::default(); }
+
 /// A type alias to RocksDB Optimistic Transaction DB.
 ///
 /// Please read the official
@@ -253,10 +261,8 @@ impl<T: ThreadMode> OptimisticTransactionDB<T> {
 
     /// Creates a transaction with default options.
     pub fn transaction(&'_ self) -> Transaction<'_, Self> {
-        self.transaction_opt(
-            &WriteOptions::default(),
-            &OptimisticTransactionOptions::default(),
-        )
+        DEFAULT_WRITE_OPTS
+            .with(|opts| self.transaction_opt(opts, &OptimisticTransactionOptions::default()))
     }
 
     /// Creates a transaction with default options.
@@ -294,7 +300,7 @@ impl<T: ThreadMode> OptimisticTransactionDB<T> {
     }
 
     pub fn write(&self, batch: &WriteBatchWithTransaction<true>) -> Result<(), Error> {
-        self.write_opt(batch, &WriteOptions::default())
+        DEFAULT_WRITE_OPTS.with(|opts| self.write_opt(batch, opts))
     }
 
     pub fn write_without_wal(&self, batch: &WriteBatchWithTransaction<true>) -> Result<(), Error> {
@@ -335,6 +341,6 @@ impl<T: ThreadMode> OptimisticTransactionDB<T> {
         from: K,
         to: K,
     ) -> Result<(), Error> {
-        self.delete_range_cf_opt(cf, from, to, &WriteOptions::default())
+        DEFAULT_WRITE_OPTS.with(|opts| self.delete_range_cf_opt(cf, from, to, opts))
     }
 }

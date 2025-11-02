@@ -42,6 +42,15 @@ use crate::{
 use ffi::rocksdb_transaction_t;
 use libc::{c_char, c_int, c_void, size_t};
 
+// Default options are kept per-thread to avoid re-allocating on every call while
+// also preventing cross-thread sharing. Some RocksDB option wrappers hold
+// pointers into internal buffers and are not safe to share across threads.
+// Using thread_local allows cheap reuse in the common "default options" path
+// without synchronization overhead. Callers who need non-defaults must pass
+// explicit options.
+thread_local! { static DEFAULT_READ_OPTS: ReadOptions = ReadOptions::default(); }
+thread_local! { static DEFAULT_WRITE_OPTS: WriteOptions = WriteOptions::default(); }
+
 #[cfg(not(feature = "multi-threaded-cf"))]
 type DefaultThreadMode = crate::SingleThreaded;
 #[cfg(feature = "multi-threaded-cf")]
@@ -403,7 +412,7 @@ impl<T: ThreadMode> TransactionDB<T> {
 
     /// Creates a transaction with default options.
     pub fn transaction(&'_ self) -> Transaction<'_, Self> {
-        self.transaction_opt(&WriteOptions::default(), &TransactionOptions::default())
+        DEFAULT_WRITE_OPTS.with(|opts| self.transaction_opt(opts, &TransactionOptions::default()))
     }
 
     /// Creates a transaction with options.
@@ -481,7 +490,7 @@ impl<T: ThreadMode> TransactionDB<T> {
         &'_ self,
         key: K,
     ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
-        self.get_pinned_opt(key, &ReadOptions::default())
+        DEFAULT_READ_OPTS.with(|opts| self.get_pinned_opt(key, opts))
     }
 
     /// Returns the bytes associated with a key value and the given column family.
@@ -490,7 +499,7 @@ impl<T: ThreadMode> TransactionDB<T> {
         cf: &impl AsColumnFamilyRef,
         key: K,
     ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
-        self.get_pinned_cf_opt(cf, key, &ReadOptions::default())
+        DEFAULT_READ_OPTS.with(|opts| self.get_pinned_cf_opt(cf, key, opts))
     }
 
     /// Returns the bytes associated with a key value with read options.
@@ -545,7 +554,7 @@ impl<T: ThreadMode> TransactionDB<T> {
         K: AsRef<[u8]>,
         I: IntoIterator<Item = K>,
     {
-        self.multi_get_opt(keys, &ReadOptions::default())
+        DEFAULT_READ_OPTS.with(|opts| self.multi_get_opt(keys, opts))
     }
 
     /// Return the values associated with the given keys using read options.
@@ -558,18 +567,16 @@ impl<T: ThreadMode> TransactionDB<T> {
         K: AsRef<[u8]>,
         I: IntoIterator<Item = K>,
     {
-        let (keys, keys_sizes): (Vec<Box<[u8]>>, Vec<_>) = keys
-            .into_iter()
-            .map(|key| {
-                let key = key.as_ref();
-                (Box::from(key), key.len())
-            })
-            .unzip();
-        let ptr_keys: Vec<_> = keys.iter().map(|k| k.as_ptr() as *const c_char).collect();
+        let owned_keys: Vec<K> = keys.into_iter().collect();
+        let keys_sizes: Vec<usize> = owned_keys.iter().map(|k| k.as_ref().len()).collect();
+        let ptr_keys: Vec<*const c_char> = owned_keys
+            .iter()
+            .map(|k| k.as_ref().as_ptr() as *const c_char)
+            .collect();
 
-        let mut values = vec![ptr::null_mut(); keys.len()];
-        let mut values_sizes = vec![0_usize; keys.len()];
-        let mut errors = vec![ptr::null_mut(); keys.len()];
+        let mut values: Vec<*mut c_char> = Vec::with_capacity(ptr_keys.len());
+        let mut values_sizes: Vec<usize> = Vec::with_capacity(ptr_keys.len());
+        let mut errors: Vec<*mut c_char> = Vec::with_capacity(ptr_keys.len());
         unsafe {
             ffi::rocksdb_transactiondb_multi_get(
                 self.inner,
@@ -581,6 +588,12 @@ impl<T: ThreadMode> TransactionDB<T> {
                 values_sizes.as_mut_ptr(),
                 errors.as_mut_ptr(),
             );
+        }
+
+        unsafe {
+            values.set_len(ptr_keys.len());
+            values_sizes.set_len(ptr_keys.len());
+            errors.set_len(ptr_keys.len());
         }
 
         convert_values(values, values_sizes, errors)
@@ -596,7 +609,7 @@ impl<T: ThreadMode> TransactionDB<T> {
         I: IntoIterator<Item = (&'b W, K)>,
         W: 'b + AsColumnFamilyRef,
     {
-        self.multi_get_cf_opt(keys, &ReadOptions::default())
+        DEFAULT_READ_OPTS.with(|opts| self.multi_get_cf_opt(keys, opts))
     }
 
     /// Return the values associated with the given keys and column families using read options.
@@ -610,25 +623,22 @@ impl<T: ThreadMode> TransactionDB<T> {
         I: IntoIterator<Item = (&'b W, K)>,
         W: 'b + AsColumnFamilyRef,
     {
-        let (cfs_and_keys, keys_sizes): (Vec<(_, Box<[u8]>)>, Vec<_>) = keys
-            .into_iter()
-            .map(|(cf, key)| {
-                let key = key.as_ref();
-                ((cf, Box::from(key)), key.len())
-            })
-            .unzip();
-        let ptr_keys: Vec<_> = cfs_and_keys
+        let cfs_and_owned_keys: Vec<(&'b W, K)> = keys.into_iter().collect();
+        let keys_sizes: Vec<usize> = cfs_and_owned_keys
             .iter()
-            .map(|(_, k)| k.as_ptr() as *const c_char)
+            .map(|(_, k)| k.as_ref().len())
             .collect();
-        let ptr_cfs: Vec<_> = cfs_and_keys
+        let ptr_keys: Vec<*const c_char> = cfs_and_owned_keys
+            .iter()
+            .map(|(_, k)| k.as_ref().as_ptr() as *const c_char)
+            .collect();
+        let ptr_cfs: Vec<*const ffi::rocksdb_column_family_handle_t> = cfs_and_owned_keys
             .iter()
             .map(|(c, _)| c.inner().cast_const())
             .collect();
-
-        let mut values = vec![ptr::null_mut(); ptr_keys.len()];
-        let mut values_sizes = vec![0_usize; ptr_keys.len()];
-        let mut errors = vec![ptr::null_mut(); ptr_keys.len()];
+        let mut values: Vec<*mut c_char> = Vec::with_capacity(ptr_keys.len());
+        let mut values_sizes: Vec<usize> = Vec::with_capacity(ptr_keys.len());
+        let mut errors: Vec<*mut c_char> = Vec::with_capacity(ptr_keys.len());
         unsafe {
             ffi::rocksdb_transactiondb_multi_get_cf(
                 self.inner,
@@ -643,6 +653,12 @@ impl<T: ThreadMode> TransactionDB<T> {
             );
         }
 
+        unsafe {
+            values.set_len(ptr_keys.len());
+            values_sizes.set_len(ptr_keys.len());
+            errors.set_len(ptr_keys.len());
+        }
+
         convert_values(values, values_sizes, errors)
     }
 
@@ -651,7 +667,7 @@ impl<T: ThreadMode> TransactionDB<T> {
         K: AsRef<[u8]>,
         V: AsRef<[u8]>,
     {
-        self.put_opt(key, value, &WriteOptions::default())
+        DEFAULT_WRITE_OPTS.with(|opts| self.put_opt(key, value, opts))
     }
 
     pub fn put_cf<K, V>(&self, cf: &impl AsColumnFamilyRef, key: K, value: V) -> Result<(), Error>
@@ -659,7 +675,7 @@ impl<T: ThreadMode> TransactionDB<T> {
         K: AsRef<[u8]>,
         V: AsRef<[u8]>,
     {
-        self.put_cf_opt(cf, key, value, &WriteOptions::default())
+        DEFAULT_WRITE_OPTS.with(|opts| self.put_cf_opt(cf, key, value, opts))
     }
 
     pub fn put_opt<K, V>(&self, key: K, value: V, writeopts: &WriteOptions) -> Result<(), Error>
@@ -710,7 +726,7 @@ impl<T: ThreadMode> TransactionDB<T> {
     }
 
     pub fn write(&self, batch: &WriteBatchWithTransaction<true>) -> Result<(), Error> {
-        self.write_opt(batch, &WriteOptions::default())
+        DEFAULT_WRITE_OPTS.with(|opts| self.write_opt(batch, opts))
     }
 
     pub fn write_opt(
@@ -733,7 +749,7 @@ impl<T: ThreadMode> TransactionDB<T> {
         K: AsRef<[u8]>,
         V: AsRef<[u8]>,
     {
-        self.merge_opt(key, value, &WriteOptions::default())
+        DEFAULT_WRITE_OPTS.with(|opts| self.merge_opt(key, value, opts))
     }
 
     pub fn merge_cf<K, V>(&self, cf: &impl AsColumnFamilyRef, key: K, value: V) -> Result<(), Error>
@@ -741,7 +757,7 @@ impl<T: ThreadMode> TransactionDB<T> {
         K: AsRef<[u8]>,
         V: AsRef<[u8]>,
     {
-        self.merge_cf_opt(cf, key, value, &WriteOptions::default())
+        DEFAULT_WRITE_OPTS.with(|opts| self.merge_cf_opt(cf, key, value, opts))
     }
 
     pub fn merge_opt<K, V>(&self, key: K, value: V, writeopts: &WriteOptions) -> Result<(), Error>
@@ -792,7 +808,7 @@ impl<T: ThreadMode> TransactionDB<T> {
     }
 
     pub fn delete<K: AsRef<[u8]>>(&self, key: K) -> Result<(), Error> {
-        self.delete_opt(key, &WriteOptions::default())
+        DEFAULT_WRITE_OPTS.with(|opts| self.delete_opt(key, opts))
     }
 
     pub fn delete_cf<K: AsRef<[u8]>>(
@@ -800,7 +816,7 @@ impl<T: ThreadMode> TransactionDB<T> {
         cf: &impl AsColumnFamilyRef,
         key: K,
     ) -> Result<(), Error> {
-        self.delete_cf_opt(cf, key, &WriteOptions::default())
+        DEFAULT_WRITE_OPTS.with(|opts| self.delete_cf_opt(cf, key, opts))
     }
 
     pub fn delete_opt<K: AsRef<[u8]>>(

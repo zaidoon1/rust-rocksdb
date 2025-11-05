@@ -13,7 +13,8 @@
 // limitations under the License.
 //
 
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap};
 use std::ffi::{CStr, CString};
 use std::fmt;
 use std::fs;
@@ -48,6 +49,18 @@ use rust_librocksdb_sys::{
 use libc::{self, c_char, c_int, c_uchar, c_void, size_t};
 use parking_lot::RwLock;
 
+// Default options are kept per-thread to avoid re-allocating on every call while
+// also preventing cross-thread sharing. Some RocksDB option wrappers hold
+// pointers into internal buffers and are not safe to share across threads.
+// Using thread_local allows cheap reuse in the common "default options" path
+// without synchronization overhead. Callers who need non-defaults must pass
+// explicit options.
+thread_local! { static DEFAULT_READ_OPTS: ReadOptions = ReadOptions::default(); }
+thread_local! { static DEFAULT_WRITE_OPTS: WriteOptions = WriteOptions::default(); }
+thread_local! { static DEFAULT_FLUSH_OPTS: FlushOptions = FlushOptions::default(); }
+// Thread-local ReadOptions for hot prefix probes; preconfigured for prefix scans.
+thread_local! { static PREFIX_READ_OPTS: RefCell<ReadOptions> = RefCell::new({ let mut o = ReadOptions::default(); o.set_prefix_same_as_start(true); o }); }
+
 /// A range of keys, `start_key` is included, but not `end_key`.
 ///
 /// You should make sure `end_key` is not less than `start_key`.
@@ -59,6 +72,28 @@ pub struct Range<'a> {
 impl<'a> Range<'a> {
     pub fn new(start_key: &'a [u8], end_key: &'a [u8]) -> Range<'a> {
         Range { start_key, end_key }
+    }
+}
+
+/// A reusable prefix probe that avoids per-call iterator creation/destruction.
+///
+/// Use this when performing many prefix existence checks in a tight loop.
+pub struct PrefixProber<'a, D: DBAccess> {
+    raw: DBRawIteratorWithThreadMode<'a, D>,
+}
+
+impl<D: DBAccess> PrefixProber<'_, D> {
+    /// Returns true if any key exists with the given prefix.
+    /// This performs a seek to the prefix and checks the current key.
+    pub fn exists(&mut self, prefix: &[u8]) -> Result<bool, Error> {
+        self.raw.seek(prefix);
+        if self.raw.valid() {
+            if let Some(k) = self.raw.key() {
+                return Ok(k.starts_with(prefix));
+            }
+        }
+        self.raw.status()?;
+        Ok(false)
     }
 }
 
@@ -88,7 +123,7 @@ pub trait ThreadMode {
 ///
 /// See [`DB`] for more details, including performance implications for each mode
 pub struct SingleThreaded {
-    pub(crate) cfs: BTreeMap<String, ColumnFamily>,
+    pub(crate) cfs: HashMap<String, ColumnFamily>,
 }
 
 /// Actual marker type for the marker trait `ThreadMode`, which holds
@@ -97,7 +132,7 @@ pub struct SingleThreaded {
 ///
 /// See [`DB`] for more details, including performance implications for each mode
 pub struct MultiThreaded {
-    pub(crate) cfs: RwLock<BTreeMap<String, Arc<UnboundColumnFamily>>>,
+    pub(crate) cfs: RwLock<HashMap<String, Arc<UnboundColumnFamily>>>,
 }
 
 impl ThreadMode for SingleThreaded {
@@ -855,7 +890,7 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
         from: K,
         to: K,
     ) -> Result<(), Error> {
-        self.delete_range_cf_opt(cf, from, to, &WriteOptions::default())
+        DEFAULT_WRITE_OPTS.with(|opts| self.delete_range_cf_opt(cf, from, to, opts))
     }
 
     pub fn write_opt(&self, batch: &WriteBatch, writeopts: &WriteOptions) -> Result<(), Error> {
@@ -870,7 +905,7 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
     }
 
     pub fn write(&self, batch: &WriteBatch) -> Result<(), Error> {
-        self.write_opt(batch, &WriteOptions::default())
+        DEFAULT_WRITE_OPTS.with(|opts| self.write_opt(batch, opts))
     }
 
     pub fn write_without_wal(&self, batch: &WriteBatch) -> Result<(), Error> {
@@ -880,7 +915,7 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
     }
 
     pub fn write_wbwi(&self, wbwi: &WriteBatchWithIndex) -> Result<(), Error> {
-        self.write_wbwi_opt(wbwi, &WriteOptions::default())
+        DEFAULT_WRITE_OPTS.with(|opts| self.write_wbwi_opt(wbwi, opts))
     }
 
     pub fn write_wbwi_opt(
@@ -1046,7 +1081,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
     /// Flushes database memtables to SST files on the disk for a given column family using default
     /// options.
     pub fn flush_cf(&self, cf: &impl AsColumnFamilyRef) -> Result<(), Error> {
-        self.flush_cf_opt(cf, &FlushOptions::default())
+        DEFAULT_FLUSH_OPTS.with(|opts| self.flush_cf_opt(cf, opts))
     }
 
     /// Return the bytes associated with a key value with read options. If you only intend to use
@@ -1065,7 +1100,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
     /// temporarily, consider using [`get_pinned`](#method.get_pinned) to avoid unnecessary memory
     /// copy.
     pub fn get<K: AsRef<[u8]>>(&self, key: K) -> Result<Option<Vec<u8>>, Error> {
-        self.get_opt(key.as_ref(), &ReadOptions::default())
+        DEFAULT_READ_OPTS.with(|opts| self.get_opt(key.as_ref(), opts))
     }
 
     /// Return the bytes associated with a key value and the given column family with read options.
@@ -1089,7 +1124,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         cf: &impl AsColumnFamilyRef,
         key: K,
     ) -> Result<Option<Vec<u8>>, Error> {
-        self.get_cf_opt(cf, key.as_ref(), &ReadOptions::default())
+        DEFAULT_READ_OPTS.with(|opts| self.get_cf_opt(cf, key.as_ref(), opts))
     }
 
     /// Return the value associated with a key using RocksDB's PinnableSlice
@@ -1130,7 +1165,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         &'_ self,
         key: K,
     ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
-        self.get_pinned_opt(key, &ReadOptions::default())
+        DEFAULT_READ_OPTS.with(|opts| self.get_pinned_opt(key, opts))
     }
 
     /// Return the value associated with a key using RocksDB's PinnableSlice
@@ -1175,7 +1210,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         cf: &impl AsColumnFamilyRef,
         key: K,
     ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
-        self.get_pinned_cf_opt(cf, key, &ReadOptions::default())
+        DEFAULT_READ_OPTS.with(|opts| self.get_pinned_cf_opt(cf, key, opts))
     }
 
     /// Return the values associated with the given keys.
@@ -1184,7 +1219,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         K: AsRef<[u8]>,
         I: IntoIterator<Item = K>,
     {
-        self.multi_get_opt(keys, &ReadOptions::default())
+        DEFAULT_READ_OPTS.with(|opts| self.multi_get_opt(keys, opts))
     }
 
     /// Return the values associated with the given keys using read options.
@@ -1197,18 +1232,16 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         K: AsRef<[u8]>,
         I: IntoIterator<Item = K>,
     {
-        let (keys, keys_sizes): (Vec<Box<[u8]>>, Vec<_>) = keys
-            .into_iter()
-            .map(|k| {
-                let k = k.as_ref();
-                (Box::from(k), k.len())
-            })
-            .unzip();
-        let ptr_keys: Vec<_> = keys.iter().map(|k| k.as_ptr() as *const c_char).collect();
+        let owned_keys: Vec<K> = keys.into_iter().collect();
+        let keys_sizes: Vec<usize> = owned_keys.iter().map(|k| k.as_ref().len()).collect();
+        let ptr_keys: Vec<*const c_char> = owned_keys
+            .iter()
+            .map(|k| k.as_ref().as_ptr() as *const c_char)
+            .collect();
 
-        let mut values = vec![ptr::null_mut(); keys.len()];
-        let mut values_sizes = vec![0_usize; keys.len()];
-        let mut errors = vec![ptr::null_mut(); keys.len()];
+        let mut values: Vec<*mut c_char> = Vec::with_capacity(ptr_keys.len());
+        let mut values_sizes: Vec<usize> = Vec::with_capacity(ptr_keys.len());
+        let mut errors: Vec<*mut c_char> = Vec::with_capacity(ptr_keys.len());
         unsafe {
             ffi::rocksdb_multi_get(
                 self.inner.inner(),
@@ -1222,7 +1255,77 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
             );
         }
 
+        unsafe {
+            values.set_len(ptr_keys.len());
+            values_sizes.set_len(ptr_keys.len());
+            errors.set_len(ptr_keys.len());
+        }
+
         convert_values(values, values_sizes, errors)
+    }
+
+    /// Returns pinned values associated with the given keys using default read options.
+    ///
+    /// This iterates `get_pinned_opt` for each key and returns zero-copy
+    /// `DBPinnableSlice` values when present, avoiding value copies.
+    pub fn multi_get_pinned<K, I>(
+        &'_ self,
+        keys: I,
+    ) -> Vec<Result<Option<DBPinnableSlice<'_>>, Error>>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = K>,
+    {
+        DEFAULT_READ_OPTS.with(|opts| self.multi_get_pinned_opt(keys, opts))
+    }
+
+    /// Returns pinned values associated with the given keys using the provided read options.
+    ///
+    /// This iterates `get_pinned_opt` for each key and returns zero-copy
+    /// `DBPinnableSlice` values when present, avoiding value copies.
+    pub fn multi_get_pinned_opt<K, I>(
+        &'_ self,
+        keys: I,
+        readopts: &ReadOptions,
+    ) -> Vec<Result<Option<DBPinnableSlice<'_>>, Error>>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = K>,
+    {
+        keys.into_iter()
+            .map(|k| self.get_pinned_opt(k, readopts))
+            .collect()
+    }
+
+    /// Returns pinned values associated with the given keys and column families
+    /// using default read options.
+    pub fn multi_get_pinned_cf<'a, 'b: 'a, K, I, W>(
+        &'a self,
+        keys: I,
+    ) -> Vec<Result<Option<DBPinnableSlice<'a>>, Error>>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = (&'b W, K)>,
+        W: 'b + AsColumnFamilyRef,
+    {
+        DEFAULT_READ_OPTS.with(|opts| self.multi_get_pinned_cf_opt(keys, opts))
+    }
+
+    /// Returns pinned values associated with the given keys and column families
+    /// using the provided read options.
+    pub fn multi_get_pinned_cf_opt<'a, 'b: 'a, K, I, W>(
+        &'a self,
+        keys: I,
+        readopts: &ReadOptions,
+    ) -> Vec<Result<Option<DBPinnableSlice<'a>>, Error>>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = (&'b W, K)>,
+        W: 'b + AsColumnFamilyRef,
+    {
+        keys.into_iter()
+            .map(|(cf, k)| self.get_pinned_cf_opt(cf, k, readopts))
+            .collect()
     }
 
     /// Return the values associated with the given keys and column families.
@@ -1235,7 +1338,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         I: IntoIterator<Item = (&'b W, K)>,
         W: 'b + AsColumnFamilyRef,
     {
-        self.multi_get_cf_opt(keys, &ReadOptions::default())
+        DEFAULT_READ_OPTS.with(|opts| self.multi_get_cf_opt(keys, opts))
     }
 
     /// Return the values associated with the given keys and column families using read options.
@@ -1249,25 +1352,22 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         I: IntoIterator<Item = (&'b W, K)>,
         W: 'b + AsColumnFamilyRef,
     {
-        let (cfs_and_keys, keys_sizes): (Vec<(_, Box<[u8]>)>, Vec<_>) = keys
-            .into_iter()
-            .map(|(cf, key)| {
-                let key = key.as_ref();
-                ((cf, Box::from(key)), key.len())
-            })
-            .unzip();
-        let ptr_keys: Vec<_> = cfs_and_keys
+        let cfs_and_owned_keys: Vec<(&'b W, K)> = keys.into_iter().collect();
+        let keys_sizes: Vec<usize> = cfs_and_owned_keys
             .iter()
-            .map(|(_, k)| k.as_ptr() as *const c_char)
+            .map(|(_, k)| k.as_ref().len())
             .collect();
-        let ptr_cfs: Vec<_> = cfs_and_keys
+        let ptr_keys: Vec<*const c_char> = cfs_and_owned_keys
+            .iter()
+            .map(|(_, k)| k.as_ref().as_ptr() as *const c_char)
+            .collect();
+        let ptr_cfs: Vec<*const ffi::rocksdb_column_family_handle_t> = cfs_and_owned_keys
             .iter()
             .map(|(c, _)| c.inner().cast_const())
             .collect();
-
-        let mut values = vec![ptr::null_mut(); ptr_keys.len()];
-        let mut values_sizes = vec![0_usize; ptr_keys.len()];
-        let mut errors = vec![ptr::null_mut(); ptr_keys.len()];
+        let mut values: Vec<*mut c_char> = Vec::with_capacity(ptr_keys.len());
+        let mut values_sizes: Vec<usize> = Vec::with_capacity(ptr_keys.len());
+        let mut errors: Vec<*mut c_char> = Vec::with_capacity(ptr_keys.len());
         unsafe {
             ffi::rocksdb_multi_get_cf(
                 self.inner.inner(),
@@ -1280,6 +1380,12 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
                 values_sizes.as_mut_ptr(),
                 errors.as_mut_ptr(),
             );
+        }
+
+        unsafe {
+            values.set_len(ptr_keys.len());
+            values_sizes.set_len(ptr_keys.len());
+            errors.set_len(ptr_keys.len());
         }
 
         convert_values(values, values_sizes, errors)
@@ -1298,7 +1404,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         K: AsRef<[u8]> + 'a + ?Sized,
         I: IntoIterator<Item = &'a K>,
     {
-        self.batched_multi_get_cf_opt(cf, keys, sorted_input, &ReadOptions::default())
+        DEFAULT_READ_OPTS.with(|opts| self.batched_multi_get_cf_opt(cf, keys, sorted_input, opts))
     }
 
     /// Return the values associated with the given keys and the specified column family
@@ -1359,7 +1465,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
     /// Returns `false` if the given key definitely doesn't exist in the database, otherwise returns
     /// `true`. This function uses default `ReadOptions`.
     pub fn key_may_exist<K: AsRef<[u8]>>(&self, key: K) -> bool {
-        self.key_may_exist_opt(key, &ReadOptions::default())
+        DEFAULT_READ_OPTS.with(|opts| self.key_may_exist_opt(key, opts))
     }
 
     /// Returns `false` if the given key definitely doesn't exist in the database, otherwise returns
@@ -1384,7 +1490,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
     /// Returns `false` if the given key definitely doesn't exist in the specified column family,
     /// otherwise returns `true`. This function uses default `ReadOptions`.
     pub fn key_may_exist_cf<K: AsRef<[u8]>>(&self, cf: &impl AsColumnFamilyRef, key: K) -> bool {
-        self.key_may_exist_cf_opt(cf, key, &ReadOptions::default())
+        DEFAULT_READ_OPTS.with(|opts| self.key_may_exist_cf_opt(cf, key, opts))
     }
 
     /// Returns `false` if the given key definitely doesn't exist in the specified column family,
@@ -1558,6 +1664,158 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
             opts,
             IteratorMode::From(prefix.as_ref(), Direction::Forward),
         )
+    }
+
+    /// Returns `true` if there exists at least one key with the given prefix
+    /// in the default column family using default read options.
+    ///
+    /// When to use: prefer this for one-shot checks. It enables
+    /// `prefix_same_as_start(true)` and bounds the iterator to the
+    /// prefix via `PrefixRange`, minimizing stray IO per call.
+    pub fn prefix_exists<P: AsRef<[u8]>>(&self, prefix: P) -> Result<bool, Error> {
+        let p = prefix.as_ref();
+        PREFIX_READ_OPTS.with(|rc| {
+            let mut opts = rc.borrow_mut();
+            opts.set_iterate_range(crate::PrefixRange(p));
+            self.prefix_exists_opt(p, &opts)
+        })
+    }
+
+    /// Returns `true` if there exists at least one key with the given prefix
+    /// in the default column family using the provided read options.
+    pub fn prefix_exists_opt<P: AsRef<[u8]>>(
+        &self,
+        prefix: P,
+        readopts: &ReadOptions,
+    ) -> Result<bool, Error> {
+        let prefix = prefix.as_ref();
+        let iter = unsafe { self.create_iterator(readopts) };
+        let res = unsafe {
+            ffi::rocksdb_iter_seek(
+                iter,
+                prefix.as_ptr() as *const c_char,
+                prefix.len() as size_t,
+            );
+            if ffi::rocksdb_iter_valid(iter) != 0 {
+                let mut key_len: size_t = 0;
+                let key_ptr = ffi::rocksdb_iter_key(iter, &mut key_len);
+                let key = slice::from_raw_parts(key_ptr as *const u8, key_len as usize);
+                Ok(key.starts_with(prefix))
+            } else if let Err(e) = (|| {
+                // Check status to differentiate end-of-range vs error
+                ffi_try!(ffi::rocksdb_iter_get_error(iter));
+                Ok::<(), Error>(())
+            })() {
+                Err(e)
+            } else {
+                Ok(false)
+            }
+        };
+        unsafe { ffi::rocksdb_iter_destroy(iter) };
+        res
+    }
+
+    /// Creates a reusable prefix prober over the default column family using
+    /// read options optimized for prefix probes.
+    ///
+    /// When to use: prefer this in hot loops with many checks per second. It
+    /// reuses a raw iterator to avoid per-call allocation/FFI overhead. If you
+    /// need custom tuning (e.g. async IO, readahead, cache-only), use
+    /// `prefix_prober_with_opts`.
+    pub fn prefix_prober(&self) -> PrefixProber<'_, Self> {
+        let mut opts = ReadOptions::default();
+        opts.set_prefix_same_as_start(true);
+        PrefixProber {
+            raw: DBRawIteratorWithThreadMode::new(self, opts),
+        }
+    }
+
+    /// Creates a reusable prefix prober over the default column family using
+    /// the provided read options (owned).
+    ///
+    /// When to use: advanced tuning for heavy workloads. Callers can set
+    /// `set_async_io(true)`, `set_readahead_size`, `set_read_tier`, etc. Note:
+    /// the prober owns `ReadOptions` to keep internal buffers alive.
+    pub fn prefix_prober_with_opts(&self, readopts: ReadOptions) -> PrefixProber<'_, Self> {
+        PrefixProber {
+            raw: DBRawIteratorWithThreadMode::new(self, readopts),
+        }
+    }
+
+    /// Creates a reusable prefix prober over the specified column family using
+    /// read options optimized for prefix probes.
+    pub fn prefix_prober_cf(&self, cf_handle: &impl AsColumnFamilyRef) -> PrefixProber<'_, Self> {
+        let mut opts = ReadOptions::default();
+        opts.set_prefix_same_as_start(true);
+        PrefixProber {
+            raw: DBRawIteratorWithThreadMode::new_cf(self, cf_handle.inner(), opts),
+        }
+    }
+
+    /// Creates a reusable prefix prober over the specified column family using
+    /// the provided read options (owned).
+    ///
+    /// When to use: advanced tuning for heavy workloads on a specific CF.
+    pub fn prefix_prober_cf_with_opts(
+        &self,
+        cf_handle: &impl AsColumnFamilyRef,
+        readopts: ReadOptions,
+    ) -> PrefixProber<'_, Self> {
+        PrefixProber {
+            raw: DBRawIteratorWithThreadMode::new_cf(self, cf_handle.inner(), readopts),
+        }
+    }
+
+    /// Returns `true` if there exists at least one key with the given prefix
+    /// in the specified column family using default read options.
+    ///
+    /// When to use: one-shot checks on a CF. Enables
+    /// `prefix_same_as_start(true)` and bounds the iterator via `PrefixRange`.
+    pub fn prefix_exists_cf<P: AsRef<[u8]>>(
+        &self,
+        cf_handle: &impl AsColumnFamilyRef,
+        prefix: P,
+    ) -> Result<bool, Error> {
+        let p = prefix.as_ref();
+        PREFIX_READ_OPTS.with(|rc| {
+            let mut opts = rc.borrow_mut();
+            opts.set_iterate_range(crate::PrefixRange(p));
+            self.prefix_exists_cf_opt(cf_handle, p, &opts)
+        })
+    }
+
+    /// Returns `true` if there exists at least one key with the given prefix
+    /// in the specified column family using the provided read options.
+    pub fn prefix_exists_cf_opt<P: AsRef<[u8]>>(
+        &self,
+        cf_handle: &impl AsColumnFamilyRef,
+        prefix: P,
+        readopts: &ReadOptions,
+    ) -> Result<bool, Error> {
+        let prefix = prefix.as_ref();
+        let iter = unsafe { self.create_iterator_cf(cf_handle.inner(), readopts) };
+        let res = unsafe {
+            ffi::rocksdb_iter_seek(
+                iter,
+                prefix.as_ptr() as *const c_char,
+                prefix.len() as size_t,
+            );
+            if ffi::rocksdb_iter_valid(iter) != 0 {
+                let mut key_len: size_t = 0;
+                let key_ptr = ffi::rocksdb_iter_key(iter, &mut key_len);
+                let key = slice::from_raw_parts(key_ptr as *const u8, key_len as usize);
+                Ok(key.starts_with(prefix))
+            } else if let Err(e) = (|| {
+                ffi_try!(ffi::rocksdb_iter_get_error(iter));
+                Ok::<(), Error>(())
+            })() {
+                Err(e)
+            } else {
+                Ok(false)
+            }
+        };
+        unsafe { ffi::rocksdb_iter_destroy(iter) };
+        res
     }
 
     /// Opens a raw iterator over the database, using the default read options
@@ -1869,7 +2127,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         K: AsRef<[u8]>,
         V: AsRef<[u8]>,
     {
-        self.put_opt(key, value, &WriteOptions::default())
+        DEFAULT_WRITE_OPTS.with(|opts| self.put_opt(key, value, opts))
     }
 
     pub fn put_cf<K, V>(&self, cf: &impl AsColumnFamilyRef, key: K, value: V) -> Result<(), Error>
@@ -1877,7 +2135,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         K: AsRef<[u8]>,
         V: AsRef<[u8]>,
     {
-        self.put_cf_opt(cf, key, value, &WriteOptions::default())
+        DEFAULT_WRITE_OPTS.with(|opts| self.put_cf_opt(cf, key, value, opts))
     }
 
     /// Set the database entry for "key" to "value".
@@ -1892,12 +2150,8 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         V: AsRef<[u8]>,
         S: AsRef<[u8]>,
     {
-        self.put_with_ts_opt(
-            key.as_ref(),
-            ts.as_ref(),
-            value.as_ref(),
-            &WriteOptions::default(),
-        )
+        DEFAULT_WRITE_OPTS
+            .with(|opts| self.put_with_ts_opt(key.as_ref(), ts.as_ref(), value.as_ref(), opts))
     }
 
     /// Put with timestamp in a specific column family.
@@ -1918,13 +2172,9 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         V: AsRef<[u8]>,
         S: AsRef<[u8]>,
     {
-        self.put_cf_with_ts_opt(
-            cf,
-            key.as_ref(),
-            ts.as_ref(),
-            value.as_ref(),
-            &WriteOptions::default(),
-        )
+        DEFAULT_WRITE_OPTS.with(|opts| {
+            self.put_cf_with_ts_opt(cf, key.as_ref(), ts.as_ref(), value.as_ref(), opts)
+        })
     }
 
     pub fn merge<K, V>(&self, key: K, value: V) -> Result<(), Error>
@@ -1932,7 +2182,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         K: AsRef<[u8]>,
         V: AsRef<[u8]>,
     {
-        self.merge_opt(key, value, &WriteOptions::default())
+        DEFAULT_WRITE_OPTS.with(|opts| self.merge_opt(key, value, opts))
     }
 
     pub fn merge_cf<K, V>(&self, cf: &impl AsColumnFamilyRef, key: K, value: V) -> Result<(), Error>
@@ -1940,11 +2190,11 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         K: AsRef<[u8]>,
         V: AsRef<[u8]>,
     {
-        self.merge_cf_opt(cf, key, value, &WriteOptions::default())
+        DEFAULT_WRITE_OPTS.with(|opts| self.merge_cf_opt(cf, key, value, opts))
     }
 
     pub fn delete<K: AsRef<[u8]>>(&self, key: K) -> Result<(), Error> {
-        self.delete_opt(key, &WriteOptions::default())
+        DEFAULT_WRITE_OPTS.with(|opts| self.delete_opt(key, opts))
     }
 
     pub fn delete_cf<K: AsRef<[u8]>>(
@@ -1952,7 +2202,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         cf: &impl AsColumnFamilyRef,
         key: K,
     ) -> Result<(), Error> {
-        self.delete_cf_opt(cf, key, &WriteOptions::default())
+        DEFAULT_WRITE_OPTS.with(|opts| self.delete_cf_opt(cf, key, opts))
     }
 
     /// Remove the database entry (if any) for "key".
@@ -1963,7 +2213,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         key: K,
         ts: S,
     ) -> Result<(), Error> {
-        self.delete_with_ts_opt(key, ts, &WriteOptions::default())
+        DEFAULT_WRITE_OPTS.with(|opts| self.delete_with_ts_opt(key, ts, opts))
     }
 
     /// Delete with timestamp in a specific column family.
@@ -1975,7 +2225,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         key: K,
         ts: S,
     ) -> Result<(), Error> {
-        self.delete_cf_with_ts_opt(cf, key, ts, &WriteOptions::default())
+        DEFAULT_WRITE_OPTS.with(|opts| self.delete_cf_with_ts_opt(cf, key, ts, opts))
     }
 
     /// Remove the database entry for "key" with WriteOptions.
@@ -2106,7 +2356,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
     ///
     /// See single_delete_opt() for detailed behavior and restrictions.
     pub fn single_delete<K: AsRef<[u8]>>(&self, key: K) -> Result<(), Error> {
-        self.single_delete_opt(key, &WriteOptions::default())
+        DEFAULT_WRITE_OPTS.with(|opts| self.single_delete_opt(key, opts))
     }
 
     /// Remove the database entry for "key" from a specific column family.
@@ -2117,7 +2367,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         cf: &impl AsColumnFamilyRef,
         key: K,
     ) -> Result<(), Error> {
-        self.single_delete_cf_opt(cf, key, &WriteOptions::default())
+        DEFAULT_WRITE_OPTS.with(|opts| self.single_delete_cf_opt(cf, key, opts))
     }
 
     /// Remove the database entry for "key".
@@ -2131,7 +2381,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         key: K,
         ts: S,
     ) -> Result<(), Error> {
-        self.single_delete_with_ts_opt(key, ts, &WriteOptions::default())
+        DEFAULT_WRITE_OPTS.with(|opts| self.single_delete_with_ts_opt(key, ts, opts))
     }
 
     /// Remove the database entry for "key" from a specific column family.
@@ -2146,7 +2396,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         key: K,
         ts: S,
     ) -> Result<(), Error> {
-        self.single_delete_cf_with_ts_opt(cf, key, ts, &WriteOptions::default())
+        DEFAULT_WRITE_OPTS.with(|opts| self.single_delete_cf_with_ts_opt(cf, key, ts, opts))
     }
 
     /// Runs a manual compaction on the Range of keys given. This is not likely to be needed for typical usage.
@@ -2825,7 +3075,9 @@ impl<I: DBInner> DBCommon<SingleThreaded, I> {
         self.cfs.cfs.get(name)
     }
 
-    /// Returns the list of column families currently open
+    /// Returns the list of column families currently open.
+    ///
+    /// The order of names is unspecified and may vary between calls.
     pub fn cf_names(&self) -> Vec<String> {
         self.cfs.cfs.keys().cloned().collect()
     }
@@ -2896,7 +3148,9 @@ impl<I: DBInner> DBCommon<MultiThreaded, I> {
             .map(UnboundColumnFamily::bound_column_family)
     }
 
-    /// Returns the list of column families currently open
+    /// Returns the list of column families currently open.
+    ///
+    /// The order of names is unspecified and may vary between calls.
     pub fn cf_names(&self) -> Vec<String> {
         self.cfs.cfs.read().keys().cloned().collect()
     }

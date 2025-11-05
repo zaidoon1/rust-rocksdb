@@ -93,7 +93,8 @@ pub unsafe extern "C" fn delete_callback(
 ) {
     unsafe {
         if !value.is_null() {
-            drop(Box::from_raw(slice::from_raw_parts_mut(
+            // Use pointer form to avoid implicit cast from slice reference to raw slice pointer
+            drop(Box::from_raw(ptr::slice_from_raw_parts_mut(
                 value as *mut u8,
                 value_length,
             )));

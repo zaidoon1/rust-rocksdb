@@ -16,6 +16,8 @@
 use crate::{ffi, Error};
 use libc::{self, c_char, c_void, size_t};
 use std::ffi::{CStr, CString};
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::ptr;
 
@@ -27,15 +29,11 @@ pub(crate) unsafe fn from_cstr(ptr: *const c_char) -> String {
 }
 
 pub(crate) unsafe fn raw_data(ptr: *const c_char, size: usize) -> Option<Vec<u8>> {
-    unsafe {
-        if ptr.is_null() {
-            None
-        } else {
-            let mut dst = vec![0; size];
-            ptr::copy_nonoverlapping(ptr as *const u8, dst.as_mut_ptr(), size);
-
-            Some(dst)
-        }
+    if ptr.is_null() {
+        None
+    } else {
+        // Safe: caller guarantees `ptr` points to `size` bytes; we immediately copy them.
+        Some(std::slice::from_raw_parts(ptr as *const u8, size).to_vec())
     }
 }
 
@@ -59,6 +57,13 @@ pub fn opt_bytes_to_ptr<T: AsRef<[u8]> + ?Sized>(opt: Option<&T>) -> *const c_ch
     }
 }
 
+#[cfg(unix)]
+pub(crate) fn to_cpath<P: AsRef<Path>>(path: P) -> Result<CString, Error> {
+    CString::new(path.as_ref().as_os_str().as_bytes())
+        .map_err(|e| Error::new(format!("Failed to convert path to CString: {e}")))
+}
+
+#[cfg(not(unix))]
 pub(crate) fn to_cpath<P: AsRef<Path>>(path: P) -> Result<CString, Error> {
     match CString::new(path.as_ref().to_string_lossy().as_bytes()) {
         Ok(c) => Ok(c),

@@ -1,12 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.44.2 (2025-11-05)
 
-- breaking: Switched internal column-family map to a HashMap; `DBCommon::cf_names()` no longer guarantees sorted order (order is unspecified and may vary).
-- Add zero-copy MultiGet pinned APIs: `DB::multi_get_pinned`, `multi_get_pinned_opt`, `multi_get_pinned_cf`, `multi_get_pinned_cf_opt` for efficient batch point lookups without value copies.
-- Add fast prefix existence APIs: `DB::prefix_exists`, `prefix_exists_opt`, `prefix_exists_cf`, `prefix_exists_cf_opt`.
-- Add `PrefixProber` reusable iterator and constructors `prefix_prober`, `prefix_prober_cf`, `prefix_prober_with_opts`, `prefix_prober_cf_with_opts` to amortize iterator setup cost for high-QPS prefix checks.
-- unix: Optimize `ffi_util::to_cpath` to perform zero-copy path conversion using `OsStrExt::as_bytes()` when available.
+- breaking: Switched internal column-family map to a HashMap; `DBCommon::cf_names()` no longer guarantees sorted order (order is unspecified and may vary) (zaidoon1)
+- Add zero-copy MultiGet pinned APIs: `DB::multi_get_pinned`, `multi_get_pinned_opt`, `multi_get_pinned_cf`, `multi_get_pinned_cf_opt` for efficient batch point lookups without value copies. (zaidoon1)
+- Add fast prefix existence APIs: `DB::prefix_exists`, `prefix_exists_opt`, `prefix_exists_cf`, `prefix_exists_cf_opt`. (zaidoon1)
+- Add `PrefixProber` reusable iterator and constructors `prefix_prober`, `prefix_prober_cf`, `prefix_prober_with_opts`, `prefix_prober_cf_with_opts` to amortize iterator setup cost for high-QPS prefix checks. (zaidoon1)
+- unix: Optimize `ffi_util::to_cpath` to perform zero-copy path conversion using `OsStrExt::as_bytes()` when available. (zaidoon1)
 
 ## 0.44.1 (2025-10-23)
 

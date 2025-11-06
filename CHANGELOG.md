@@ -7,6 +7,7 @@
 - Add fast prefix existence APIs: `DB::prefix_exists`, `prefix_exists_opt`, `prefix_exists_cf`, `prefix_exists_cf_opt`. (zaidoon1)
 - Add `PrefixProber` reusable iterator and constructors `prefix_prober`, `prefix_prober_cf`, `prefix_prober_with_opts`, `prefix_prober_cf_with_opts` to amortize iterator setup cost for high-QPS prefix checks. (zaidoon1)
 - unix: Optimize `ffi_util::to_cpath` to perform zero-copy path conversion using `OsStrExt::as_bytes()` when available. (zaidoon1)
+- Expose APIs to import and export Column Families (pcholakov)
 
 ## 0.44.1 (2025-10-23)
 

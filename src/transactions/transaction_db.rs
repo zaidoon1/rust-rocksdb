@@ -33,14 +33,19 @@ use crate::{
     db_options::OptionsMustOutliveDB,
     ffi,
     ffi_util::to_cpath,
-    AsColumnFamilyRef, BoundColumnFamily, ColumnFamily, ColumnFamilyDescriptor,
+    AsColumnFamilyRef, BoundColumnFamily, ColumnFamily, ColumnFamilyDescriptor, CompactOptions, FlushOptions,
     DBIteratorWithThreadMode, DBPinnableSlice, DBRawIteratorWithThreadMode, Direction, Error,
     IteratorMode, MultiThreaded, Options, ReadOptions, SingleThreaded, SnapshotWithThreadMode,
     ThreadMode, Transaction, TransactionDBOptions, TransactionOptions, WriteBatchWithTransaction,
     WriteOptions, DB, DEFAULT_COLUMN_FAMILY_NAME,
 };
 use ffi::rocksdb_transaction_t;
-use libc::{c_char, c_int, c_void, size_t};
+use libc::{c_char, c_int, c_uchar, c_void, size_t};
+
+#[inline]
+fn opt_bytes_to_ptr_len<T: AsRef<[u8]>>(opt: Option<T>) -> (*const c_char, size_t) {
+    match opt { Some(v) => { let s = v.as_ref(); (s.as_ptr() as *const c_char, s.len() as size_t) }, None => (ptr::null(), 0) }
+}
 
 // Default options are kept per-thread to avoid re-allocating on every call while
 // also preventing cross-thread sharing. Some RocksDB option wrappers hold
@@ -408,6 +413,37 @@ impl<T: ThreadMode> TransactionDB<T> {
 
     pub fn path(&self) -> &Path {
         self.path.as_path()
+    }
+
+    pub fn create_checkpoint<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
+        self.create_checkpoint_with_log_size(path, 0)
+    }
+
+    pub fn create_checkpoint_with_log_size<P: AsRef<Path>>(
+        &self,
+        path: P,
+        log_size_for_flush: u64,
+    ) -> Result<(), Error> {
+        let path_ref = path.as_ref();
+        if path_ref.exists() {
+            return Err(Error::new(format!(
+                "Checkpoint path already exists: {}",
+                path_ref.display()
+            )));
+        }
+        let cpath = to_cpath(path_ref)?;
+
+        unsafe {
+            let base_db: *mut ffi::rocksdb_t = ffi::rocksdb_transactiondb_get_base_db(self.inner);
+            if base_db.is_null() {
+                return Err(Error::new("rocksdb_transactiondb_get_base_db returned null".to_owned()));
+            }
+
+            let ckpt = ffi_try!(ffi::rocksdb_checkpoint_object_create(base_db));
+            let () = ffi_try!(ffi::rocksdb_checkpoint_create(ckpt, cpath.as_ptr(), log_size_for_flush));
+            ffi::rocksdb_checkpoint_object_destroy(ckpt);
+        }
+        Ok(())
     }
 
     /// Creates a transaction with default options.
@@ -855,6 +891,39 @@ impl<T: ThreadMode> TransactionDB<T> {
         Ok(())
     }
 
+    pub fn delete_range_cf_opt<K: AsRef<[u8]>>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        from: K,
+        to: K,
+        writeopts: &WriteOptions,
+    ) -> Result<(), Error> {
+        let from = from.as_ref();
+        let to = to.as_ref();
+        unsafe {
+            let base_db = ffi::rocksdb_transactiondb_get_base_db(self.inner);
+            ffi_try!(ffi::rocksdb_delete_range_cf(
+                base_db,
+                writeopts.inner,
+                cf.inner(),
+                from.as_ptr() as *const c_char,
+                from.len() as size_t,
+                to.as_ptr() as *const c_char,
+                to.len() as size_t,
+            ));
+            Ok(())
+        }
+    }
+
+    pub fn delete_range_cf<K: AsRef<[u8]>>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        from: K,
+        to: K,
+    ) -> Result<(), Error> {
+        self.delete_range_cf_opt(cf, from, to, &WriteOptions::default())
+    }
+
     pub fn iterator<'a: 'b, 'b>(
         &'a self,
         mode: IteratorMode,
@@ -993,6 +1062,75 @@ impl<T: ThreadMode> TransactionDB<T> {
         // and any resources (mem, files) are reclaimed.
         Ok(())
     }
+
+    /// Runs a manual compaction on the Range of keys given on the
+    /// given column family. This is not likely to be needed for typical usage.
+    pub fn compact_range_cf<S: AsRef<[u8]>, E: AsRef<[u8]>>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        start: Option<S>,
+        end: Option<E>,
+    ) {
+        unsafe {
+            let (start_ptr, start_len) = opt_bytes_to_ptr_len(start);
+            let (end_ptr,   end_len)   = opt_bytes_to_ptr_len(end);
+            let base_db = ffi::rocksdb_transactiondb_get_base_db(self.inner);
+            ffi::rocksdb_compact_range_cf(
+                base_db,
+                cf.inner(),
+                start_ptr, start_len, end_ptr, end_len,
+            );
+        }
+    }
+
+    /// Same as `compact_range_cf` but with custom options.
+    pub fn compact_range_cf_opt<S: AsRef<[u8]>, E: AsRef<[u8]>>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        start: Option<S>,
+        end: Option<E>,
+        opts: &CompactOptions,
+    ) {
+        unsafe {
+            let (start_ptr, start_len) = opt_bytes_to_ptr_len(start);
+            let (end_ptr,   end_len)   = opt_bytes_to_ptr_len(end);
+            let base_db = ffi::rocksdb_transactiondb_get_base_db(self.inner);
+            ffi::rocksdb_compact_range_cf_opt(
+                base_db,
+                cf.inner(),
+                opts.inner,
+                start_ptr, start_len, end_ptr, end_len
+            );
+        }
+    }
+
+    pub fn flush_wal(&self, sync: bool) -> Result<(), Error> {
+        unsafe {
+            let base = ffi::rocksdb_transactiondb_get_base_db(self.inner);
+            ffi_try!(ffi::rocksdb_flush_wal(base, c_uchar::from(sync)));
+        }
+        Ok(())
+    }
+
+    pub fn flush(&self) -> Result<(), Error> {
+        let mut fo = FlushOptions::default();
+        fo.set_wait(true);
+        unsafe {
+            let base = ffi::rocksdb_transactiondb_get_base_db(self.inner);
+            ffi_try!(ffi::rocksdb_flush(base, fo.inner));
+        }
+        Ok(())
+    }
+
+    pub fn flush_cf(&self, cf: &impl AsColumnFamilyRef) -> Result<(), Error> {
+        let mut fo = FlushOptions::default();
+        fo.set_wait(true);
+        unsafe {
+            let base = ffi::rocksdb_transactiondb_get_base_db(self.inner);
+            ffi_try!(ffi::rocksdb_flush_cf(base, fo.inner, cf.inner()));
+        }
+        Ok(())
+    }
 }
 
 impl TransactionDB<SingleThreaded> {
@@ -1096,6 +1234,21 @@ impl TransactionDB<MultiThreaded> {
         Self::property_value_impl(
             name,
             |prop_name| unsafe { ffi::rocksdb_transactiondb_property_value(self.inner, prop_name) },
+            |str_value| Ok(str_value.to_owned()),
+        )
+    }
+
+    pub fn property_value_cf(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        name: impl CStrLike,
+    ) -> Result<Option<String>, Error> {
+        Self::property_value_impl(
+            name,
+            |prop_name| unsafe {
+                let base_db = ffi::rocksdb_transactiondb_get_base_db(self.inner);
+                ffi::rocksdb_property_value_cf(base_db, cf.inner(), prop_name)
+            },
             |str_value| Ok(str_value.to_owned()),
         )
     }

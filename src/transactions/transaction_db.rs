@@ -875,6 +875,39 @@ impl<T: ThreadMode> TransactionDB<T> {
         Ok(())
     }
 
+    pub fn delete_range_cf_opt<K: AsRef<[u8]>>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        from: K,
+        to: K,
+        writeopts: &WriteOptions,
+    ) -> Result<(), Error> {
+        let from = from.as_ref();
+        let to = to.as_ref();
+        unsafe {
+            let base_db = ffi::rocksdb_transactiondb_get_base_db(self.inner);
+            ffi_try!(ffi::rocksdb_delete_range_cf(
+                base_db,
+                writeopts.inner,
+                cf.inner(),
+                from.as_ptr() as *const c_char,
+                from.len() as size_t,
+                to.as_ptr() as *const c_char,
+                to.len() as size_t,
+            ));
+            Ok(())
+        }
+    }
+
+    pub fn delete_range_cf<K: AsRef<[u8]>>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        from: K,
+        to: K,
+    ) -> Result<(), Error> {
+        self.delete_range_cf_opt(cf, from, to, &WriteOptions::default())
+    }
+
     pub fn iterator<'a: 'b, 'b>(
         &'a self,
         mode: IteratorMode,

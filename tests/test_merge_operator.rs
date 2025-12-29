@@ -15,7 +15,7 @@
 mod util;
 
 use pretty_assertions::assert_eq;
-use rust_rocksdb::{merge_operator::MergeFn, DBCompactionStyle, MergeOperands, Options, DB};
+use rust_rocksdb::{DB, DBCompactionStyle, MergeOperands, Options, merge_operator::MergeFn};
 use serde::{Deserialize, Serialize};
 use util::DBPath;
 
@@ -41,7 +41,7 @@ fn test_provided_merge(
 
 #[test]
 fn merge_test() {
-    use crate::{Options, DB};
+    use crate::{DB, Options};
 
     let db_path = DBPath::new("_rust_rocksdb_merge_test");
     let mut opts = Options::default();
@@ -227,7 +227,7 @@ fn counting_merge_test() {
 
     let value_getter = |key| match db.get(key) {
         Ok(Some(value)) => ValueCounts::from_slice(&value)
-            .map_or_else(|| panic!("unable to create ValueCounts from bytes"), |v| v),
+            .unwrap_or_else(|| panic!("unable to create ValueCounts from bytes")),
         Ok(None) => panic!("value not present"),
         Err(e) => panic!("error reading value {e:?}"),
     };
@@ -254,7 +254,7 @@ fn failed_merge_test() {
     ) -> Option<Vec<u8>> {
         None
     }
-    use crate::{Options, DB};
+    use crate::{DB, Options};
 
     let db_path = DBPath::new("_rust_rocksdb_failed_merge_test");
     let mut opts = Options::default();
@@ -294,7 +294,7 @@ fn make_merge_max_with_limit(limit: u64) -> impl MergeFn + Clone {
 
 #[test]
 fn test_merge_state() {
-    use {Options, DB};
+    use {DB, Options};
     let tempdir = tempfile::Builder::new()
         .prefix("_rust_rocksdb_merge_test_state")
         .tempdir()

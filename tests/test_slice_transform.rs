@@ -16,8 +16,8 @@ mod util;
 
 use pretty_assertions::assert_eq;
 
-use rust_rocksdb::{Options, SliceTransform, DB};
-use util::{assert_iter, pair, DBPath};
+use rust_rocksdb::{DB, Options, SliceTransform};
+use util::{DBPath, assert_iter, pair};
 
 #[test]
 pub fn test_slice_transform() {

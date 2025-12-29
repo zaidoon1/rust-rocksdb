@@ -30,17 +30,16 @@ use std::time::Duration;
 use crate::column_family::ColumnFamilyTtl;
 use crate::ffi_util::CSlice;
 use crate::{
+    ColumnFamily, ColumnFamilyDescriptor, CompactOptions, DBIteratorWithThreadMode,
+    DBPinnableSlice, DBRawIteratorWithThreadMode, DBWALIterator, DEFAULT_COLUMN_FAMILY_NAME,
+    Direction, Error, FlushOptions, IngestExternalFileOptions, IteratorMode, Options, ReadOptions,
+    SnapshotWithThreadMode, WaitForCompactOptions, WriteBatch, WriteBatchWithIndex, WriteOptions,
     column_family::AsColumnFamilyRef,
     column_family::BoundColumnFamily,
     column_family::UnboundColumnFamily,
     db_options::{ImportColumnFamilyOptions, OptionsMustOutliveDB},
     ffi,
-    ffi_util::{from_cstr, opt_bytes_to_ptr, raw_data, to_cpath, CStrLike},
-    ColumnFamily, ColumnFamilyDescriptor, CompactOptions, DBIteratorWithThreadMode,
-    DBPinnableSlice, DBRawIteratorWithThreadMode, DBWALIterator, Direction, Error, FlushOptions,
-    IngestExternalFileOptions, IteratorMode, Options, ReadOptions, SnapshotWithThreadMode,
-    WaitForCompactOptions, WriteBatch, WriteBatchWithIndex, WriteOptions,
-    DEFAULT_COLUMN_FAMILY_NAME,
+    ffi_util::{CStrLike, from_cstr, opt_bytes_to_ptr, raw_data, to_cpath},
 };
 use rust_librocksdb_sys::{
     rocksdb_livefile_destroy, rocksdb_livefile_t, rocksdb_livefiles_destroy, rocksdb_livefiles_t,
@@ -87,10 +86,10 @@ impl<D: DBAccess> PrefixProber<'_, D> {
     /// This performs a seek to the prefix and checks the current key.
     pub fn exists(&mut self, prefix: &[u8]) -> Result<bool, Error> {
         self.raw.seek(prefix);
-        if self.raw.valid() {
-            if let Some(k) = self.raw.key() {
-                return Ok(k.starts_with(prefix));
-            }
+        if self.raw.valid()
+            && let Some(k) = self.raw.key()
+        {
+            return Ok(k.starts_with(prefix));
         }
         self.raw.status()?;
         Ok(false)
@@ -983,7 +982,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
             let ptr = ffi_try!(ffi::rocksdb_list_column_families(
                 opts.inner,
                 cpath.as_ptr(),
-                &mut length,
+                &raw mut length,
             ));
 
             let vec = slice::from_raw_parts(ptr, length)
@@ -1542,11 +1541,11 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
                     cf.inner(),
                     key.as_ptr() as *const c_char,
                     key.len() as size_t,
-                    &mut val,         /*value*/
-                    &mut val_len,     /*val_len*/
-                    ptr::null(),      /*timestamp*/
-                    0,                /*timestamp_len*/
-                    &mut value_found, /*value_found*/
+                    &raw mut val,         /*value*/
+                    &raw mut val_len,     /*val_len*/
+                    ptr::null(),          /*timestamp*/
+                    0,                    /*timestamp_len*/
+                    &raw mut value_found, /*value_found*/
                 )
             };
         // The value is only allocated (using malloc) and returned if it is found and
@@ -1698,7 +1697,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
             );
             if ffi::rocksdb_iter_valid(iter) != 0 {
                 let mut key_len: size_t = 0;
-                let key_ptr = ffi::rocksdb_iter_key(iter, &mut key_len);
+                let key_ptr = ffi::rocksdb_iter_key(iter, &raw mut key_len);
                 let key = slice::from_raw_parts(key_ptr as *const u8, key_len as usize);
                 Ok(key.starts_with(prefix))
             } else if let Err(e) = (|| {
@@ -1802,7 +1801,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
             );
             if ffi::rocksdb_iter_valid(iter) != 0 {
                 let mut key_len: size_t = 0;
-                let key_ptr = ffi::rocksdb_iter_key(iter, &mut key_len);
+                let key_ptr = ffi::rocksdb_iter_key(iter, &raw mut key_len);
                 let key = slice::from_raw_parts(key_ptr as *const u8, key_len as usize);
                 Ok(key.starts_with(prefix))
             } else if let Err(e) = (|| {
@@ -2702,7 +2701,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
                     end_key_ptr,
                     end_key_len_ptr,
                     size_ptr,
-                    &mut err,
+                    &raw mut err,
                 );
             },
             Some(cf) => unsafe {
@@ -2715,7 +2714,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
                     end_key_ptr,
                     end_key_len_ptr,
                     size_ptr,
-                    &mut err,
+                    &raw mut err,
                 );
             },
         }
@@ -2995,7 +2994,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
             let ts = ffi_try!(ffi::rocksdb_get_full_history_ts_low(
                 self.inner.inner(),
                 cf.inner(),
-                &mut ts_lowlen,
+                &raw mut ts_lowlen,
             ));
 
             if ts.is_null() {
@@ -3013,7 +3012,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
     pub fn get_db_identity(&self) -> Result<Vec<u8>, Error> {
         unsafe {
             let mut length: usize = 0;
-            let identity_ptr = ffi::rocksdb_get_db_identity(self.inner.inner(), &mut length);
+            let identity_ptr = ffi::rocksdb_get_db_identity(self.inner.inner(), &raw mut length);
             let identity_vec = raw_data(identity_ptr, length);
             ffi::rocksdb_free(identity_ptr as *mut c_void);
             // In RocksDB: get_db_identity copies a std::string so it should not fail, but
@@ -3226,11 +3225,11 @@ impl LiveFile {
                 let level = ffi::rocksdb_livefiles_level(files, i);
 
                 // get smallest key inside file
-                let smallest_key = ffi::rocksdb_livefiles_smallestkey(files, i, &mut key_size);
+                let smallest_key = ffi::rocksdb_livefiles_smallestkey(files, i, &raw mut key_size);
                 let smallest_key = raw_data(smallest_key, key_size);
 
                 // get largest key inside file
-                let largest_key = ffi::rocksdb_livefiles_largestkey(files, i, &mut key_size);
+                let largest_key = ffi::rocksdb_livefiles_largestkey(files, i, &raw mut key_size);
                 let largest_key = raw_data(largest_key, key_size);
 
                 livefiles.push(LiveFile {

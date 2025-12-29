@@ -18,7 +18,7 @@
 //! [1]: https://github.com/facebook/rocksdb/wiki/Checkpoints
 
 use crate::db::{DBInner, ExportImportFilesMetaData};
-use crate::{ffi, ffi_util::to_cpath, AsColumnFamilyRef, DBCommon, Error, ThreadMode};
+use crate::{AsColumnFamilyRef, DBCommon, Error, ThreadMode, ffi, ffi_util::to_cpath};
 use std::{marker::PhantomData, path::Path};
 
 /// Default value for the `log_size_for_flush` parameter passed to

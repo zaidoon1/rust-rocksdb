@@ -1,4 +1,4 @@
-use rust_rocksdb::{ColumnFamilyDescriptor, Options, ReadOptions, DB};
+use rust_rocksdb::{ColumnFamilyDescriptor, DB, Options, ReadOptions};
 
 #[test]
 fn prefix_exists_default_cf() {

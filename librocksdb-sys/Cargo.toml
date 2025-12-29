@@ -1,8 +1,8 @@
 [package]
 name = "rust-librocksdb-sys"
 version = "0.40.0+10.7.5"
-edition = "2021"
-rust-version = "1.81.0"
+edition = "2024"
+rust-version = "1.89.0"
 authors = [
     "Karl Hobley <karlhobley10@gmail.com>",
     "Arkadiy Paronyan <arkadiy@ethcore.io>",

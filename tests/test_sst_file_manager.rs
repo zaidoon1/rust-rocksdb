@@ -1,7 +1,7 @@
 mod util;
 
 use rust_rocksdb::sst_file_manager::SstFileManager;
-use rust_rocksdb::{FlushOptions, Options, DB};
+use rust_rocksdb::{DB, FlushOptions, Options};
 use util::DBPath;
 
 #[test]

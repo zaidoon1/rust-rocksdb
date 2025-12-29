@@ -4,7 +4,7 @@
 [![crates.io](https://img.shields.io/crates/v/rust-rocksdb.svg)](https://crates.io/crates/rust-rocksdb)
 [![documentation](https://docs.rs/rust-rocksdb/badge.svg)](https://docs.rs/rust-rocksdb)
 [![license](https://img.shields.io/crates/l/rust-rocksdb.svg)](https://github.com/zaidoon1/rust-rocksdb/blob/master/LICENSE)
-![rust 1.81.0 required](https://img.shields.io/badge/rust-1.81.0-blue.svg?label=MSRV)
+![rust 1.89.0 required](https://img.shields.io/badge/rust-1.89.0-blue.svg?label=MSRV)
 ![GitHub commits (since latest release)](https://img.shields.io/github/commits-since/zaidoon1/rust-rocksdb/latest.svg)
 [![dependency status](https://deps.rs/repo/github/zaidoon1/rust-rocksdb/status.svg)](https://deps.rs/repo/github/zaidoon1/rust-rocksdb)
 
@@ -25,7 +25,7 @@ RocksDB is a fast key-value storage engine based on LSM-trees, optimized for SSD
 
 **Requirements:**
 - **Clang and LLVM** - Required for building RocksDB C++ components
-- **Rust 1.81.0+** - Current MSRV (rolling 6-month policy)
+- **Rust 1.89.0+** - Current MSRV (rolling 6-month policy)
 
 Add this to your `Cargo.toml`:
 
@@ -285,7 +285,7 @@ git submodule update --init --recursive
 
 Feedback and pull requests welcome! Open an issue for feature requests or submit PRs. This fork maintains regular updates with latest RocksDB releases and Rust versions.
 
-**Current MSRV**: 1.81.0 (rolling 6-month policy)
+**Current MSRV**: 1.89.0 (rolling 6-month policy)
 
 ## ❓ Why This Fork
 

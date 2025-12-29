@@ -19,8 +19,8 @@ use std::path::Path;
 
 use rust_rocksdb::checkpoint::Checkpoint;
 use rust_rocksdb::{
-    DBWithThreadMode, ExportImportFilesMetaData, ImportColumnFamilyOptions, IteratorMode,
-    MultiThreaded, OptimisticTransactionDB, Options, DB,
+    DB, DBWithThreadMode, ExportImportFilesMetaData, ImportColumnFamilyOptions, IteratorMode,
+    MultiThreaded, OptimisticTransactionDB, Options,
 };
 use std::fs;
 use util::DBPath;

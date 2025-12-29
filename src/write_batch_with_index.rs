@@ -1,7 +1,7 @@
 use crate::db::DBInner;
 use crate::{
-    ffi, AsColumnFamilyRef, DBAccess, DBCommon, DBPinnableSlice, DBRawIteratorWithThreadMode,
-    Error, Options, ReadOptions, ThreadMode,
+    AsColumnFamilyRef, DBAccess, DBCommon, DBPinnableSlice, DBRawIteratorWithThreadMode, Error,
+    Options, ReadOptions, ThreadMode, ffi,
 };
 use libc::{c_char, c_uchar, size_t};
 
@@ -29,7 +29,7 @@ impl WriteBatchWithIndex {
     pub fn size_in_bytes(&self) -> usize {
         unsafe {
             let mut batch_size: size_t = 0;
-            ffi::rocksdb_writebatch_wi_data(self.inner, &mut batch_size);
+            ffi::rocksdb_writebatch_wi_data(self.inner, &raw mut batch_size);
             batch_size
         }
     }
@@ -38,7 +38,7 @@ impl WriteBatchWithIndex {
     pub fn data(&self) -> &[u8] {
         unsafe {
             let mut batch_size: size_t = 0;
-            let batch_data = ffi::rocksdb_writebatch_wi_data(self.inner, &mut batch_size);
+            let batch_data = ffi::rocksdb_writebatch_wi_data(self.inner, &raw mut batch_size);
             std::slice::from_raw_parts(batch_data as _, batch_size)
         }
     }
@@ -59,7 +59,7 @@ impl WriteBatchWithIndex {
                 options.inner,
                 key.as_ptr() as *const c_char,
                 key.len() as size_t,
-                &mut value_size
+                &raw mut value_size
             ));
 
             if value_data.is_null() {
@@ -92,7 +92,7 @@ impl WriteBatchWithIndex {
                 cf.inner(),
                 key.as_ptr() as *const c_char,
                 key.len() as size_t,
-                &mut value_size
+                &raw mut value_size
             ));
 
             if value_data.is_null() {
@@ -135,7 +135,7 @@ impl WriteBatchWithIndex {
                 readopts.inner,
                 key.as_ptr() as *const c_char,
                 key.len() as size_t,
-                &mut value_size
+                &raw mut value_size
             ));
 
             if value_data.is_null() {
@@ -217,7 +217,7 @@ impl WriteBatchWithIndex {
                 cf.inner(),
                 key.as_ptr() as *const c_char,
                 key.len() as size_t,
-                &mut value_size
+                &raw mut value_size
             ));
 
             if value_data.is_null() {

@@ -16,8 +16,8 @@ mod util;
 
 use pretty_assertions::assert_eq;
 
-use rust_rocksdb::{Direction, IteratorMode, MemtableFactory, Options, DB};
-use util::{assert_iter, assert_iter_reversed, pair, DBPath};
+use rust_rocksdb::{DB, Direction, IteratorMode, MemtableFactory, Options};
+use util::{DBPath, assert_iter, assert_iter_reversed, pair};
 
 #[test]
 #[allow(clippy::cognitive_complexity)]

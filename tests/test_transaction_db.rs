@@ -18,9 +18,9 @@ mod util;
 use pretty_assertions::assert_eq;
 
 use rust_rocksdb::{
-    CuckooTableOptions, DBAccess, Direction, Error, ErrorKind, IteratorMode, Options, ReadOptions,
-    SliceTransform, TransactionDB, TransactionDBOptions, TransactionOptions,
-    WriteBatchWithTransaction, WriteOptions, DB,
+    CuckooTableOptions, DB, DBAccess, Direction, Error, ErrorKind, IteratorMode, Options,
+    ReadOptions, SliceTransform, TransactionDB, TransactionDBOptions, TransactionOptions,
+    WriteBatchWithTransaction, WriteOptions,
 };
 use util::DBPath;
 

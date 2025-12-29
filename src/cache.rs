@@ -1,4 +1,4 @@
-use crate::{ffi, LruCacheOptions};
+use crate::{LruCacheOptions, ffi};
 use libc::size_t;
 use std::ptr::NonNull;
 use std::sync::Arc;

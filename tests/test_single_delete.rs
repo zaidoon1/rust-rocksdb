@@ -1,4 +1,4 @@
-use rust_rocksdb::{ColumnFamilyDescriptor, Options, ReadOptions, WriteOptions, DB};
+use rust_rocksdb::{ColumnFamilyDescriptor, DB, Options, ReadOptions, WriteOptions};
 
 mod util;
 use util::DBPath;

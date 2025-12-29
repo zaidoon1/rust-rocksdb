@@ -120,8 +120,8 @@ pub use crate::{
     },
     compaction_filter::Decision as CompactionDecision,
     db::{
-        DBAccess, DBCommon, DBWithThreadMode, ExportImportFilesMetaData, LiveFile, MultiThreaded,
-        PrefixProber, Range, SingleThreaded, ThreadMode, DB,
+        DB, DBAccess, DBCommon, DBWithThreadMode, ExportImportFilesMetaData, LiveFile,
+        MultiThreaded, PrefixProber, Range, SingleThreaded, ThreadMode,
     },
     db_iterator::{
         DBIterator, DBIteratorWithThreadMode, DBRawIterator, DBRawIteratorWithThreadMode,
@@ -249,18 +249,18 @@ impl fmt::Display for Error {
 #[cfg(test)]
 mod test {
     use crate::{
-        cache::{Cache, CacheWrapper},
-        write_buffer_manager::{WriteBufferManager, WriteBufferManagerWrapper},
         OptimisticTransactionDB, OptimisticTransactionOptions, Transaction, TransactionDB,
         TransactionDBOptions, TransactionOptions,
+        cache::{Cache, CacheWrapper},
+        write_buffer_manager::{WriteBufferManager, WriteBufferManagerWrapper},
     };
 
     use super::{
+        BlockBasedOptions, BoundColumnFamily, ColumnFamily, ColumnFamilyDescriptor, DB, DBIterator,
+        DBRawIterator, IngestExternalFileOptions, Options, PlainTableFactoryOptions, ReadOptions,
+        Snapshot, SstFileWriter, WriteBatch, WriteOptions,
         column_family::UnboundColumnFamily,
         env::{Env, EnvWrapper},
-        BlockBasedOptions, BoundColumnFamily, ColumnFamily, ColumnFamilyDescriptor, DBIterator,
-        DBRawIterator, IngestExternalFileOptions, Options, PlainTableFactoryOptions, ReadOptions,
-        Snapshot, SstFileWriter, WriteBatch, WriteOptions, DB,
     };
 
     #[test]

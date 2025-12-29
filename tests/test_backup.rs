@@ -17,8 +17,8 @@ mod util;
 use pretty_assertions::assert_eq;
 
 use rust_rocksdb::{
+    DB, Env,
     backup::{BackupEngine, BackupEngineOptions, RestoreOptions},
-    Env, DB,
 };
 use util::DBPath;
 

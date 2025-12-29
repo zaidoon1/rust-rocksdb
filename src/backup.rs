@@ -14,7 +14,7 @@
 //
 
 use crate::env::Env;
-use crate::{db::DBInner, ffi, ffi_util::to_cpath, DBCommon, Error, ThreadMode};
+use crate::{DBCommon, Error, ThreadMode, db::DBInner, ffi, ffi_util::to_cpath};
 
 use libc::c_uchar;
 use std::ffi::CString;

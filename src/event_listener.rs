@@ -1,5 +1,5 @@
 use crate::ffi_util::error_message;
-use crate::{ffi, Error};
+use crate::{Error, ffi};
 use libc::{c_char, c_void};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -222,7 +222,7 @@ impl FlushJobInfo {
     pub fn cf_name(&self) -> Option<Vec<u8>> {
         unsafe {
             let mut length: usize = 0;
-            let cf_name_ptr = ffi::rocksdb_flushjobinfo_cf_name(self.inner, &mut length);
+            let cf_name_ptr = ffi::rocksdb_flushjobinfo_cf_name(self.inner, &raw mut length);
 
             if cf_name_ptr.is_null() || length == 0 {
                 return None;
@@ -271,7 +271,7 @@ impl CompactionJobInfo {
     pub fn cf_name(&self) -> Option<Vec<u8>> {
         unsafe {
             let mut length: usize = 0;
-            let cf_name_ptr = ffi::rocksdb_compactionjobinfo_cf_name(self.inner, &mut length);
+            let cf_name_ptr = ffi::rocksdb_compactionjobinfo_cf_name(self.inner, &raw mut length);
 
             if cf_name_ptr.is_null() || length == 0 {
                 return None;
@@ -348,7 +348,8 @@ impl SubcompactionJobInfo {
     pub fn cf_name(&self) -> Option<Vec<u8>> {
         unsafe {
             let mut length: usize = 0;
-            let cf_name_ptr = ffi::rocksdb_subcompactionjobinfo_cf_name(self.inner, &mut length);
+            let cf_name_ptr =
+                ffi::rocksdb_subcompactionjobinfo_cf_name(self.inner, &raw mut length);
 
             if cf_name_ptr.is_null() || length == 0 {
                 return None;
@@ -391,7 +392,7 @@ impl IngestionInfo {
         unsafe {
             let mut length: usize = 0;
             let cf_name_ptr =
-                ffi::rocksdb_externalfileingestioninfo_cf_name(self.inner, &mut length);
+                ffi::rocksdb_externalfileingestioninfo_cf_name(self.inner, &raw mut length);
 
             if cf_name_ptr.is_null() || length == 0 {
                 return None;
@@ -413,7 +414,7 @@ impl WriteStallInfo {
     pub fn cf_name(&self) -> Option<Vec<u8>> {
         unsafe {
             let mut length: usize = 0;
-            let cf_name_ptr = ffi::rocksdb_writestallinfo_cf_name(self.inner, &mut length);
+            let cf_name_ptr = ffi::rocksdb_writestallinfo_cf_name(self.inner, &raw mut length);
 
             if cf_name_ptr.is_null() || length == 0 {
                 return None;
@@ -448,7 +449,7 @@ impl MemTableInfo {
     pub fn cf_name(&self) -> Option<Vec<u8>> {
         unsafe {
             let mut length: usize = 0;
-            let cf_name_ptr = ffi::rocksdb_memtableinfo_cf_name(self.inner, &mut length);
+            let cf_name_ptr = ffi::rocksdb_memtableinfo_cf_name(self.inner, &raw mut length);
 
             if cf_name_ptr.is_null() || length == 0 {
                 return None;
@@ -612,7 +613,7 @@ extern "C" fn on_background_error<E: EventListener>(
     let ctx = unsafe { &*(ctx as *mut E) };
     let result = unsafe {
         let mut err: *mut c_char = std::ptr::null_mut();
-        ffi::rocksdb_status_ptr_get_error(status_ptr, &mut err);
+        ffi::rocksdb_status_ptr_get_error(status_ptr, &raw mut err);
         if err.is_null() {
             Ok(())
         } else {

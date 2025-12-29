@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::ffi::CStr;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 use std::ptr::null_mut;
 use std::slice;
@@ -23,11 +23,12 @@ use libc::{self, c_char, c_double, c_int, c_uchar, c_uint, c_void, size_t};
 
 use crate::cache::Cache;
 use crate::column_family::ColumnFamilyTtl;
-use crate::event_listener::{new_event_listener, EventListener};
+use crate::event_listener::{EventListener, new_event_listener};
 use crate::sst_file_manager::SstFileManager;
 use crate::statistics::{Histogram, HistogramData, StatsLevel};
 use crate::write_buffer_manager::WriteBufferManager;
 use crate::{
+    ColumnFamilyDescriptor, Error, SnapshotWithThreadMode,
     compaction_filter::{self, CompactionFilterCallback, CompactionFilterFn},
     compaction_filter_factory::{self, CompactionFilterFactory},
     comparator::{
@@ -36,13 +37,12 @@ use crate::{
     db::DBAccess,
     env::Env,
     ffi,
-    ffi_util::{from_cstr, to_cpath, CStrLike},
+    ffi_util::{CStrLike, from_cstr, to_cpath},
     merge_operator::{
-        self, full_merge_callback, partial_merge_callback, MergeFn, MergeOperatorCallback,
+        self, MergeFn, MergeOperatorCallback, full_merge_callback, partial_merge_callback,
     },
     slice_transform::SliceTransform,
     statistics::Ticker,
-    ColumnFamilyDescriptor, Error, SnapshotWithThreadMode,
 };
 
 // must be Send and Sync because it will be called by RocksDB from different threads
@@ -890,10 +890,10 @@ impl Options {
                 env.0.inner,
                 ignore_unknown_options,
                 cache.0.inner.as_ptr(),
-                &mut db_options,
-                &mut num_column_families,
-                &mut column_family_names,
-                &mut column_family_options,
+                &raw mut db_options,
+                &raw mut num_column_families,
+                &raw mut column_family_names,
+                &raw mut column_family_options,
             ));
         }
         let options = Options {
@@ -955,7 +955,7 @@ impl Options {
     pub fn set_options_from_string(&mut self, string: impl CStrLike) -> Result<&mut Self, Error> {
         let c_string = string.into_c_string().unwrap();
         let mut err: *mut c_char = null_mut();
-        let err_ptr: *mut *mut c_char = &mut err;
+        let err_ptr: *mut *mut c_char = &raw mut err;
         unsafe {
             ffi::rocksdb_get_options_from_string(
                 self.inner,

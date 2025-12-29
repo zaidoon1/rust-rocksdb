@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{db::MultiThreaded, ffi, Options};
+use crate::{Options, db::MultiThreaded, ffi};
 
 use std::sync::Arc;
 use std::time::Duration;

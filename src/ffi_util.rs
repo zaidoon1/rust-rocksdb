@@ -13,7 +13,7 @@
 // limitations under the License.
 //
 
-use crate::{ffi, Error};
+use crate::{Error, ffi};
 use libc::{self, c_char, c_void, size_t};
 use std::ffi::{CStr, CString};
 #[cfg(unix)]
@@ -32,8 +32,8 @@ pub(crate) unsafe fn raw_data(ptr: *const c_char, size: usize) -> Option<Vec<u8>
     if ptr.is_null() {
         None
     } else {
-        // Safe: caller guarantees `ptr` points to `size` bytes; we immediately copy them.
-        Some(std::slice::from_raw_parts(ptr as *const u8, size).to_vec())
+        // SAFETY: Caller guarantees `ptr` points to `size` bytes; we immediately copy them.
+        Some(unsafe { std::slice::from_raw_parts(ptr as *const u8, size) }.to_vec())
     }
 }
 

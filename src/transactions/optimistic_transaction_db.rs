@@ -19,12 +19,12 @@ use libc::{c_char, c_int, size_t};
 
 use crate::column_family::ColumnFamilyTtl;
 use crate::{
+    AsColumnFamilyRef, ColumnFamilyDescriptor, DEFAULT_COLUMN_FAMILY_NAME, Error,
+    OptimisticTransactionOptions, Options, ThreadMode, Transaction, WriteOptions,
     db::{DBCommon, DBInner},
     ffi,
     ffi_util::to_cpath,
     write_batch::WriteBatchWithTransaction,
-    AsColumnFamilyRef, ColumnFamilyDescriptor, Error, OptimisticTransactionOptions, Options,
-    ThreadMode, Transaction, WriteOptions, DEFAULT_COLUMN_FAMILY_NAME,
 };
 
 // Default options are kept per-thread to avoid re-allocating on every call while

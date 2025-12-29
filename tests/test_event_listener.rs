@@ -1,10 +1,10 @@
 mod util;
 
-use rust_rocksdb::{event_listener::*, FlushOptions, Options, DB};
+use rust_rocksdb::{DB, FlushOptions, Options, event_listener::*};
 use std::io::Write;
 use std::path::Path;
-use std::sync::atomic::*;
 use std::sync::Arc;
+use std::sync::atomic::*;
 use util::DBPath;
 
 #[derive(Default, Clone)]

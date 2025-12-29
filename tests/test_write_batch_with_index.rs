@@ -1,5 +1,5 @@
-use crate::util::{assert_item, assert_no_item, DBPath};
-use rust_rocksdb::{ReadOptions, WriteBatchWithIndex, DB};
+use crate::util::{DBPath, assert_item, assert_no_item};
+use rust_rocksdb::{DB, ReadOptions, WriteBatchWithIndex};
 
 mod util;
 

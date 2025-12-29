@@ -28,16 +28,16 @@ use std::ffi::CStr;
 
 use crate::column_family::ColumnFamilyTtl;
 use crate::{
+    AsColumnFamilyRef, BoundColumnFamily, ColumnFamily, ColumnFamilyDescriptor, DB,
+    DBIteratorWithThreadMode, DBPinnableSlice, DBRawIteratorWithThreadMode,
+    DEFAULT_COLUMN_FAMILY_NAME, Direction, Error, IteratorMode, MultiThreaded, Options,
+    ReadOptions, SingleThreaded, SnapshotWithThreadMode, ThreadMode, Transaction,
+    TransactionDBOptions, TransactionOptions, WriteBatchWithTransaction, WriteOptions,
     column_family::UnboundColumnFamily,
-    db::{convert_values, DBAccess},
+    db::{DBAccess, convert_values},
     db_options::OptionsMustOutliveDB,
     ffi,
     ffi_util::to_cpath,
-    AsColumnFamilyRef, BoundColumnFamily, ColumnFamily, ColumnFamilyDescriptor,
-    DBIteratorWithThreadMode, DBPinnableSlice, DBRawIteratorWithThreadMode, Direction, Error,
-    IteratorMode, MultiThreaded, Options, ReadOptions, SingleThreaded, SnapshotWithThreadMode,
-    ThreadMode, Transaction, TransactionDBOptions, TransactionOptions, WriteBatchWithTransaction,
-    WriteOptions, DB, DEFAULT_COLUMN_FAMILY_NAME,
 };
 use ffi::rocksdb_transaction_t;
 use libc::{c_char, c_int, c_void, size_t};
@@ -320,7 +320,7 @@ impl<T: ThreadMode> TransactionDB<T> {
 
         let prepared = unsafe {
             let mut cnt = 0;
-            let ptr = ffi::rocksdb_transactiondb_get_prepared_transactions(db, &mut cnt);
+            let ptr = ffi::rocksdb_transactiondb_get_prepared_transactions(db, &raw mut cnt);
             let mut vec = vec![std::ptr::null_mut(); cnt];
             if !ptr.is_null() {
                 std::ptr::copy_nonoverlapping(ptr, vec.as_mut_ptr(), cnt);

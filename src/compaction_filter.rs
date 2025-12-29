@@ -162,7 +162,7 @@ fn test_filter(level: u32, key: &[u8], value: &[u8]) -> Decision {
 
 #[test]
 fn compaction_filter_test() {
-    use crate::{Options, DB};
+    use crate::{DB, Options};
 
     let tempdir = tempfile::Builder::new()
         .prefix("_rust_rocksdb_filter_test")

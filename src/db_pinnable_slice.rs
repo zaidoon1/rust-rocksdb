@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{ffi, DB};
+use crate::{DB, ffi};
 use core::ops::Deref;
 use libc::size_t;
 use std::marker::PhantomData;
@@ -44,7 +44,7 @@ impl Deref for DBPinnableSlice<'_> {
     fn deref(&self) -> &[u8] {
         unsafe {
             let mut val_len: size_t = 0;
-            let val = ffi::rocksdb_pinnableslice_value(self.ptr, &mut val_len) as *mut u8;
+            let val = ffi::rocksdb_pinnableslice_value(self.ptr, &raw mut val_len) as *mut u8;
             slice::from_raw_parts(val, val_len)
         }
     }

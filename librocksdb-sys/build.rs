@@ -2,7 +2,7 @@ use std::path::Path;
 use std::{env, fs, path::PathBuf, process::Command};
 
 #[cfg(target_os = "linux")]
-use libc::{getauxval, AT_HWCAP};
+use libc::{AT_HWCAP, getauxval};
 
 // On these platforms jemalloc-sys will use a prefixed jemalloc which cannot be linked together
 // with RocksDB.
@@ -185,7 +185,9 @@ fn build_rocksdb() {
         config.define("ROCKSDB_PLATFORM_POSIX", None);
         config.define("ROCKSDB_LIB_IO_POSIX", None);
 
-        env::set_var("IPHONEOS_DEPLOYMENT_TARGET", "12.0");
+        // SAFETY: This is the build script, which is single-threaded and runs
+        // before any other code. Setting environment variables here is safe.
+        unsafe { env::set_var("IPHONEOS_DEPLOYMENT_TARGET", "12.0") };
     } else if target.contains("darwin") {
         config.define("OS_MACOSX", None);
         config.define("ROCKSDB_PLATFORM_POSIX", None);
@@ -377,10 +379,10 @@ fn build_snappy() {
 
 fn try_to_find_and_link_lib(lib_name: &str) -> bool {
     println!("cargo:rerun-if-env-changed={lib_name}_COMPILE");
-    if let Ok(v) = env::var(format!("{lib_name}_COMPILE")) {
-        if v.to_lowercase() == "true" || v == "1" {
-            return false;
-        }
+    if let Ok(v) = env::var(format!("{lib_name}_COMPILE"))
+        && (v.to_lowercase() == "true" || v == "1")
+    {
+        return false;
     }
 
     println!("cargo:rerun-if-env-changed={lib_name}_LIB_DIR");

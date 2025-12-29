@@ -22,14 +22,14 @@ use std::{sync::Arc, thread, time::Duration};
 
 use rust_rocksdb::statistics::{Histogram, StatsLevel, Ticker};
 use rust_rocksdb::{
-    perf::get_memory_usage_stats, BlockBasedOptions, BottommostLevelCompaction, Cache,
-    ColumnFamilyDescriptor, ColumnFamilyTtl, CompactOptions, CuckooTableOptions, DBAccess,
-    DBCompactionStyle, DBWithThreadMode, Env, Error, ErrorKind, FifoCompactOptions, IteratorMode,
+    BlockBasedOptions, BottommostLevelCompaction, Cache, ColumnFamilyDescriptor, ColumnFamilyTtl,
+    CompactOptions, CuckooTableOptions, DB, DBAccess, DBCompactionStyle, DBWithThreadMode,
+    DEFAULT_COLUMN_FAMILY_NAME, Env, Error, ErrorKind, FifoCompactOptions, IteratorMode,
     MultiThreaded, Options, PerfContext, PerfMetric, RateLimiterMode, ReadOptions, SingleThreaded,
     SliceTransform, Snapshot, UniversalCompactOptions, UniversalCompactionStopStyle,
-    WaitForCompactOptions, WriteBatch, DB, DEFAULT_COLUMN_FAMILY_NAME,
+    WaitForCompactOptions, WriteBatch, perf::get_memory_usage_stats,
 };
-use util::{assert_iter, pair, DBPath, U64Comparator, U64Timestamp};
+use util::{DBPath, U64Comparator, U64Timestamp, assert_iter, pair};
 
 #[test]
 fn external() {
@@ -307,26 +307,32 @@ fn set_option_test() {
     {
         let db = DB::open_default(&path).unwrap();
         // set an option to valid values
-        assert!(db
-            .set_options(&[("disable_auto_compactions", "true")])
-            .is_ok());
-        assert!(db
-            .set_options(&[("disable_auto_compactions", "false")])
-            .is_ok());
+        assert!(
+            db.set_options(&[("disable_auto_compactions", "true")])
+                .is_ok()
+        );
+        assert!(
+            db.set_options(&[("disable_auto_compactions", "false")])
+                .is_ok()
+        );
         // invalid names/values should result in an error
-        assert!(db
-            .set_options(&[("disable_auto_compactions", "INVALID_VALUE")])
-            .is_err());
-        assert!(db
-            .set_options(&[("INVALID_NAME", "INVALID_VALUE")])
-            .is_err());
+        assert!(
+            db.set_options(&[("disable_auto_compactions", "INVALID_VALUE")])
+                .is_err()
+        );
+        assert!(
+            db.set_options(&[("INVALID_NAME", "INVALID_VALUE")])
+                .is_err()
+        );
         // option names/values must not contain NULLs
-        assert!(db
-            .set_options(&[("disable_auto_compactions", "true\0")])
-            .is_err());
-        assert!(db
-            .set_options(&[("disable_auto_compactions\0", "true")])
-            .is_err());
+        assert!(
+            db.set_options(&[("disable_auto_compactions", "true\0")])
+                .is_err()
+        );
+        assert!(
+            db.set_options(&[("disable_auto_compactions\0", "true")])
+                .is_err()
+        );
         // empty options are not allowed
         assert!(db.set_options(&[]).is_err());
         // multiple options can be set in a single API call
@@ -348,26 +354,32 @@ fn set_option_cf_test() {
         let db = DB::open_cf(&opts, &path, vec!["cf1"]).unwrap();
         let cf = db.cf_handle("cf1").unwrap();
         // set an option to valid values
-        assert!(db
-            .set_options_cf(&cf, &[("disable_auto_compactions", "true")])
-            .is_ok());
-        assert!(db
-            .set_options_cf(&cf, &[("disable_auto_compactions", "false")])
-            .is_ok());
+        assert!(
+            db.set_options_cf(&cf, &[("disable_auto_compactions", "true")])
+                .is_ok()
+        );
+        assert!(
+            db.set_options_cf(&cf, &[("disable_auto_compactions", "false")])
+                .is_ok()
+        );
         // invalid names/values should result in an error
-        assert!(db
-            .set_options_cf(&cf, &[("disable_auto_compactions", "INVALID_VALUE")])
-            .is_err());
-        assert!(db
-            .set_options_cf(&cf, &[("INVALID_NAME", "INVALID_VALUE")])
-            .is_err());
+        assert!(
+            db.set_options_cf(&cf, &[("disable_auto_compactions", "INVALID_VALUE")])
+                .is_err()
+        );
+        assert!(
+            db.set_options_cf(&cf, &[("INVALID_NAME", "INVALID_VALUE")])
+                .is_err()
+        );
         // option names/values must not contain NULLs
-        assert!(db
-            .set_options_cf(&cf, &[("disable_auto_compactions", "true\0")])
-            .is_err());
-        assert!(db
-            .set_options_cf(&cf, &[("disable_auto_compactions\0", "true")])
-            .is_err());
+        assert!(
+            db.set_options_cf(&cf, &[("disable_auto_compactions", "true\0")])
+                .is_err()
+        );
+        assert!(
+            db.set_options_cf(&cf, &[("disable_auto_compactions\0", "true")])
+                .is_err()
+        );
         // empty options are not allowed
         assert!(db.set_options_cf(&cf, &[]).is_err());
         // multiple options can be set in a single API call
@@ -1090,12 +1102,13 @@ fn get_with_cache_and_bulkload_test() {
             });
 
             // delete sst file in range (except L0)
-            assert!(db
-                .delete_file_in_range(
+            assert!(
+                db.delete_file_in_range(
                     format!("{:0>4}", 0).as_bytes(),
                     format!("{:0>4}", 9999).as_bytes()
                 )
-                .is_ok());
+                .is_ok()
+            );
             let livefiles = db.live_files().unwrap();
             assert_eq!(livefiles.len(), 0);
 
@@ -1227,12 +1240,13 @@ fn get_with_cache_and_bulkload_and_blobs_test() {
         });
 
         // delete sst file in range (except L0)
-        assert!(db
-            .delete_file_in_range(
+        assert!(
+            db.delete_file_in_range(
                 format!("{:0>4}", 0).as_bytes(),
                 format!("{:0>4}", 9999).as_bytes()
             )
-            .is_ok());
+            .is_ok()
+        );
         let livefiles = db.live_files().unwrap();
         assert_eq!(livefiles.len(), 0);
 

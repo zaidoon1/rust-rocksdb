@@ -16,7 +16,7 @@ mod util;
 
 use pretty_assertions::assert_eq;
 
-use rust_rocksdb::{properties, Options, TransactionDB, TransactionDBOptions};
+use rust_rocksdb::{Options, TransactionDB, TransactionDBOptions, properties};
 use util::DBPath;
 
 #[test]

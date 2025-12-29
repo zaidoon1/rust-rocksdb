@@ -20,7 +20,9 @@
     non_upper_case_globals,
     unused_mut,
     unused_unsafe,
-    unused_variables
+    unused_variables,
+    static_mut_refs,
+    unsafe_op_in_unsafe_fn
 )]
 
 use libc::*;

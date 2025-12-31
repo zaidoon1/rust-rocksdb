@@ -15,7 +15,7 @@
 use std::ffi::CStr;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
-use std::ptr::null_mut;
+use std::ptr::{NonNull, null_mut};
 use std::slice;
 use std::sync::Arc;
 
@@ -53,6 +53,8 @@ struct LogCallback {
     callback: Box<LogCallbackFn>,
 }
 
+/// Options that must outlive the DB, and may be shared between DBs. This is cloned and stored
+/// with every DB that is created from the options.
 #[derive(Default)]
 pub(crate) struct OptionsMustOutliveDB {
     env: Option<Env>,
@@ -62,6 +64,7 @@ pub(crate) struct OptionsMustOutliveDB {
     write_buffer_manager: Option<WriteBufferManager>,
     sst_file_manager: Option<SstFileManager>,
     log_callback: Option<Arc<LogCallback>>,
+    comparator: Option<Arc<OwnedComparator>>,
 }
 
 impl OptionsMustOutliveDB {
@@ -77,6 +80,29 @@ impl OptionsMustOutliveDB {
             write_buffer_manager: self.write_buffer_manager.clone(),
             sst_file_manager: self.sst_file_manager.clone(),
             log_callback: self.log_callback.clone(),
+            comparator: self.comparator.clone(),
+        }
+    }
+}
+
+/// Stores a `rocksdb_comparator_t` and destroys it when dropped.
+///
+/// This has an unsafe implementation of Send and Sync because it wraps a RocksDB pointer that
+/// is safe to share between threads.
+struct OwnedComparator {
+    inner: NonNull<ffi::rocksdb_comparator_t>,
+}
+
+impl OwnedComparator {
+    fn new(inner: NonNull<ffi::rocksdb_comparator_t>) -> Self {
+        Self { inner }
+    }
+}
+
+impl Drop for OwnedComparator {
+    fn drop(&mut self) {
+        unsafe {
+            ffi::rocksdb_comparator_destroy(self.inner.as_ptr());
         }
     }
 }
@@ -268,6 +294,7 @@ unsafe impl Send for ReadOptions {}
 unsafe impl Send for IngestExternalFileOptions {}
 unsafe impl Send for CompactOptions {}
 unsafe impl Send for ImportColumnFamilyOptions {}
+unsafe impl Send for OwnedComparator {}
 
 // Sync is similarly safe for many types because they do not expose interior mutability, and their
 // use within the rocksdb library is generally behind a const reference
@@ -281,6 +308,7 @@ unsafe impl Sync for ReadOptions {}
 unsafe impl Sync for IngestExternalFileOptions {}
 unsafe impl Sync for CompactOptions {}
 unsafe impl Sync for ImportColumnFamilyOptions {}
+unsafe impl Sync for OwnedComparator {}
 
 impl Drop for Options {
     fn drop(&mut self) {
@@ -1653,7 +1681,7 @@ impl Options {
             compare_fn,
         });
 
-        unsafe {
+        let cmp = unsafe {
             let cmp = ffi::rocksdb_comparator_create(
                 Box::into_raw(cb).cast::<c_void>(),
                 Some(ComparatorCallback::destructor_callback),
@@ -1661,7 +1689,9 @@ impl Options {
                 Some(ComparatorCallback::name_callback),
             );
             ffi::rocksdb_options_set_comparator(self.inner, cmp);
-        }
+            OwnedComparator::new(NonNull::new(cmp).unwrap())
+        };
+        self.outlive.comparator = Some(Arc::new(cmp));
     }
 
     /// Sets the comparator that are timestamp-aware, used to define the order of keys in the table,
@@ -1686,7 +1716,7 @@ impl Options {
             compare_without_ts_fn,
         });
 
-        unsafe {
+        let cmp = unsafe {
             let cmp = ffi::rocksdb_comparator_with_ts_create(
                 Box::into_raw(cb).cast::<c_void>(),
                 Some(ComparatorWithTsCallback::destructor_callback),
@@ -1697,7 +1727,9 @@ impl Options {
                 timestamp_size,
             );
             ffi::rocksdb_options_set_comparator(self.inner, cmp);
-        }
+            OwnedComparator::new(NonNull::new(cmp).unwrap())
+        };
+        self.outlive.comparator = Some(Arc::new(cmp));
     }
 
     pub fn set_prefix_extractor(&mut self, prefix_extractor: SliceTransform) {

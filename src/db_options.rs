@@ -65,6 +65,7 @@ pub(crate) struct OptionsMustOutliveDB {
     sst_file_manager: Option<SstFileManager>,
     log_callback: Option<Arc<LogCallback>>,
     comparator: Option<Arc<OwnedComparator>>,
+    compaction_filter: Option<Arc<OwnedCompactionFilter>>,
 }
 
 impl OptionsMustOutliveDB {
@@ -81,6 +82,7 @@ impl OptionsMustOutliveDB {
             sst_file_manager: self.sst_file_manager.clone(),
             log_callback: self.log_callback.clone(),
             comparator: self.comparator.clone(),
+            compaction_filter: self.compaction_filter.clone(),
         }
     }
 }
@@ -103,6 +105,28 @@ impl Drop for OwnedComparator {
     fn drop(&mut self) {
         unsafe {
             ffi::rocksdb_comparator_destroy(self.inner.as_ptr());
+        }
+    }
+}
+
+/// Stores a `rocksdb_compactionfilter_t` and destroys it when dropped.
+///
+/// This has an unsafe implementation of Send and Sync because it wraps a RocksDB pointer that
+/// is safe to share between threads.
+struct OwnedCompactionFilter {
+    inner: NonNull<ffi::rocksdb_compactionfilter_t>,
+}
+
+impl OwnedCompactionFilter {
+    fn new(inner: NonNull<ffi::rocksdb_compactionfilter_t>) -> Self {
+        Self { inner }
+    }
+}
+
+impl Drop for OwnedCompactionFilter {
+    fn drop(&mut self) {
+        unsafe {
+            ffi::rocksdb_compactionfilter_destroy(self.inner.as_ptr());
         }
     }
 }
@@ -296,6 +320,7 @@ unsafe impl Send for CompactOptions {}
 unsafe impl Send for ImportColumnFamilyOptions {}
 unsafe impl Send for WriteBufferManagerWrapper {}
 unsafe impl Send for OwnedComparator {}
+unsafe impl Send for OwnedCompactionFilter {}
 
 // Sync is similarly safe for many types because they do not expose interior mutability, and their
 // use within the rocksdb library is generally behind a const reference
@@ -311,6 +336,7 @@ unsafe impl Sync for CompactOptions {}
 unsafe impl Sync for ImportColumnFamilyOptions {}
 unsafe impl Sync for WriteBufferManagerWrapper {}
 unsafe impl Sync for OwnedComparator {}
+unsafe impl Sync for OwnedCompactionFilter {}
 
 impl Drop for Options {
     fn drop(&mut self) {
@@ -1657,7 +1683,7 @@ impl Options {
             filter_fn,
         });
 
-        unsafe {
+        let filter = unsafe {
             let cf = ffi::rocksdb_compactionfilter_create(
                 Box::into_raw(cb).cast::<c_void>(),
                 Some(compaction_filter::destructor_callback::<CompactionFilterCallback<F>>),
@@ -1665,7 +1691,10 @@ impl Options {
                 Some(compaction_filter::name_callback::<CompactionFilterCallback<F>>),
             );
             ffi::rocksdb_options_set_compaction_filter(self.inner, cf);
-        }
+
+            OwnedCompactionFilter::new(NonNull::new(cf).unwrap())
+        };
+        self.outlive.compaction_filter = Some(Arc::new(filter));
     }
 
     pub fn add_event_listener<L: EventListener>(&mut self, l: L) {

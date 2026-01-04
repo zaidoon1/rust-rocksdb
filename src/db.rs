@@ -34,12 +34,10 @@ use crate::{
     DBPinnableSlice, DBRawIteratorWithThreadMode, DBWALIterator, DEFAULT_COLUMN_FAMILY_NAME,
     Direction, Error, FlushOptions, IngestExternalFileOptions, IteratorMode, Options, ReadOptions,
     SnapshotWithThreadMode, WaitForCompactOptions, WriteBatch, WriteBatchWithIndex, WriteOptions,
-    column_family::AsColumnFamilyRef,
-    column_family::BoundColumnFamily,
-    column_family::UnboundColumnFamily,
+    column_family::{AsColumnFamilyRef, BoundColumnFamily, UnboundColumnFamily},
     db_options::{ImportColumnFamilyOptions, OptionsMustOutliveDB},
     ffi,
-    ffi_util::{CStrLike, from_cstr, opt_bytes_to_ptr, raw_data, to_cpath},
+    ffi_util::{CStrLike, convert_rocksdb_error, from_cstr, opt_bytes_to_ptr, raw_data, to_cpath},
 };
 use rust_librocksdb_sys::{
     rocksdb_livefile_destroy, rocksdb_livefile_t, rocksdb_livefiles_destroy, rocksdb_livefiles_t,
@@ -1454,7 +1452,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
                             Ok(Some(DBPinnableSlice::from_c(v)))
                         }
                     } else {
-                        Err(Error::new(crate::ffi_util::error_message(e)))
+                        Err(convert_rocksdb_error(e))
                     }
                 })
                 .collect()
@@ -3448,7 +3446,7 @@ pub(crate) fn convert_values(
                 }
                 Ok(value)
             } else {
-                Err(Error::new(crate::ffi_util::error_message(e)))
+                Err(convert_rocksdb_error(e))
             }
         })
         .collect()

@@ -69,5 +69,6 @@ iterable_named_enum! {
         AsyncPrefetchAbortMicros("rocksdb.async.prefetch.abort.micros"),
         TableOpenPrefetchTailReadBytes("rocksdb.table.open.prefetch.tail.read.bytes"),
         NumOpPerTransaction("rocksdb.num.op.per.transaction"),
+        MultiscanPrepareIterators("rocksdb.multiscan.op.prepare.iterators.micros"),
     }
 }

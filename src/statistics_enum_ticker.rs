@@ -181,6 +181,7 @@ iterable_named_enum! {
         BackupWriteBytes("rocksdb.backup.write.bytes"),
         RemoteCompactReadBytes("rocksdb.remote.compact.read.bytes"),
         RemoteCompactWriteBytes("rocksdb.remote.compact.write.bytes"),
+        RemoteCompactResumedBytes("rocksdb.remote.compact.resumed.bytes"),
         HotFileReadBytes("rocksdb.hot.file.read.bytes"),
         WarmFileReadBytes("rocksdb.warm.file.read.bytes"),
         CoolFileReadBytes("rocksdb.cool.file.read.bytes"),

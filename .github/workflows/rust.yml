@@ -1,6 +1,16 @@
 name: RocksDB CI
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
   style:
@@ -11,15 +21,11 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt
-
-      - name: use stable rust
-        run: rustup override set stable
-
-      - name: generate Cargo.lock
-        run: cargo generate-lockfile
+          cache: false
+          rustflags: ""
 
       - name: Run rustfmt
         run: cargo fmt --all -- --check
@@ -32,13 +38,9 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rust-docs
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
 
       - name: Run cargo rustdoc
         run: cargo rustdoc -- -D warnings
@@ -51,11 +53,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
+        uses: actions-rust-lang/setup-rust-toolchain@v1
 
       - name: Run doctests
         run: cargo test --doc
@@ -68,21 +66,13 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: clippy
 
-      - name: use stable rust
-        run: rustup override set stable
-
-      - name: generate Cargo.lock
-        run: cargo generate-lockfile
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y liburing-dev pkg-config
+
       - name: Set PKG_CONFIG_PATH
         run: echo "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig" >> $GITHUB_ENV
 
@@ -105,20 +95,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-
-      - name: Install rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: use stable rust
-        run: rustup override set stable
-
-      - name: generate Cargo.lock
-        run: cargo generate-lockfile
-
-      # https://github.com/rustsec/audit-check/issues/2
-      - uses: rustsec/audit-check@master
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions-rust-lang/audit@v1
 
   test:
     name: ${{ matrix.build }}
@@ -139,13 +116,14 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v5
+        with:
+          submodules: recursive
 
       - name: Install rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
       - uses: taiki-e/install-action@nextest
 
       - name: Remove msys64 # Workaround to resolve link error with C:\msys64\mingw64\bin\libclang.dll
@@ -161,14 +139,64 @@ jobs:
         run: |
           mkdir -p target
           touch Cargo.lock
-          git submodule update --init --recursive
           chmod -R a-w .
           chmod -R a+w target Cargo.lock
 
       - name: Run rocksdb tests
+        run: cargo nextest run --all
+
+      - name: Mark working directory as writable
+        if: runner.os == 'Linux'
+        run: chmod -R a+w .
+
+  test-multi-threaded-cf:
+    name: ${{ matrix.build }} (multi-threaded-cf)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        build: [Linux, Linux-ARM, macOS, Windows]
+        include:
+          - build: Linux
+            os: ubuntu-latest
+          - build: Linux-ARM
+            os: ubuntu-24.04-arm
+          - build: macOS
+            os: macos-latest
+          - build: Windows
+            os: windows-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-key: "v1-rust-multi-threaded-cf"
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      - uses: taiki-e/install-action@nextest
+
+      - name: Remove msys64 # Workaround to resolve link error with C:\msys64\mingw64\bin\libclang.dll
+        if: runner.os == 'Windows'
+        run: Remove-Item -LiteralPath "C:\msys64\" -Force -Recurse
+
+      - name: Install dependencies
+        if: runner.os == 'Windows'
+        run: choco install llvm -y
+
+      - name: Mark working directory as read-only
+        if: runner.os == 'Linux'
         run: |
-          cargo nextest run --all
-          cargo nextest run --all --features multi-threaded-cf
+          mkdir -p target
+          touch Cargo.lock
+          chmod -R a-w .
+          chmod -R a+w target Cargo.lock
+
+      - name: Run rocksdb tests (multi-threaded-cf)
+        run: cargo nextest run --all --features multi-threaded-cf
 
       - name: Mark working directory as writable
         if: runner.os == 'Linux'
@@ -191,19 +219,16 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v5
+        with:
+          submodules: recursive
 
       - name: Install rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          cache-on-failure: true
-          prefix-key: "v1-rust-jemalloc"
+          cache-key: "v1-rust-jemalloc"
+          save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - uses: taiki-e/install-action@nextest
-
-      - name: Initialize submodules
-        run: git submodule update --init --recursive
 
       - name: Mark working directory as read-only
         if: runner.os == 'Linux'
@@ -230,14 +255,13 @@ jobs:
           submodules: recursive
 
       - name: Install rust nightly
-        uses: dtolnay/rust-toolchain@nightly
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
+          toolchain: nightly
           components: rust-src
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-          prefix-key: "v1-rust-asan"
+          cache-key: "v1-rust-asan"
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+          rustflags: ""
 
       - name: Install dependencies
         run: |

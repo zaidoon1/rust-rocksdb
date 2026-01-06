@@ -37,7 +37,10 @@ use crate::{
     column_family::{AsColumnFamilyRef, BoundColumnFamily, UnboundColumnFamily},
     db_options::{ImportColumnFamilyOptions, OptionsMustOutliveDB},
     ffi,
-    ffi_util::{CStrLike, convert_rocksdb_error, from_cstr, opt_bytes_to_ptr, raw_data, to_cpath},
+    ffi_util::{
+        CStrLike, convert_rocksdb_error, from_cstr_and_free, from_cstr_without_free,
+        opt_bytes_to_ptr, raw_data, to_cpath,
+    },
 };
 use rust_librocksdb_sys::{
     rocksdb_livefile_destroy, rocksdb_livefile_t, rocksdb_livefiles_destroy, rocksdb_livefiles_t,
@@ -985,7 +988,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
 
             let vec = slice::from_raw_parts(ptr, length)
                 .iter()
-                .map(|ptr| CStr::from_ptr(*ptr).to_string_lossy().into_owned())
+                .map(|ptr| from_cstr_without_free(*ptr))
                 .collect();
             ffi::rocksdb_list_column_families_destroy(ptr, length);
             Ok(vec)
@@ -2853,7 +2856,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
 
             let metadata = ColumnFamilyMetaData {
                 size: ffi::rocksdb_column_family_metadata_get_size(ptr),
-                name: from_cstr(ffi::rocksdb_column_family_metadata_get_name(ptr)),
+                name: from_cstr_and_free(ffi::rocksdb_column_family_metadata_get_name(ptr)),
                 file_count: ffi::rocksdb_column_family_metadata_get_file_count(ptr),
             };
 
@@ -2875,7 +2878,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
 
             let metadata = ColumnFamilyMetaData {
                 size: ffi::rocksdb_column_family_metadata_get_size(ptr),
-                name: from_cstr(ffi::rocksdb_column_family_metadata_get_name(ptr)),
+                name: from_cstr_and_free(ffi::rocksdb_column_family_metadata_get_name(ptr)),
                 file_count: ffi::rocksdb_column_family_metadata_get_file_count(ptr),
             };
 
@@ -3227,10 +3230,11 @@ impl LiveFile {
             let mut key_size: usize = 0;
 
             for i in 0..n {
+                // rocksdb_livefiles_* returns pointers to strings, not copies
                 let column_family_name =
-                    from_cstr(ffi::rocksdb_livefiles_column_family_name(files, i));
-                let name = from_cstr(ffi::rocksdb_livefiles_name(files, i));
-                let directory = from_cstr(ffi::rocksdb_livefiles_directory(files, i));
+                    from_cstr_without_free(ffi::rocksdb_livefiles_column_family_name(files, i));
+                let name = from_cstr_without_free(ffi::rocksdb_livefiles_name(files, i));
+                let directory = from_cstr_without_free(ffi::rocksdb_livefiles_directory(files, i));
                 let size = ffi::rocksdb_livefiles_size(files, i);
                 let level = ffi::rocksdb_livefiles_level(files, i);
 
@@ -3316,9 +3320,7 @@ impl ExportImportFilesMetaData {
         unsafe {
             let c_name =
                 ffi::rocksdb_export_import_files_metadata_get_db_comparator_name(self.inner);
-            let name = from_cstr(c_name);
-            ffi::rocksdb_free(c_name as *mut c_void);
-            name
+            from_cstr_and_free(c_name)
         }
     }
 

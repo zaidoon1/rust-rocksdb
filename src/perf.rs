@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use libc::{c_int, c_uchar, c_void};
+use libc::{c_int, c_uchar};
 
 use crate::cache::Cache;
+use crate::ffi_util::from_cstr_and_free;
 use crate::{DB, DBCommon, ThreadMode, TransactionDB};
-use crate::{Error, db::DBInner, ffi, ffi_util::from_cstr};
+use crate::{Error, db::DBInner, ffi};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[repr(i32)]
@@ -84,9 +85,7 @@ impl PerfContext {
         unsafe {
             let ptr =
                 ffi::rocksdb_perfcontext_report(self.inner, c_uchar::from(exclude_zero_counters));
-            let report = from_cstr(ptr);
-            ffi::rocksdb_free(ptr as *mut c_void);
-            report
+            from_cstr_and_free(ptr)
         }
     }
 

@@ -1,4 +1,4 @@
-use crate::ffi_util::error_message;
+use crate::ffi_util::convert_rocksdb_error;
 use crate::{Error, ffi};
 use libc::{c_char, c_void};
 
@@ -477,7 +477,7 @@ impl MemTableInfo {
 }
 
 pub struct MutableStatus {
-    result: Result<(), String>,
+    result: Result<(), Error>,
     ptr: *mut ffi::rocksdb_status_ptr_t,
 }
 
@@ -486,8 +486,8 @@ impl MutableStatus {
         unsafe { ffi::rocksdb_reset_status(self.ptr) }
     }
 
-    pub fn result(&self) -> Result<(), String> {
-        self.result.clone()
+    pub fn result(&self) -> &Result<(), Error> {
+        &self.result
     }
 }
 
@@ -617,7 +617,7 @@ extern "C" fn on_background_error<E: EventListener>(
         if err.is_null() {
             Ok(())
         } else {
-            Err(error_message(err))
+            Err(convert_rocksdb_error(err))
         }
     };
     let status = MutableStatus {

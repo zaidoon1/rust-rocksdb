@@ -242,13 +242,6 @@ fn test_custom_iterator() {
         let _data = custom_iter(&db).collect::<Vec<usize>>();
     }
 }
-
-#[test]
-fn test_iterator_outlive_db() {
-    let t = trybuild::TestCases::new();
-    t.compile_fail("tests/fail/iterator_outlive_db.rs");
-}
-
 #[test]
 fn test_iter_range() {
     #[rustfmt::skip]

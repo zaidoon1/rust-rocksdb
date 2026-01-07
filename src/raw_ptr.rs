@@ -3,7 +3,7 @@ use crate::{
     db_options::Options,
     env::Env,
 };
-use librocksdb_sys as ffi;
+use rust_librocksdb_sys as ffi;
 
 /// Trait for accessing raw pointers to underlying RocksDB objects.
 ///
@@ -13,7 +13,7 @@ use librocksdb_sys as ffi;
 /// # Examples
 ///
 /// ```rust,ignore
-/// use rocksdb::{DB, Options, AsRawPtr};
+/// use rust_rocksdb::{DB, Options, AsRawPtr};
 ///
 /// let db = DB::open_default("path")?;
 /// let raw_db_ptr = unsafe { db.as_raw_ptr() }; // *mut rocksdb_t

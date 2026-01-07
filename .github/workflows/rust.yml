@@ -13,14 +13,14 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  style:
+  fmt:
     name: Rustfmt
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
         uses: actions/checkout@v5
 
-      - name: Install rust
+      - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt
@@ -30,29 +30,27 @@ jobs:
       - name: Run rustfmt
         run: cargo fmt --all -- --check
 
-  doc-check:
-    name: Rustdoc-check
+  doc:
+    name: Rustdoc
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
         uses: actions/checkout@v5
 
-      - name: Install rust
+      - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          components: rust-docs
 
-      - name: Run cargo rustdoc
+      - name: Run rustdoc
         run: cargo rustdoc -- -D warnings
 
-  doctest: # doctest are no supported in cargo nextest yet. https://github.com/nextest-rs/nextest/issues/16
+  doctest:
     name: Doctests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
         uses: actions/checkout@v5
 
-      - name: Install rust
+      - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
 
       - name: Run doctests
@@ -65,188 +63,122 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v5
 
-      - name: Install rust
+      - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: clippy
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y liburing-dev pkg-config
-
-      - name: Set PKG_CONFIG_PATH
-        run: echo "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig" >> $GITHUB_ENV
+        run: sudo apt-get update && sudo apt-get install -y liburing-dev
 
       - name: Run clippy
         run: |
           cargo clippy --all-targets --features \
-            "jemalloc \
-            io-uring \
-            valgrind \
-            mt_static \
-            rtti \
-            multi-threaded-cf \
-            malloc-usable-size \
-            zstd-static-linking-only \
-            serde1" \
+            "jemalloc,io-uring,valgrind,mt_static,rtti,multi-threaded-cf,malloc-usable-size,zstd-static-linking-only,serde1,raw-ptr" \
             -- -D warnings
 
   audit:
-    name: Security audit
+    name: Security Audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions-rust-lang/audit@v1
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: Run audit
+        uses: actions-rust-lang/audit@v1
 
   test:
-    name: ${{ matrix.build }}
+    name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        build: [Linux, Linux-ARM, macOS, Windows]
-        include:
-          - build: Linux
-            os: ubuntu-latest
-          - build: Linux-ARM
-            os: ubuntu-24.04-arm
-          - build: macOS
-            os: macos-latest
-          - build: Windows
-            os: windows-latest
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v5
         with:
           submodules: recursive
 
-      - name: Install rust
+      - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      - uses: taiki-e/install-action@nextest
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
 
-      - name: Remove msys64 # Workaround to resolve link error with C:\msys64\mingw64\bin\libclang.dll
+      - name: Remove msys64
         if: runner.os == 'Windows'
         run: Remove-Item -LiteralPath "C:\msys64\" -Force -Recurse
 
-      - name: Install dependencies
+      - name: Install LLVM (Windows)
         if: runner.os == 'Windows'
         run: choco install llvm -y
 
-      - name: Mark working directory as read-only
-        if: runner.os == 'Linux'
-        run: |
-          mkdir -p target
-          touch Cargo.lock
-          chmod -R a-w .
-          chmod -R a+w target Cargo.lock
-
-      - name: Run rocksdb tests
+      - name: Run tests
         run: cargo nextest run --all
 
-      - name: Mark working directory as writable
-        if: runner.os == 'Linux'
-        run: chmod -R a+w .
-
   test-multi-threaded-cf:
-    name: ${{ matrix.build }} (multi-threaded-cf)
+    name: Test multi-threaded-cf (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        build: [Linux, Linux-ARM, macOS, Windows]
-        include:
-          - build: Linux
-            os: ubuntu-latest
-          - build: Linux-ARM
-            os: ubuntu-24.04-arm
-          - build: macOS
-            os: macos-latest
-          - build: Windows
-            os: windows-latest
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v5
         with:
           submodules: recursive
 
-      - name: Install rust
+      - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          cache-key: "v1-rust-multi-threaded-cf"
+          cache-key: v1-multi-threaded-cf
           save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      - uses: taiki-e/install-action@nextest
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
 
-      - name: Remove msys64 # Workaround to resolve link error with C:\msys64\mingw64\bin\libclang.dll
+      - name: Remove msys64
         if: runner.os == 'Windows'
         run: Remove-Item -LiteralPath "C:\msys64\" -Force -Recurse
 
-      - name: Install dependencies
+      - name: Install LLVM (Windows)
         if: runner.os == 'Windows'
         run: choco install llvm -y
 
-      - name: Mark working directory as read-only
-        if: runner.os == 'Linux'
-        run: |
-          mkdir -p target
-          touch Cargo.lock
-          chmod -R a-w .
-          chmod -R a+w target Cargo.lock
-
-      - name: Run rocksdb tests (multi-threaded-cf)
+      - name: Run tests
         run: cargo nextest run --all --features multi-threaded-cf
 
-      - name: Mark working directory as writable
-        if: runner.os == 'Linux'
-        run: chmod -R a+w .
-
   test-jemalloc:
-    name: Test with jemalloc - ${{ matrix.build }}
+    name: Test jemalloc (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        build: [Linux, Linux-ARM, macOS]
-        include:
-          - build: Linux
-            os: ubuntu-latest
-          - build: Linux-ARM
-            os: ubuntu-24.04-arm
-          - build: macOS
-            os: macos-latest
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v5
         with:
           submodules: recursive
 
-      - name: Install rust
+      - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          cache-key: "v1-rust-jemalloc"
+          cache-key: v1-jemalloc
           save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      - uses: taiki-e/install-action@nextest
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
 
-      - name: Mark working directory as read-only
-        if: runner.os == 'Linux'
-        run: |
-          mkdir -p target
-          touch Cargo.lock
-          chmod -R a-w .
-          chmod -R a+w target Cargo.lock
-
-      - name: Run rocksdb tests with jemalloc
+      - name: Run tests
         run: cargo nextest run --all --features jemalloc
 
-      - name: Mark working directory as writable
-        if: runner.os == 'Linux'
-        run: chmod -R a+w .
-
-  test-sanitizers:
-    name: Test with AddressSanitizer
+  asan:
+    name: AddressSanitizer
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -254,24 +186,21 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install rust nightly
+      - name: Install Rust nightly
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: nightly
           components: rust-src
-          cache-key: "v1-rust-asan"
+          cache-key: v1-asan
           save-if: ${{ github.ref == 'refs/heads/master' }}
           rustflags: ""
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y llvm clang
 
       - name: Run tests with AddressSanitizer
         env:
           RUSTFLAGS: -Zsanitizer=address
-          RUSTDOCFLAGS: -Zsanitizer=address
-          ASAN_OPTIONS: detect_leaks=0:abort_on_error=1:print_stats=1
+          ASAN_OPTIONS: detect_leaks=1:detect_stack_use_after_return=1
         run: |
-          cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu --all --lib --bins
+          cargo +nightly test \
+            -Zbuild-std \
+            --target x86_64-unknown-linux-gnu \
+            --lib --bins

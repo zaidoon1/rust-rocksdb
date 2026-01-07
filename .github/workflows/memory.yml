@@ -1,0 +1,97 @@
+name: Memory Safety
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  valgrind:
+    name: Valgrind
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-key: v1-valgrind
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      - name: Install Valgrind
+        run: sudo apt-get update && sudo apt-get install -y valgrind
+
+      - name: Build tests
+        run: cargo test --no-run --features valgrind --message-format=json > build_output.json 2>&1 || true
+
+      - name: Run tests under Valgrind
+        run: |
+          # Extract test binary path from cargo JSON output
+          TEST_BIN=$(jq -r 'select(.executable != null and .target.kind == ["lib"]) | .executable' build_output.json | head -1)
+
+          # Fallback: try to find any test executable
+          if [ -z "$TEST_BIN" ] || [ ! -f "$TEST_BIN" ]; then
+            TEST_BIN=$(jq -r 'select(.executable != null) | .executable' build_output.json | grep -E 'rust.rocksdb|rust_rocksdb' | head -1)
+          fi
+
+          # Final fallback: find in target directory
+          if [ -z "$TEST_BIN" ] || [ ! -f "$TEST_BIN" ]; then
+            TEST_BIN=$(find target/debug/deps -name 'rust_rocksdb-*' -type f -executable 2>/dev/null | head -1)
+          fi
+
+          if [ -z "$TEST_BIN" ] || [ ! -f "$TEST_BIN" ]; then
+            echo "::error::Could not find test binary"
+            echo "Build output:"
+            cat build_output.json
+            exit 1
+          fi
+
+          echo "Running Valgrind on: $TEST_BIN"
+
+          valgrind \
+            --leak-check=full \
+            --show-leak-kinds=definite,indirect \
+            --errors-for-leak-kinds=definite,indirect \
+            --track-origins=yes \
+            --error-exitcode=1 \
+            --suppressions=valgrind.supp \
+            "$TEST_BIN" --test-threads=1
+
+  tsan:
+    name: ThreadSanitizer
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install Rust nightly
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: nightly
+          components: rust-src
+          cache-key: v1-tsan
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+          rustflags: ""
+
+      - name: Run tests with ThreadSanitizer
+        env:
+          RUSTFLAGS: -Zsanitizer=thread
+          TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+        run: |
+          cargo +nightly test \
+            -Zbuild-std \
+            --target x86_64-unknown-linux-gnu \
+            --lib --bins \
+            -- --test-threads=1

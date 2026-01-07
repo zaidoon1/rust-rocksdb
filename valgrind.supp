@@ -1,0 +1,157 @@
+# Valgrind suppressions for rust-rocksdb
+#
+# These suppress known false positives from RocksDB internals and system libraries.
+# Only "reachable" leaks are suppressed - actual leaks (definite/indirect) will still be reported.
+
+# RocksDB thread-local storage (intentionally kept alive for performance)
+{
+   rocksdb_thread_local_ptr
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   fun:*rocksdb*ThreadLocalPtr*
+}
+
+{
+   rocksdb_thread_local
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   fun:*ThreadLocal*
+}
+
+# RocksDB default environment singleton
+{
+   rocksdb_default_env
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   fun:*rocksdb*Env*Default*
+}
+
+# RocksDB compression library singletons
+{
+   rocksdb_compression
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   fun:*rocksdb*Compress*
+}
+
+# jemalloc internal allocations (when using jemalloc feature)
+{
+   jemalloc_internal
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   obj:*libjemalloc*
+}
+
+{
+   jemalloc_tsd
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   fun:*jemalloc*
+}
+
+# Rust standard library
+{
+   rust_panic_unwind
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   fun:*std*panicking*
+}
+
+{
+   rust_thread_local
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   fun:*std*thread*local*
+}
+
+{
+   rust_backtrace
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   fun:*std*backtrace*
+}
+
+# glibc/libc internal allocations
+{
+   glibc_dlopen
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   fun:_dl_*
+}
+
+{
+   glibc_nss
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   obj:*libnss*
+}
+
+{
+   glibc_locale
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   fun:*setlocale*
+}
+
+# C++ runtime (exception handling, RTTI)
+{
+   cxx_abi
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   fun:__cxa_*
+}
+
+{
+   cxx_global_constructors
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   fun:*__static_initialization*
+}
+
+# pthread internal allocations
+{
+   pthread_create
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   fun:pthread_create*
+}
+
+{
+   pthread_key
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   fun:pthread_key_create
+}
+
+# libstdc++ internal allocations
+{
+   libstdcxx_locale
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   fun:*std*locale*
+}
+
+{
+   libstdcxx_iostream
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   fun:*std*iostream*
+}

@@ -75,6 +75,82 @@ impl<'a> Range<'a> {
     }
 }
 
+/// Result of a [`get_into_buffer`](DBCommon::get_into_buffer) operation.
+///
+/// This enum represents the outcome of attempting to read a value directly
+/// into a caller-provided buffer, avoiding memory allocation. This is the most
+/// efficient way to read values when you have a pre-allocated buffer available.
+///
+/// # Performance
+///
+/// Using `get_into_buffer` with a reusable buffer can significantly reduce
+/// allocation overhead in hot paths compared to [`get`](DBCommon::get) or even
+/// [`get_pinned`](DBCommon::get_pinned):
+///
+/// - [`get`](DBCommon::get): Allocates a new `Vec<u8>` for each call
+/// - [`get_pinned`](DBCommon::get_pinned): Pins memory in RocksDB's block cache
+/// - `get_into_buffer`: Zero allocation when buffer is large enough
+///
+/// # Example
+///
+/// ```
+/// use rust_rocksdb::{DB, GetIntoBufferResult};
+///
+/// # let tempdir = tempfile::Builder::new().prefix("ex").tempdir().unwrap();
+/// let db = DB::open_default(tempdir.path()).unwrap();
+/// db.put(b"key", b"value").unwrap();
+///
+/// let mut buffer = [0u8; 1024];
+/// match db.get_into_buffer(b"key", &mut buffer).unwrap() {
+///     GetIntoBufferResult::Found(len) => {
+///         println!("Value: {:?}", &buffer[..len]);
+///     }
+///     GetIntoBufferResult::NotFound => {
+///         println!("Key not found");
+///     }
+///     GetIntoBufferResult::BufferTooSmall(needed) => {
+///         println!("Need a buffer of at least {} bytes", needed);
+///     }
+/// }
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GetIntoBufferResult {
+    /// The key was not found in the database.
+    NotFound,
+    /// The value was found and successfully copied into the buffer.
+    /// The `usize` contains the actual size of the value (number of bytes written).
+    Found(usize),
+    /// The value was found but the provided buffer was too small to hold it.
+    /// The `usize` contains the actual size of the value, allowing the caller
+    /// to allocate a larger buffer and retry.
+    ///
+    /// Note: When this variant is returned, no data is written to the buffer.
+    BufferTooSmall(usize),
+}
+
+impl GetIntoBufferResult {
+    /// Returns `true` if the key was found (regardless of buffer size).
+    #[inline]
+    pub fn is_found(&self) -> bool {
+        matches!(self, Self::Found(_) | Self::BufferTooSmall(_))
+    }
+
+    /// Returns `true` if the key was not found.
+    #[inline]
+    pub fn is_not_found(&self) -> bool {
+        matches!(self, Self::NotFound)
+    }
+
+    /// Returns the value size if the key was found, `None` otherwise.
+    #[inline]
+    pub fn value_size(&self) -> Option<usize> {
+        match self {
+            Self::Found(size) | Self::BufferTooSmall(size) => Some(*size),
+            Self::NotFound => None,
+        }
+    }
+}
+
 /// A reusable prefix probe that avoids per-call iterator creation/destruction.
 ///
 /// Use this when performing many prefix existence checks in a tight loop.
@@ -1213,6 +1289,195 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         DEFAULT_READ_OPTS.with(|opts| self.get_pinned_cf_opt(cf, key, opts))
     }
 
+    /// Read a value directly into a caller-provided buffer, avoiding memory allocation.
+    ///
+    /// This is the most efficient way to read values when you have a pre-allocated
+    /// buffer. It completely avoids the allocation overhead of [`get`](#method.get)
+    /// and even the pinning overhead of [`get_pinned`](#method.get_pinned).
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The key to look up
+    /// * `buffer` - A mutable byte slice to write the value into. Can be empty if you
+    ///   only want to check if a key exists and get its value size.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(GetIntoBufferResult::NotFound)` - The key doesn't exist
+    /// * `Ok(GetIntoBufferResult::Found(size))` - Value was copied into the buffer.
+    ///   `size` is the number of bytes written.
+    /// * `Ok(GetIntoBufferResult::BufferTooSmall(size))` - The value exists but the buffer
+    ///   is too small. `size` is the actual value size needed. No data is written.
+    /// * `Err(...)` - Database error occurred
+    ///
+    /// # Performance
+    ///
+    /// This method is ideal for high-throughput scenarios where you can reuse a buffer:
+    ///
+    /// ```ignore
+    /// use rust_rocksdb::{DB, GetIntoBufferResult};
+    ///
+    /// let db: DB = /* open database */;
+    /// let keys_to_lookup: Vec<&[u8]> = /* keys to look up */;
+    /// let mut buffer = vec![0u8; 4096]; // Reusable buffer
+    ///
+    /// for key in keys_to_lookup {
+    ///     match db.get_into_buffer(key, &mut buffer).unwrap() {
+    ///         GetIntoBufferResult::Found(len) => {
+    ///             process_value(&buffer[..len]);
+    ///         }
+    ///         GetIntoBufferResult::BufferTooSmall(needed) => {
+    ///             buffer.resize(needed, 0);
+    ///             // Retry with larger buffer...
+    ///         }
+    ///         GetIntoBufferResult::NotFound => {}
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use rust_rocksdb::{DB, GetIntoBufferResult};
+    ///
+    /// let tempdir = tempfile::Builder::new()
+    ///     .prefix("rocksdb_get_into_buffer")
+    ///     .tempdir()
+    ///     .unwrap();
+    /// let db = DB::open_default(tempdir.path()).unwrap();
+    /// db.put(b"key", b"value").unwrap();
+    ///
+    /// let mut buffer = [0u8; 100];
+    /// match db.get_into_buffer(b"key", &mut buffer).unwrap() {
+    ///     GetIntoBufferResult::Found(size) => {
+    ///         assert_eq!(&buffer[..size], b"value");
+    ///     }
+    ///     GetIntoBufferResult::NotFound => panic!("expected value"),
+    ///     GetIntoBufferResult::BufferTooSmall(needed) => {
+    ///         panic!("buffer too small, need {} bytes", needed)
+    ///     }
+    /// }
+    /// ```
+    pub fn get_into_buffer<K: AsRef<[u8]>>(
+        &self,
+        key: K,
+        buffer: &mut [u8],
+    ) -> Result<GetIntoBufferResult, Error> {
+        DEFAULT_READ_OPTS.with(|opts| self.get_into_buffer_opt(key, buffer, opts))
+    }
+
+    /// Read a value directly into a caller-provided buffer with custom read options.
+    ///
+    /// This is the same as [`get_into_buffer`](#method.get_into_buffer) but allows
+    /// specifying custom [`ReadOptions`], such as setting a snapshot or fill cache behavior.
+    ///
+    /// See [`get_into_buffer`](#method.get_into_buffer) for full documentation.
+    pub fn get_into_buffer_opt<K: AsRef<[u8]>>(
+        &self,
+        key: K,
+        buffer: &mut [u8],
+        readopts: &ReadOptions,
+    ) -> Result<GetIntoBufferResult, Error> {
+        if readopts.inner.is_null() {
+            return Err(Error::new(
+                "Unable to create RocksDB read options. This is a fairly trivial call, and its \
+                 failure may be indicative of a mis-compiled or mis-loaded RocksDB library."
+                    .to_owned(),
+            ));
+        }
+
+        let key = key.as_ref();
+        let mut val_len: size_t = 0;
+        let mut found: c_uchar = 0;
+
+        unsafe {
+            let success = ffi_try!(ffi::rocksdb_get_into_buffer(
+                self.inner.inner(),
+                readopts.inner,
+                key.as_ptr() as *const c_char,
+                key.len() as size_t,
+                buffer.as_mut_ptr() as *mut c_char,
+                buffer.len() as size_t,
+                &raw mut val_len,
+                &raw mut found,
+            ));
+
+            if found == 0 {
+                Ok(GetIntoBufferResult::NotFound)
+            } else if success != 0 {
+                Ok(GetIntoBufferResult::Found(val_len))
+            } else {
+                Ok(GetIntoBufferResult::BufferTooSmall(val_len))
+            }
+        }
+    }
+
+    /// Read a value from a column family directly into a caller-provided buffer.
+    ///
+    /// This is the column family variant of [`get_into_buffer`](#method.get_into_buffer).
+    /// See that method for full documentation on the zero-allocation buffer API.
+    ///
+    /// # Arguments
+    ///
+    /// * `cf` - The column family to read from
+    /// * `key` - The key to look up
+    /// * `buffer` - A mutable byte slice to write the value into
+    pub fn get_into_buffer_cf<K: AsRef<[u8]>>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        key: K,
+        buffer: &mut [u8],
+    ) -> Result<GetIntoBufferResult, Error> {
+        DEFAULT_READ_OPTS.with(|opts| self.get_into_buffer_cf_opt(cf, key, buffer, opts))
+    }
+
+    /// Read a value from a column family directly into a caller-provided buffer
+    /// with custom read options.
+    ///
+    /// This is the column family variant of [`get_into_buffer_opt`](#method.get_into_buffer_opt).
+    /// See [`get_into_buffer`](#method.get_into_buffer) for full documentation.
+    pub fn get_into_buffer_cf_opt<K: AsRef<[u8]>>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        key: K,
+        buffer: &mut [u8],
+        readopts: &ReadOptions,
+    ) -> Result<GetIntoBufferResult, Error> {
+        if readopts.inner.is_null() {
+            return Err(Error::new(
+                "Unable to create RocksDB read options. This is a fairly trivial call, and its \
+                 failure may be indicative of a mis-compiled or mis-loaded RocksDB library."
+                    .to_owned(),
+            ));
+        }
+
+        let key = key.as_ref();
+        let mut val_len: size_t = 0;
+        let mut found: c_uchar = 0;
+
+        unsafe {
+            let success = ffi_try!(ffi::rocksdb_get_into_buffer_cf(
+                self.inner.inner(),
+                readopts.inner,
+                cf.inner(),
+                key.as_ptr() as *const c_char,
+                key.len() as size_t,
+                buffer.as_mut_ptr() as *mut c_char,
+                buffer.len() as size_t,
+                &raw mut val_len,
+                &raw mut found,
+            ));
+
+            if found == 0 {
+                Ok(GetIntoBufferResult::NotFound)
+            } else if success != 0 {
+                Ok(GetIntoBufferResult::Found(val_len))
+            } else {
+                Ok(GetIntoBufferResult::BufferTooSmall(val_len))
+            }
+        }
+    }
+
     /// Return the values associated with the given keys.
     pub fn multi_get<K, I>(&self, keys: I) -> Vec<Result<Option<Vec<u8>>, Error>>
     where
@@ -1440,6 +1705,142 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
                 ptr_keys.len(),
                 ptr_keys.as_ptr(),
                 keys_sizes.as_ptr(),
+                pinned_values.as_mut_ptr(),
+                errors.as_mut_ptr(),
+                sorted_input,
+            );
+            pinned_values
+                .into_iter()
+                .zip(errors)
+                .map(|(v, e)| {
+                    if e.is_null() {
+                        if v.is_null() {
+                            Ok(None)
+                        } else {
+                            Ok(Some(DBPinnableSlice::from_c(v)))
+                        }
+                    } else {
+                        Err(convert_rocksdb_error(e))
+                    }
+                })
+                .collect()
+        }
+    }
+
+    /// Return the values associated with the given keys and the specified column family
+    /// using an optimized slice-based API.
+    ///
+    /// This method uses RocksDB's optimized `rocksdb_batched_multi_get_cf_slice` C API,
+    /// which takes a `rocksdb_slice_t` array directly. This eliminates the internal
+    /// overhead of converting keys from separate pointer+size arrays to Slice objects.
+    ///
+    /// # Arguments
+    ///
+    /// * `cf` - The column family to read from
+    /// * `keys` - An iterator of keys to look up
+    /// * `sorted_input` - If `true`, indicates the keys are already sorted in ascending
+    ///   order, which allows RocksDB to skip internal sorting and improve performance.
+    ///   **Important**: If you pass `true` but keys are not sorted, results may be incorrect.
+    ///
+    /// # Returns
+    ///
+    /// A vector of results in the same order as the input keys. Each element is:
+    /// - `Ok(Some(DBPinnableSlice))` if the key was found
+    /// - `Ok(None)` if the key was not found
+    /// - `Err(...)` if an error occurred for that key
+    ///
+    /// # Performance
+    ///
+    /// This is the fastest batch lookup method when:
+    /// - You're looking up many keys (10+) from the same column family
+    /// - You can pre-sort your keys (set `sorted_input = true`)
+    /// - Block-based table format is used (default)
+    ///
+    /// For small numbers of keys, the overhead of batching may not be worth it.
+    /// Consider using [`get_pinned_cf`](#method.get_pinned_cf) for single key lookups.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use rust_rocksdb::{DB, Options, ColumnFamilyDescriptor};
+    ///
+    /// let tempdir = tempfile::Builder::new().prefix("batch_slice").tempdir().unwrap();
+    /// let mut opts = Options::default();
+    /// opts.create_if_missing(true);
+    /// opts.create_missing_column_families(true);
+    /// let db = DB::open_cf_descriptors(&opts, tempdir.path(),
+    ///     vec![ColumnFamilyDescriptor::new("cf", Options::default())]).unwrap();
+    ///
+    /// let cf = db.cf_handle("cf").unwrap();
+    /// db.put_cf(&cf, b"k1", b"v1").unwrap();
+    /// db.put_cf(&cf, b"k2", b"v2").unwrap();
+    ///
+    /// // Keys are sorted, so we can set sorted_input = true
+    /// let keys: Vec<&[u8]> = vec![b"k1", b"k2", b"k3"];
+    /// let results = db.batched_multi_get_cf_slice(&cf, keys, true);
+    ///
+    /// assert!(results[0].as_ref().unwrap().is_some()); // k1 found
+    /// assert!(results[1].as_ref().unwrap().is_some()); // k2 found
+    /// assert!(results[2].as_ref().unwrap().is_none()); // k3 not found
+    /// ```
+    pub fn batched_multi_get_cf_slice<'a, K, I>(
+        &'_ self,
+        cf: &impl AsColumnFamilyRef,
+        keys: I,
+        sorted_input: bool,
+    ) -> Vec<Result<Option<DBPinnableSlice<'_>>, Error>>
+    where
+        K: AsRef<[u8]> + 'a + ?Sized,
+        I: IntoIterator<Item = &'a K>,
+    {
+        DEFAULT_READ_OPTS
+            .with(|opts| self.batched_multi_get_cf_slice_opt(cf, keys, sorted_input, opts))
+    }
+
+    /// Return the values associated with the given keys and the specified column family
+    /// using an optimized slice-based API with custom read options.
+    ///
+    /// This is the same as [`batched_multi_get_cf_slice`](#method.batched_multi_get_cf_slice)
+    /// but allows specifying custom [`ReadOptions`].
+    ///
+    /// See [`batched_multi_get_cf_slice`](#method.batched_multi_get_cf_slice) for full documentation.
+    pub fn batched_multi_get_cf_slice_opt<'a, K, I>(
+        &'_ self,
+        cf: &impl AsColumnFamilyRef,
+        keys: I,
+        sorted_input: bool,
+        readopts: &ReadOptions,
+    ) -> Vec<Result<Option<DBPinnableSlice<'_>>, Error>>
+    where
+        K: AsRef<[u8]> + 'a + ?Sized,
+        I: IntoIterator<Item = &'a K>,
+    {
+        // Convert keys to rocksdb_slice_t array
+        let slices: Vec<ffi::rocksdb_slice_t> = keys
+            .into_iter()
+            .map(|k| {
+                let k = k.as_ref();
+                ffi::rocksdb_slice_t {
+                    data: k.as_ptr() as *const c_char,
+                    size: k.len(),
+                }
+            })
+            .collect();
+
+        if slices.is_empty() {
+            return Vec::new();
+        }
+
+        let mut pinned_values = vec![ptr::null_mut(); slices.len()];
+        let mut errors = vec![ptr::null_mut(); slices.len()];
+
+        unsafe {
+            ffi::rocksdb_batched_multi_get_cf_slice(
+                self.inner.inner(),
+                readopts.inner,
+                cf.inner(),
+                slices.len(),
+                slices.as_ptr(),
                 pinned_values.as_mut_ptr(),
                 errors.as_mut_ptr(),
                 sorted_input,

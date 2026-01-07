@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.45.0 (2026-01-06)
+
+- upgrade to RocksDB 10.9.1 (zaidoon1)
+- upgrade to Rust edition 2024 and MSRV 1.89.0 (zaidoon1)
+- breaking: remove set_options_from_string (incorrectly named and wrong implementation) (zaidoon1)
+- feat: expose get_options_from_string (MarioRuiz)
+- feat: add feature-gated `raw_ptr` trait to expose raw C pointers (jszwec)
+- fix: memory leak in DBCommon.get_column_family_metadata(_cf) (evanj)
+- fix: memory leak in DB.create_cf on error (evanj)
+- fix: memory leak in MemoryUsageBuilder.add_tx_db (evanj)
+- fix: memory leak in DBOptions.get_options_from_string on error (evanj)
+- fix: memory leak in DBOptions.set_compaction_filter (evanj)
+- fix: memory leak in DBOptions.set_comparator(_ts) (evanj)
+- fix: MemoryUsageBuilder now requires DBs/caches to outlive the builder (evanj)
+- improve Cache::new_hyper_clock_cache documentation (evanj)
+- minor documentation improvements (luohewuyang, vastonus, Galoretka)
+
 ## 0.44.2 (2025-11-05)
 
 - breaking: Switched internal column-family map to a HashMap; `DBCommon::cf_names()` no longer guarantees sorted order (order is unspecified and may vary) (zaidoon1)

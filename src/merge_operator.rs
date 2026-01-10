@@ -61,7 +61,6 @@
 
 use libc::{self, c_char, c_int, c_void, size_t};
 use std::ffi::CString;
-use std::mem;
 use std::ptr;
 use std::slice;
 
@@ -219,14 +218,9 @@ impl MergeOperands {
             None
         } else {
             unsafe {
-                let base = self.operands_list as usize;
-                let base_len = self.operands_list_len as usize;
-                let spacing = mem::size_of::<*const *const u8>();
-                let spacing_len = mem::size_of::<*const size_t>();
-                let len_ptr = (base_len + (spacing_len * index)) as *const size_t;
-                let len = *len_ptr;
-                let ptr = base + (spacing * index);
-                Some(slice::from_raw_parts(*(ptr as *const *const u8), len))
+                let ptr = *self.operands_list.add(index);
+                let len = *self.operands_list_len.add(index);
+                Some(slice::from_raw_parts(ptr as *const u8, len))
             }
         }
     }

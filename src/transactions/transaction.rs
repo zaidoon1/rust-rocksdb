@@ -504,7 +504,7 @@ impl<DB> Transaction<'_, DB> {
         K: AsRef<[u8]>,
         I: IntoIterator<Item = K>,
     {
-        self.multi_get_opt(keys, &ReadOptions::default())
+        DEFAULT_READ_OPTS.with(|opts| self.multi_get_opt(keys, opts))
     }
 
     /// Return the values associated with the given keys using read options.

@@ -16,7 +16,6 @@ mod util;
 
 use pretty_assertions::assert_eq;
 use rust_rocksdb::{DB, DBCompactionStyle, MergeOperands, Options, merge_operator::MergeFn};
-use serde::{Deserialize, Serialize};
 use util::DBPath;
 
 fn test_provided_merge(
@@ -76,7 +75,7 @@ fn merge_test() {
     assert!(db.get(b"k1").unwrap().is_none());
 }
 
-#[derive(Serialize, Deserialize, Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default)]
 struct ValueCounts {
     num_a: u32,
     num_b: u32,
@@ -86,11 +85,24 @@ struct ValueCounts {
 
 impl ValueCounts {
     fn from_slice(slice: &[u8]) -> Option<Self> {
-        bincode::deserialize::<Self>(slice).ok()
+        if slice.len() < 16 {
+            return None;
+        }
+        Some(Self {
+            num_a: u32::from_le_bytes(slice[0..4].try_into().ok()?),
+            num_b: u32::from_le_bytes(slice[4..8].try_into().ok()?),
+            num_c: u32::from_le_bytes(slice[8..12].try_into().ok()?),
+            num_d: u32::from_le_bytes(slice[12..16].try_into().ok()?),
+        })
     }
 
     fn as_bytes(&self) -> Option<Vec<u8>> {
-        bincode::serialize(self).ok()
+        let mut bytes = Vec::with_capacity(16);
+        bytes.extend_from_slice(&self.num_a.to_le_bytes());
+        bytes.extend_from_slice(&self.num_b.to_le_bytes());
+        bytes.extend_from_slice(&self.num_c.to_le_bytes());
+        bytes.extend_from_slice(&self.num_d.to_le_bytes());
+        Some(bytes)
     }
 }
 

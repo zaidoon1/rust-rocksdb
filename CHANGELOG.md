@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.46.0 (2026-02-03)
+
+- upgrade RocksDB to 10.10.1 (zaidoon1)
+- doc: document enable_statistics stats are shared (evanj)
+- feat: add sequence_number method to SnapshotWithThreadMode (lucacasonato)
+- perf: use thread-local ReadOptions in Transaction::multi_get (zaidoon1)
+- refactor: simplify MergeOperands::get_operand using pointer add() method (zaidoon1)
+- chore: remove bincode and serde dev-dependencies, implement manual serialization in merge operator test (zaidoon1)
+- feat: add zero-copy C API support for get_into_buffer, batched_multi_get_cf_slice, and optimized iterator (zaidoon1)
+
 ## 0.45.0 (2026-01-06)
 
 - upgrade to RocksDB 10.9.1 (zaidoon1)

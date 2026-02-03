@@ -96,6 +96,41 @@ impl PerfContext {
     }
 }
 
+/// Executes the given closure with a thread-local `PerfContext`, automatically
+/// resetting it before use.
+///
+/// This avoids the overhead of creating and destroying a `PerfContext` on each
+/// call, which involves FFI calls to `rocksdb_perfcontext_create` and
+/// `rocksdb_perfcontext_destroy`.
+///
+/// # Example
+///
+/// ```ignore
+/// use rust_rocksdb::perf::{set_perf_stats, with_thread_local, PerfStatsLevel, PerfMetric};
+///
+/// set_perf_stats(PerfStatsLevel::EnableCount);
+/// let keys_skipped = with_thread_local(|ctx| {
+///     // ... perform RocksDB operations ...
+///     ctx.metric(PerfMetric::InternalKeySkippedCount)
+/// });
+/// ```
+pub fn with_thread_local<F, R>(f: F) -> R
+where
+    F: FnOnce(&mut PerfContext) -> R,
+{
+    use std::cell::RefCell;
+
+    thread_local! {
+        static PERF_CONTEXT: RefCell<PerfContext> = RefCell::new(PerfContext::default());
+    }
+
+    PERF_CONTEXT.with(|ctx| {
+        let mut ctx = ctx.borrow_mut();
+        ctx.reset();
+        f(&mut ctx)
+    })
+}
+
 /// Memory usage stats
 pub struct MemoryUsageStats {
     /// Approximate memory usage of all the mem-tables

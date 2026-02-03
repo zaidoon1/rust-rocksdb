@@ -141,7 +141,7 @@ pub use crate::{
     ffi_util::CStrLike,
     iter_range::{IterateBounds, PrefixRange},
     merge_operator::MergeOperands,
-    perf::{PerfContext, PerfMetric, PerfStatsLevel},
+    perf::{PerfContext, PerfMetric, PerfStatsLevel, set_perf_stats, with_thread_local},
     slice_transform::SliceTransform,
     snapshot::{Snapshot, SnapshotWithThreadMode},
     sst_file_manager::SstFileManager,

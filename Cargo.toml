@@ -41,7 +41,7 @@ raw-ptr = []
 
 [dependencies]
 libc = "0.2"
-rust-librocksdb-sys = { path = "librocksdb-sys", version = "0.41.0", default-features = false, features = [
+rust-librocksdb-sys = { path = "librocksdb-sys", version = "0.42.0", default-features = false, features = [
     "static",
 ] }
 serde = { version = "1", features = ["derive"], optional = true }

@@ -48,6 +48,10 @@ use crate::{
 // must be Send and Sync because it will be called by RocksDB from different threads
 type LogCallbackFn = dyn Fn(LogLevel, &str) + 'static + Send + Sync;
 
+/// Type for log callbacks used by [`Options::set_info_logger`]. Use Box to pass a thin pointer to
+/// the C callback.
+type LoggerCallback = Box<dyn Fn(LogLevel, &str) + Sync + Send>;
+
 // Holds a log callback to ensure it outlives any Options and DBs that use it.
 struct LogCallback {
     callback: Box<LogCallbackFn>,
@@ -66,6 +70,7 @@ pub(crate) struct OptionsMustOutliveDB {
     log_callback: Option<Arc<LogCallback>>,
     comparator: Option<Arc<OwnedComparator>>,
     compaction_filter: Option<Arc<OwnedCompactionFilter>>,
+    logger_callback: Option<Arc<LoggerCallback>>,
 }
 
 impl OptionsMustOutliveDB {
@@ -83,6 +88,7 @@ impl OptionsMustOutliveDB {
             log_callback: self.log_callback.clone(),
             comparator: self.comparator.clone(),
             compaction_filter: self.compaction_filter.clone(),
+            logger_callback: self.logger_callback.clone(),
         }
     }
 }
@@ -3880,6 +3886,28 @@ impl Options {
         let val_u8 = unsafe { ffi::rocksdb_options_get_write_dbid_to_manifest(self.inner) };
         val_u8 != 0
     }
+
+    /// Sets the logger to use.
+    ///
+    /// By default `rocksdb` writes its internal logs to a file in the database
+    /// directory; this can be changed to a custom callback with the
+    /// [`InfoLogger::new_callback_logger`] constructor.
+    pub fn set_info_logger(&mut self, mut logger: InfoLogger) {
+        // Move the callback so it can be shared across database instances
+        self.outlive.logger_callback = logger.callback.take();
+        unsafe {
+            ffi::rocksdb_options_set_info_log(self.inner, logger.inner);
+        }
+    }
+
+    /// Returns a reference to the currently configured logger.
+    pub fn get_info_logger(&self) -> InfoLogger {
+        let raw = unsafe { ffi::rocksdb_options_get_info_log(self.inner) };
+        InfoLogger {
+            inner: raw,
+            callback: self.outlive.logger_callback.clone(),
+        }
+    }
 }
 
 impl Default for Options {
@@ -4965,6 +4993,63 @@ impl Drop for DBPath {
     }
 }
 
+pub struct InfoLogger {
+    pub(crate) inner: *mut ffi::rocksdb_logger_t,
+    callback: Option<Arc<LoggerCallback>>,
+}
+
+impl InfoLogger {
+    /// Creates a new logger that redirects logs to `STDERR` with an optional
+    /// prefix.
+    pub fn new_stderr_logger<S: AsRef<str>>(log_level: LogLevel, prefix: Option<S>) -> Self {
+        let prefix = prefix.map(|s| {
+            s.as_ref()
+                .into_c_string()
+                .expect("cannot have NULL in prefix")
+        });
+        let prefix_ptr = match prefix.as_ref() {
+            Some(s) => s.as_ptr(),
+            None => std::ptr::null(),
+        };
+        let inner =
+            unsafe { ffi::rocksdb_logger_create_stderr_logger(log_level as i32, prefix_ptr) };
+        Self {
+            inner,
+            // no Rust callback: RocksDB implements this
+            callback: None,
+        }
+    }
+
+    /// Creates a new logger that redirects logs to a custom callback.
+    pub fn new_callback_logger<F: Fn(LogLevel, &str) + Sync + Send + 'static>(
+        level: LogLevel,
+        cb: F,
+    ) -> Self {
+        // use an Arc<Box<...>> so we can reference count, and still pass a thin pointer to C
+        let arc_cb: Arc<LoggerCallback> = Arc::new(Box::new(cb));
+        let raw_cb: LoggerCallbackPtr = Arc::as_ptr(&arc_cb);
+        let inner = unsafe {
+            ffi::rocksdb_logger_create_callback_logger(
+                level as i32,
+                Some(logger_callback),
+                raw_cb as *mut c_void,
+            )
+        };
+        Self {
+            inner,
+            callback: Some(arc_cb),
+        }
+    }
+}
+
+impl Drop for InfoLogger {
+    fn drop(&mut self) {
+        unsafe {
+            ffi::rocksdb_logger_destroy(self.inner);
+        }
+    }
+}
+
 /// Options for importing column families. See
 /// [DB::create_column_family_with_import](crate::DB::create_column_family_with_import).
 pub struct ImportColumnFamilyOptions {
@@ -5004,10 +5089,27 @@ impl Drop for ImportColumnFamilyOptions {
     }
 }
 
+/// Ensures the unsafe casts use the same type.
+type LoggerCallbackPtr = *const LoggerCallback;
+
+unsafe extern "C" fn logger_callback(
+    raw_cb: *mut c_void,
+    level: c_uint,
+    msg: *mut c_char,
+    len: size_t,
+) {
+    let rust_callback: &LoggerCallback = unsafe { &*(raw_cb as LoggerCallbackPtr) };
+    let raw_msg = unsafe { std::slice::from_raw_parts(msg as *const u8, len) };
+    let msg = String::from_utf8_lossy(raw_msg);
+    let level =
+        LogLevel::try_from_raw(level as i32).expect("rocksdb generated an invalid log level");
+    (rust_callback)(level, &msg);
+}
+
 #[cfg(test)]
 mod tests {
     use crate::cache::Cache;
-    use crate::db_options::WriteBufferManager;
+    use crate::db_options::{DBCompactionPri, InfoLogger, WriteBufferManager};
     use crate::{MemtableFactory, Options};
 
     #[test]
@@ -5068,5 +5170,95 @@ mod tests {
 
         // WriteBufferManager outlives options
         assert!(write_buffer_manager.enabled());
+    }
+
+    #[test]
+    fn compaction_pri() {
+        let mut opts = Options::default();
+        opts.set_compaction_pri(DBCompactionPri::RoundRobin);
+        opts.create_if_missing(true);
+        let tmp = tempfile::tempdir().unwrap();
+        let _db = crate::DB::open(&opts, tmp.path()).unwrap();
+
+        let options = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .find_map(|x| {
+                let x = x.ok()?;
+                x.file_name()
+                    .into_string()
+                    .unwrap()
+                    .contains("OPTIONS")
+                    .then_some(x.path())
+            })
+            .map(std::fs::read_to_string)
+            .unwrap()
+            .unwrap();
+
+        assert!(options.contains("compaction_pri=kRoundRobin"));
+    }
+
+    #[test]
+    fn test_callback_logger() {
+        let (log_snd, log_rcv) = std::sync::mpsc::channel();
+        let callback = move |level, msg: &str| {
+            log_snd.send((level, msg.to_string())).ok();
+        };
+
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        opts.set_info_logger(InfoLogger::new_callback_logger(
+            super::LogLevel::Debug,
+            callback,
+        ));
+
+        // create 2 DBs with the options then drop the options to ensure it is reference counted
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::DB::open(&opts, tmp.path()).unwrap();
+        db.put(b"testkey", b"testvalue").unwrap();
+        db.flush().unwrap();
+        db.delete(b"testkey").unwrap();
+        db.flush().unwrap();
+        db.compact_range(Some(b"a"), Some(b"z"));
+        assert!(log_rcv.try_recv().is_ok());
+        drop(db);
+
+        let tmp2 = tempfile::tempdir().unwrap();
+        let db2 = crate::DB::open(&opts, tmp2.path()).unwrap();
+
+        // get the configured logger before dropping the options
+        let logger = opts.get_info_logger();
+        drop(opts);
+
+        // clear the logs and make sure the callback is called by db2
+        while log_rcv.try_recv().is_ok() {}
+        assert!(log_rcv.try_recv().is_err());
+
+        db2.put(b"testkey2", b"testvalue2").unwrap();
+        db2.flush().unwrap();
+        db2.delete(b"testkey2").unwrap();
+        db2.flush().unwrap();
+        db2.compact_range(Some(b"a"), Some(b"z"));
+
+        drop(db2);
+        assert!(log_rcv.try_recv().is_ok());
+
+        // clear the logs
+        while log_rcv.try_recv().is_ok() {}
+        assert!(log_rcv.try_recv().is_err());
+
+        // create a db with the copied logger to check lifetimes
+        let tmp3 = tempfile::tempdir().unwrap();
+        let mut opts2 = Options::default();
+        opts2.create_if_missing(true);
+        opts2.set_info_logger(logger);
+        let db3 = crate::DB::open(&opts2, tmp3.path()).unwrap();
+        drop(opts2);
+        db3.put(b"testkey3", b"testvalue3").unwrap();
+        db3.flush().unwrap();
+        db3.delete(b"testkey3").unwrap();
+        db3.flush().unwrap();
+        db3.compact_range(Some(b"a"), Some(b"z"));
+        assert!(log_rcv.try_recv().is_ok());
+        drop(db3);
     }
 }

@@ -13,9 +13,8 @@
 // limitations under the License.
 
 use crate::{
-    Error, ReadOptions, WriteBatch,
-    db::{DB, DBAccess},
-    ffi,
+    db::{DBAccess, DB},
+    ffi, Error, ReadOptions, WriteBatch,
 };
 use libc::{c_char, c_uchar, size_t};
 use std::mem::ManuallyDrop;

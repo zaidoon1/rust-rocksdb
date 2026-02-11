@@ -2,7 +2,7 @@ use std::path::Path;
 use std::{env, fs, path::PathBuf, process::Command};
 
 #[cfg(target_os = "linux")]
-use libc::{getauxval, AT_HWCAP};
+use libc::{AT_HWCAP, getauxval};
 
 // On these platforms jemalloc-sys will use a prefixed jemalloc which cannot be linked together
 // with RocksDB.
@@ -180,6 +180,15 @@ fn build_rocksdb() {
     config.include(".");
     config.define("NDEBUG", Some("1"));
 
+    // true for C++ >= 17; we set -std=c++20 below
+    config.define("HAVE_ALIGNED_NEW", None);
+
+    // __uint128_t is supported by GCC and Clang; Don't use it for MSVC
+    // TODO: implement a detection script?
+    if !target.contains("msvc") {
+        config.define("HAVE_UINT128_EXTENSION", None);
+    }
+
     let mut lib_sources = include_str!("rocksdb_lib_sources.txt")
         .trim()
         .split('\n')
@@ -288,6 +297,8 @@ fn build_rocksdb() {
         if check_getauxval_supported() {
             config.define("ROCKSDB_AUXV_GETAUXVAL_PRESENT", None);
         }
+        config.define("ROCKSDB_FALLOCATE_PRESENT", None);
+        config.define("ROCKSDB_RANGESYNC_PRESENT", None);
     } else if target.contains("dragonfly") {
         config.define("OS_DRAGONFLYBSD", None);
         config.define("ROCKSDB_PLATFORM_POSIX", None);
@@ -353,8 +364,6 @@ fn build_rocksdb() {
         }
     }
 
-    config.define("ROCKSDB_SUPPORT_THREAD_LOCAL", None);
-
     if cfg!(feature = "jemalloc") && NO_JEMALLOC_TARGETS.iter().all(|i| !target.contains(i)) {
         config.define("ROCKSDB_JEMALLOC", Some("1"));
         config.define("JEMALLOC_NO_DEMANGLE", Some("1"));
@@ -382,6 +391,7 @@ fn build_rocksdb() {
             config.static_crt(true);
         }
         config.flag("-EHsc");
+        // Don't use cxx_standard: Uses : instead of =
         config.flag("-std:c++20");
     } else {
         config.flag(cxx_standard());
@@ -407,7 +417,6 @@ fn build_rocksdb() {
     config.file("build_version.cc");
 
     config.cpp(true);
-    config.flag_if_supported("-std=c++20");
 
     if !target.contains("windows") {
         config.flag("-include").flag("cstdint");
@@ -474,6 +483,8 @@ fn try_to_find_and_link_lib(lib_name: &str) -> bool {
     false
 }
 
+/// Returns the value of the `ROCKSDB_CXX_STD` env var, or the default `-std=c++{version}` flag for
+/// building RocksDB.
 fn cxx_standard() -> String {
     env::var("ROCKSDB_CXX_STD").map_or("-std=c++20".to_owned(), |cxx_std| {
         if !cxx_std.starts_with("-std=") {

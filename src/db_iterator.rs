@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use crate::{
-    db::{DBAccess, DB},
-    ffi, Error, ReadOptions, WriteBatch,
+    Error, ReadOptions, WriteBatch,
+    db::{DB, DBAccess},
+    ffi,
 };
 use libc::{c_char, c_uchar, size_t};
 use std::mem::ManuallyDrop;
@@ -145,6 +146,21 @@ impl<'a, D: DBAccess> DBRawIteratorWithThreadMode<'a, D> {
     pub fn status(&self) -> Result<(), Error> {
         unsafe {
             ffi_try!(ffi::rocksdb_iter_get_error(self.inner.as_ptr()));
+        }
+        Ok(())
+    }
+
+    /// Refreshes the iterator to represent the latest state of the DB.
+    /// The iterator is invalidated after this call and must be re-sought
+    /// before use.
+    ///
+    /// If the iterator was created with a snapshot, the refreshed iterator
+    /// will no longer use that snapshot and will instead read the latest
+    /// DB state. The snapshot itself is not released; it remains valid and
+    /// will be released when the owning [`crate::SnapshotWithThreadMode`] is dropped.
+    pub fn refresh(&mut self) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_iter_refresh(self.inner.as_ptr()));
         }
         Ok(())
     }
@@ -522,6 +538,16 @@ impl<'a, D: DBAccess> DBIteratorWithThreadMode<'a, D> {
                 Direction::Reverse
             }
         };
+    }
+
+    /// Refreshes the iterator, then re-seeks using the given mode.
+    ///
+    /// After a refresh the underlying iterator is invalidated, so a mode
+    /// must be provided to reposition it.
+    pub fn refresh(&mut self, mode: IteratorMode) -> Result<(), Error> {
+        self.raw.refresh()?;
+        self.set_mode(mode);
+        Ok(())
     }
 }
 

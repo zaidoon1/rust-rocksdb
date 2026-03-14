@@ -343,6 +343,12 @@ fn build_rocksdb() {
     // see https://docs.rs/cc/latest/cc/index.html#c-support.
     // There is no need to manually set `cpp_link_stdlib`.
 
+    // Allow users to override optimization level and debug info for the C++
+    // build.  This is particularly useful for avoiding OOM in debug builds
+    // where the default -O0 -g produces very large object files for 330+
+    // compilation units.
+    set_build_profile(&mut config);
+
     config.compile("librocksdb.a");
 }
 
@@ -374,6 +380,7 @@ fn build_snappy() {
     config.file("snappy/snappy-sinksource.cc");
     config.file("snappy/snappy-c.cc");
     config.cpp(true);
+    set_build_profile(&mut config);
     config.compile("libsnappy.a");
 }
 
@@ -398,6 +405,40 @@ fn try_to_find_and_link_lib(lib_name: &str) -> bool {
         return true;
     }
     false
+}
+
+/// Apply user-controlled optimization level and debug info settings to the C++
+/// build. When the corresponding environment variable is not set, the `cc`
+/// crate's defaults (inherited from Cargo's `OPT_LEVEL` and `DEBUG` env vars)
+/// are used.
+///
+/// These environment variables provide the same control as Cargo profile
+/// overrides (e.g. `[profile.dev.package.rust-librocksdb-sys]`) but without
+/// needing to modify `Cargo.toml`, which is useful for CI or one-off builds.
+///
+/// Environment variables:
+///   ROCKSDB_LIB_OPT_LEVEL – Override the C++ optimization level. Accepts
+///                            "0", "1", "2", "3", "s", or "z". Setting this
+///                            to "2" matches the upstream RocksDB Makefile
+///                            default and reduces peak memory usage compared
+///                            to the Cargo dev profile default of "0".
+///   ROCKSDB_LIB_DEBUG     – Override the C++ debug info level. Accepts the
+///                            same values as Cargo's `debug` profile setting:
+///                            "true"/"1"/"2" for full debug info,
+///                            "false"/"0" for none, or "line-tables-only"
+///                            for minimal info sufficient for backtraces.
+///                            Reducing debug info dramatically lowers memory
+///                            usage and object file sizes.
+fn set_build_profile(config: &mut cc::Build) {
+    println!("cargo:rerun-if-env-changed=ROCKSDB_LIB_OPT_LEVEL");
+    if let Ok(opt_level) = env::var("ROCKSDB_LIB_OPT_LEVEL") {
+        config.opt_level_str(&opt_level);
+    }
+
+    println!("cargo:rerun-if-env-changed=ROCKSDB_LIB_DEBUG");
+    if let Ok(debug) = env::var("ROCKSDB_LIB_DEBUG") {
+        config.debug_str(&debug);
+    }
 }
 
 fn cxx_standard() -> String {

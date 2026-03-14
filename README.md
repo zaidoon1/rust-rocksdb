@@ -18,12 +18,14 @@ RocksDB is a fast key-value storage engine based on LSM-trees, optimized for SSD
 - [ Usage Examples](#-usage-examples)
 - [⚙️ Features & Configuration](#️-features--configuration)
 - [🔧 Building from Source](#-building-from-source)
+- [Build Performance & Troubleshooting](#build-performance--troubleshooting)
 - [🤝 Contributing](#-contributing)
 - [❓ Why This Fork](#-why-this-fork)
 
 ## 🚀 Quick Start
 
 **Requirements:**
+
 - **Clang and LLVM** - Required for building RocksDB C++ components
 - **Rust 1.89.0+** - Current MSRV (rolling 6-month policy)
 
@@ -31,7 +33,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rust-rocksdb = "0.43"
+rust-rocksdb = "0.46"
 ```
 
 ### Basic Example
@@ -48,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Write data
     db.put(b"key1", b"value1")?;
-    
+
     // Read data
     match db.get(b"key1")? {
         Some(value) => println!("Retrieved: {}", String::from_utf8_lossy(&value)),
@@ -57,12 +59,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Delete data
     db.delete(b"key1")?;
-    
+
     Ok(())
 }
 ```
 
-##  Usage Examples
+## Usage Examples
 
 ### Working with Iterators
 
@@ -79,8 +81,8 @@ db.put(b"key3", b"value3")?;
 // Iterate over all keys
 let iter = db.iterator(IteratorMode::Start);
 for (key, value) in iter {
-    println!("{}: {}", 
-        String::from_utf8_lossy(&key), 
+    println!("{}: {}",
+        String::from_utf8_lossy(&key),
         String::from_utf8_lossy(&value)
     );
 }
@@ -88,8 +90,8 @@ for (key, value) in iter {
 // Iterate from a specific key
 let iter = db.iterator(IteratorMode::From(b"key2", rust_rocksdb::Direction::Forward));
 for (key, value) in iter {
-    println!("{}: {}", 
-        String::from_utf8_lossy(&key), 
+    println!("{}: {}",
+        String::from_utf8_lossy(&key),
         String::from_utf8_lossy(&value)
     );
 }
@@ -160,6 +162,7 @@ features = ["lz4"]  # Enable only LZ4 compression
 ```
 
 **Available compression features:**
+
 - `snappy` - Google's Snappy compression (fast, moderate compression)
 - `lz4` - LZ4 compression (very fast, light compression)
 - `zstd` - Zstandard compression (configurable speed/ratio tradeoff)
@@ -177,9 +180,10 @@ features = ["lz4"]  # Enable only LZ4 compression
 features = ["jemalloc"]
 ```
 
-Enables jemalloc memory allocator which significantly reduces memory fragmentation compared to libc malloc, especially for RocksDB workloads. 
+Enables jemalloc memory allocator which significantly reduces memory fragmentation compared to libc malloc, especially for RocksDB workloads.
 
 **Platform Support:**
+
 - **Supported platforms** (Linux, macOS): RocksDB will be properly informed that Jemalloc is enabled, allowing internal optimizations
 - **Unsupported platforms**: [See build.rs](https://github.com/zaidoon1/rust-rocksdb/blob/master/librocksdb-sys/build.rs#L4-L7) - You still get Jemalloc benefits but some RocksDB internal optimizations are skipped
 
@@ -219,6 +223,7 @@ features = ["mt_static"]
 #### Bindgen Linking
 
 **Dynamic Linking (Default)**:
+
 ```toml
 [dependencies.rust-rocksdb]
 features = ["bindgen-runtime"]  # Enabled by default
@@ -227,6 +232,7 @@ features = ["bindgen-runtime"]  # Enabled by default
 The `bindgen-runtime` feature enables the `runtime` feature of bindgen, which dynamically links to libclang. This is suitable for most platforms and is enabled by default.
 
 **Static Linking (Alpine Linux/musl)**:
+
 ```toml
 [dependencies.rust-rocksdb]
 default-features = false
@@ -256,7 +262,7 @@ features = ["lto"]
 ```
 
 > **⚠️ CRITICAL REQUIREMENTS**
-> 
+>
 > - **Must use clang**: `CC=/usr/bin/clang CXX=/usr/bin/clang++`
 > - **Clang LLVM version must match Rust compiler**
 > - **Rust flags**: `RUSTFLAGS="-Clinker-plugin-lto -Clinker=clang -Clink-arg=-fuse-ld=lld"`
@@ -281,6 +287,141 @@ cd rust-rocksdb
 git submodule update --init --recursive
 ```
 
+## Build Performance & Troubleshooting
+
+> **Release builds (`cargo build --release`) are not affected.** Cargo's release profile already compiles at `-O3` with no debug info, which is optimal. The guidance below applies to **dev builds** (`cargo build`) where the default `-O0 -g` settings cause high memory usage.
+
+RocksDB is a large C++ library (~330 compilation units). In dev builds, the default Cargo profile compiles C++ at `-O0` with full debug info (`-g -gdwarf-2`). By contrast, the upstream RocksDB Makefile defaults to `-O2`. This mismatch is the primary cause of high memory usage and OOM errors when building through this crate during development.
+
+**Approximate impact of the default dev profile vs optimized settings:**
+
+|                                  | Default dev (`-O0 -g`) | Optimized (`-O2`, no debug) |
+| -------------------------------- | ---------------------- | --------------------------- |
+| Build artifacts                  | ~1.6 GB                | ~46 MB (**34x smaller**)    |
+| Peak memory per compiler process | High                   | Significantly lower         |
+| Build time                       | Baseline               | Comparable or faster        |
+
+> Measured on macOS/ARM64 with default features. Exact numbers vary by platform but the ratios are representative.
+
+Below are strategies to reduce dev build time and memory usage, ordered from most to least recommended.
+
+### 1. Cargo Profile Overrides (Recommended)
+
+The standard Cargo way to control how a dependency is compiled. Add this to **your project's** `Cargo.toml`:
+
+```toml
+# Compile RocksDB C++ code at -O2 with no debug info, even in dev builds.
+# This matches the upstream RocksDB Makefile defaults and dramatically
+# reduces memory usage and build artifact size.
+[profile.dev.package.rust-librocksdb-sys]
+opt-level = 2
+debug = false
+```
+
+This works because the [`cc`](https://docs.rs/cc) crate used to compile the C++ code inherits the `OPT_LEVEL` and `DEBUG` settings that Cargo sets for each package.
+
+Other useful values for `debug`:
+
+- `false` / `0` -- No debug info (maximum memory savings)
+- `"line-tables-only"` -- Minimal info sufficient for backtraces (good middle ground)
+- `true` / `2` -- Full debug info (Cargo default for dev builds)
+
+### 2. Build Caching with sccache / ccache
+
+The `cc` crate respects the `CC` and `CXX` environment variables. Wrap your compiler with [sccache](https://github.com/mozilla/sccache) or [ccache](https://ccache.dev/) to cache C++ compilation results across `cargo clean` cycles and across projects:
+
+```bash
+# Using sccache
+CC="sccache cc" CXX="sccache c++" cargo build
+
+# Using ccache
+CC="ccache cc" CXX="ccache c++" cargo build
+```
+
+This is **highly recommended** for development workflows. After the first build, subsequent builds (even after `cargo clean`) will reuse cached object files.
+
+### 3. Linking a Pre-built RocksDB Library
+
+If you have RocksDB already installed on your system (e.g. via a package manager), you can skip compiling it from source entirely:
+
+```bash
+# Link against a pre-built static library
+ROCKSDB_LIB_DIR=/usr/local/lib \
+ROCKSDB_INCLUDE_DIR=/usr/local/include \
+ROCKSDB_STATIC=1 \
+cargo build
+
+# Or link dynamically (omit ROCKSDB_STATIC)
+ROCKSDB_LIB_DIR=/usr/local/lib \
+ROCKSDB_INCLUDE_DIR=/usr/local/include \
+cargo build
+```
+
+Similarly for Snappy:
+
+```bash
+SNAPPY_LIB_DIR=/usr/local/lib SNAPPY_STATIC=1 cargo build
+```
+
+To force compilation from source even when these variables are set:
+
+```bash
+ROCKSDB_COMPILE=true cargo build
+```
+
+> **Note**: On FreeBSD, the system-installed RocksDB at `/usr/local/lib` is used automatically.
+
+### 4. Controlling Parallel Compilation
+
+Each compiler process for a large C++ file can consume significant memory. Reducing parallelism lowers peak memory usage:
+
+```bash
+# Limit to 2 parallel jobs (reduces peak memory at the cost of build time)
+cargo build -j 2
+
+# Or via environment variable
+CARGO_BUILD_JOBS=2 cargo build
+```
+
+### 5. Environment Variable Overrides
+
+For CI pipelines or one-off builds where modifying `Cargo.toml` is not practical, you can use environment variables to override the C++ optimization level and debug info:
+
+```bash
+# Disable debug info for C++ code (biggest memory savings)
+ROCKSDB_LIB_DEBUG=false cargo build
+
+# Compile C++ at -O2 (matches upstream RocksDB Makefile default)
+ROCKSDB_LIB_OPT_LEVEL=2 cargo build
+
+# Combine both for maximum memory reduction
+ROCKSDB_LIB_DEBUG=false ROCKSDB_LIB_OPT_LEVEL=2 cargo build
+
+# Use line-tables-only debug info (backtraces work, much less memory)
+ROCKSDB_LIB_DEBUG=line-tables-only ROCKSDB_LIB_OPT_LEVEL=2 cargo build
+```
+
+These environment variables accept the same values as their Cargo profile equivalents:
+
+- `ROCKSDB_LIB_OPT_LEVEL`: `0`, `1`, `2`, `3`, `s`, or `z`
+- `ROCKSDB_LIB_DEBUG`: `true`, `false`, `0`, `1`, `2`, `line-tables-only`
+
+### Environment Variable Reference
+
+| Variable                | Description                                                                  |
+| ----------------------- | ---------------------------------------------------------------------------- |
+| `ROCKSDB_LIB_DIR`       | Path to a pre-built RocksDB library directory (skips compilation)            |
+| `ROCKSDB_INCLUDE_DIR`   | Path to RocksDB headers (defaults to bundled `rocksdb/include`)              |
+| `ROCKSDB_STATIC`        | If set (any value), link RocksDB statically; otherwise dynamically           |
+| `ROCKSDB_COMPILE`       | Set to `true` or `1` to force compilation from source                        |
+| `ROCKSDB_LIB_OPT_LEVEL` | Override C++ optimization level (`0`, `1`, `2`, `3`, `s`, `z`)               |
+| `ROCKSDB_LIB_DEBUG`     | Override C++ debug info level (`true`, `false`, `0`-`2`, `line-tables-only`) |
+| `ROCKSDB_CXX_STD`       | Override C++ standard version (defaults to `-std=c++20`)                     |
+| `SNAPPY_LIB_DIR`        | Path to a pre-built Snappy library directory                                 |
+| `SNAPPY_STATIC`         | If set, link Snappy statically                                               |
+| `SNAPPY_COMPILE`        | Set to `true` or `1` to force Snappy compilation from source                 |
+| `CXXSTDLIB`             | Override which C++ standard library to link (e.g. `c++`, `stdc++`)           |
+
 ## 🤝 Contributing
 
 Feedback and pull requests welcome! Open an issue for feature requests or submit PRs. This fork maintains regular updates with latest RocksDB releases and Rust versions.
@@ -292,7 +433,7 @@ Feedback and pull requests welcome! Open an issue for feature requests or submit
 This fork of the original [rust-rocksdb](https://github.com/rust-rocksdb/rust-rocksdb) focuses on:
 
 - **Regular updates** with latest RocksDB releases
-- **Modern Rust support** with up-to-date MSRV policy  
+- **Modern Rust support** with up-to-date MSRV policy
 - **Active maintenance** and quick issue resolution
 - **Performance optimizations** and new feature integration
 

@@ -15,8 +15,8 @@
 mod util;
 
 use crate::util::{assert_item, assert_no_item};
-use rust_rocksdb::{DB, ReadOptions};
-use util::DBPath;
+use rust_rocksdb::{DB, Options, ReadOptions};
+use util::{DBPath, U64Comparator, U64Timestamp};
 
 #[test]
 pub fn test_forwards_iteration() {
@@ -187,5 +187,79 @@ pub fn test_refresh_with_snapshot() {
         iter.refresh().unwrap();
         iter.seek(b"k2");
         assert_item(&iter, b"k2", b"v2");
+    }
+}
+
+#[test]
+fn test_iterator_timestamp() {
+    let n = DBPath::new("_rust_rocksdb_iterator_timestamp_test");
+
+    let mut opts = Options::default();
+    opts.create_if_missing(true);
+    opts.set_comparator_with_ts(
+        U64Comparator::NAME,
+        U64Timestamp::SIZE,
+        Box::new(U64Comparator::compare),
+        Box::new(U64Comparator::compare_ts),
+        Box::new(U64Comparator::compare_without_ts),
+    );
+    let db = DB::open(&opts, &n).unwrap();
+
+    let ts1 = U64Timestamp::new(1);
+    let ts2 = U64Timestamp::new(2);
+    let ts3 = U64Timestamp::new(3);
+
+    db.put_with_ts(b"k1", ts1, b"v1").unwrap();
+    db.put_with_ts(b"k2", ts2, b"v2").unwrap();
+    db.put_with_ts(b"k3", ts3, b"v3").unwrap();
+
+    // Read at ts3 will return all keys
+    let mut read_opts = ReadOptions::default();
+    read_opts.set_timestamp(ts3);
+
+    let mut iter = db.raw_iterator_opt(read_opts);
+
+    // Seek to first and walk through all entries, check timestamps
+    iter.seek_to_first();
+    assert!(iter.valid());
+    assert_eq!(iter.key(), Some(b"k1".as_ref()));
+    unsafe {
+        assert_eq!(iter.timestamp(), ts1.as_ref());
+    }
+
+    iter.next();
+    assert!(iter.valid());
+    assert_eq!(iter.key(), Some(b"k2".as_ref()));
+    unsafe {
+        assert_eq!(iter.timestamp(), ts2.as_ref());
+    }
+
+    iter.next();
+    assert!(iter.valid());
+    assert_eq!(iter.key(), Some(b"k3".as_ref()));
+    unsafe {
+        assert_eq!(iter.timestamp(), ts3.as_ref());
+    }
+
+    // Past last entry, iterator is invalid
+    iter.next();
+    assert!(!iter.valid());
+
+    // Seek to specific key
+    iter.seek(b"k2");
+    assert!(iter.valid());
+    unsafe {
+        assert_eq!(iter.timestamp(), ts2.as_ref());
+    }
+
+    // Read at ts1, only k1 visible
+    let mut read_opts = ReadOptions::default();
+    read_opts.set_timestamp(ts1);
+    let mut iter = db.raw_iterator_opt(read_opts);
+    iter.seek_to_first();
+    assert!(iter.valid());
+    assert_eq!(iter.key(), Some(b"k1".as_ref()));
+    unsafe {
+        assert_eq!(iter.timestamp(), ts1.as_ref());
     }
 }

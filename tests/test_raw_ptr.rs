@@ -18,7 +18,7 @@
 
 mod util;
 
-use rust_rocksdb::{AsRawPtr, DB, Env, Options};
+use rust_rocksdb::{AsRawPtr, DB, Env, IngestExternalFileOptions, Options, SstFileWriter};
 use util::DBPath;
 
 #[test]
@@ -188,4 +188,83 @@ fn test_multiple_envs_have_different_raw_ptrs() {
     assert_ne!(ptr1, ptr2);
     assert!(!ptr1.is_null());
     assert!(!ptr2.is_null());
+}
+
+#[test]
+fn test_ingest_external_file_options_as_raw_ptr() {
+    let opts = IngestExternalFileOptions::default();
+
+    unsafe {
+        let ptr = opts.as_raw_ptr();
+        assert!(!ptr.is_null());
+    }
+}
+
+#[test]
+fn test_ingest_external_file_options_raw_ptr_stability() {
+    let opts = IngestExternalFileOptions::default();
+
+    let ptr1 = unsafe { opts.as_raw_ptr() };
+    let ptr2 = unsafe { opts.as_raw_ptr() };
+
+    // Multiple calls should return the same pointer
+    assert_eq!(ptr1, ptr2);
+}
+
+#[test]
+fn test_multiple_ingest_external_file_options_have_different_raw_ptrs() {
+    // Test that different IngestExternalFileOptions instances have different raw pointers
+    let opts1 = IngestExternalFileOptions::default();
+    let opts2 = IngestExternalFileOptions::default();
+
+    let ptr1 = unsafe { opts1.as_raw_ptr() };
+    let ptr2 = unsafe { opts2.as_raw_ptr() };
+
+    assert_ne!(ptr1, ptr2);
+    assert!(!ptr1.is_null());
+    assert!(!ptr2.is_null());
+}
+
+#[test]
+fn test_ingest_external_file_options_raw_ptr_set_ingest() {
+    let dir = tempfile::Builder::new()
+        .prefix("_rust_rocksdb_raw_ptr_ingest")
+        .tempdir()
+        .expect("Failed to create temporary path for file writer");
+    let writer_path = dir.path().join("sst_file");
+
+    // Write basic SST file for ingestion
+    {
+        let opts = Options::default();
+        let mut writer = SstFileWriter::create(&opts);
+        writer.open(&writer_path).unwrap();
+        writer.put(b"key-a", b"value-a").unwrap();
+        writer.finish().unwrap();
+    }
+
+    // Configure SST ingestion to move source files (default is move=false)
+
+    assert!(writer_path.exists(), "SST file should exist");
+
+    let db_path = DBPath::new("_rust_rocksdb_raw_ptr_ingest");
+    let db = DB::open_default(&db_path).unwrap();
+
+    let ingest_opts = IngestExternalFileOptions::default();
+
+    unsafe {
+        let ptr = ingest_opts.as_raw_ptr();
+
+        //Set move_files to true to cause rocksdb to remove source file after ingestion.
+        rust_librocksdb_sys::rocksdb_ingestexternalfileoptions_set_move_files(ptr, 1);
+    }
+
+    db.ingest_external_file_opts(&ingest_opts, vec![&writer_path])
+        .unwrap();
+
+    //Verify ingestion
+    let r = db.get(b"key-a").unwrap();
+    assert_eq!(r.unwrap(), b"value-a");
+
+    //Verify the source files are gone
+    assert!(!writer_path.exists(), "source SST should have been removed");
 }

@@ -3222,6 +3222,27 @@ impl Options {
         }
     }
 
+    /// If false, fallocate() calls are bypassed, which disables file preallocation.
+    ///
+    /// The file space preallocation is used to increase the file write/append
+    /// performance. By default, RocksDB preallocates space for WAL, SST, and Manifest
+    /// files, truncating the extra space when the file is written.
+    ///
+    /// # Warning
+    ///
+    /// If you're using btrfs, we would recommend setting this to false to disable
+    /// preallocation. As on btrfs, the extra allocated space cannot be freed, which could
+    /// be significant if you have lots of files.
+    ///
+    /// See the [btrfs dev docs] for more information about this limitation.
+    ///
+    /// [btrfs dev docs]: https://github.com/btrfs/btrfs-dev-docs/blob/471c5699336e043114d4bca02adcd57d9dab9c44/data-extent-reference-counts.md
+    pub fn set_allow_fallocate(&mut self, allow: bool) {
+        unsafe {
+            ffi::rocksdb_options_set_allow_fallocate(self.inner, allow);
+        }
+    }
+
     /// If true, then DB::Open() will not update the statistics used to optimize
     /// compaction decision by loading table properties from many files.
     /// Turning off this feature will improve DBOpen time especially in disk environment.

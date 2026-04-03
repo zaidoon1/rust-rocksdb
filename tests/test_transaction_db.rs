@@ -18,8 +18,8 @@ mod util;
 use pretty_assertions::assert_eq;
 
 use rust_rocksdb::{
-    CuckooTableOptions, DB, DBAccess, Direction, Error, ErrorKind, IteratorMode, Options,
-    ReadOptions, SliceTransform, TransactionDB, TransactionDBOptions, TransactionOptions,
+    CuckooTableOptions, DB, DBAccess, Direction, Error, ErrorKind, FlushOptions, IteratorMode,
+    Options, ReadOptions, SliceTransform, TransactionDB, TransactionDBOptions, TransactionOptions,
     WriteBatchWithTransaction, WriteOptions,
 };
 use util::DBPath;
@@ -674,6 +674,95 @@ fn two_phase_commit() {
         assert_eq!(db.get(b"k1").unwrap().unwrap(), b"v1");
         assert!(db.get(b"k2").unwrap().is_none());
     }
+}
+
+#[test]
+fn transaction_db_flush() {
+    let path = DBPath::new("_rust_rocksdb_transaction_db_flush");
+    {
+        let db: TransactionDB = TransactionDB::open_default(&path).unwrap();
+
+        let txn = db.transaction();
+        txn.put(b"k1", b"v1").unwrap();
+        txn.commit().unwrap();
+
+        // flush memtables to SST
+        db.flush().unwrap();
+
+        // verify data survived the flush
+        assert_eq!(db.get(b"k1").unwrap().unwrap().as_slice(), b"v1");
+    }
+}
+
+#[test]
+fn transaction_db_flush_opt() {
+    let path = DBPath::new("_rust_rocksdb_transaction_db_flush_opt");
+    {
+        let db: TransactionDB = TransactionDB::open_default(&path).unwrap();
+
+        let txn = db.transaction();
+        txn.put(b"k1", b"v1").unwrap();
+        txn.commit().unwrap();
+
+        // flush with wait disabled (async flush)
+        let mut opts = FlushOptions::default();
+        opts.set_wait(false);
+        db.flush_opt(&opts).unwrap();
+
+        // issue a second synchronous flush; because the memtable was already
+        // flushed (or is in progress), this effectively acts as a barrier
+        // that ensures all previous flush work is complete before we assert
+        let mut wait_opts = FlushOptions::default();
+        wait_opts.set_wait(true);
+        db.flush_opt(&wait_opts).unwrap();
+
+        assert_eq!(db.get(b"k1").unwrap().unwrap().as_slice(), b"v1");
+    }
+}
+
+#[test]
+fn transaction_db_flush_wal() {
+    let path = DBPath::new("_rust_rocksdb_transaction_db_flush_wal");
+    {
+        let db: TransactionDB = TransactionDB::open_default(&path).unwrap();
+
+        let txn = db.transaction();
+        txn.put(b"k1", b"v1").unwrap();
+        txn.commit().unwrap();
+
+        // sync WAL to disk
+        db.flush_wal(true).unwrap();
+
+        // verify data survived the WAL sync
+        assert_eq!(db.get(b"k1").unwrap().unwrap().as_slice(), b"v1");
+    }
+
+    // reopen and verify persistence
+    {
+        let db: TransactionDB = TransactionDB::open_default(&path).unwrap();
+        assert_eq!(db.get(b"k1").unwrap().unwrap().as_slice(), b"v1");
+    }
+}
+
+#[test]
+fn transaction_db_flush_wal_without_sync() {
+    let path = DBPath::new("_rust_rocksdb_transaction_db_flush_wal_no_sync");
+    {
+        let db: TransactionDB = TransactionDB::open_default(&path).unwrap();
+
+        let txn = db.transaction();
+        txn.put(b"k1", b"v1").unwrap();
+        txn.commit().unwrap();
+
+        // flush WAL buffer without fsync
+        db.flush_wal(false).unwrap();
+
+        assert_eq!(db.get(b"k1").unwrap().unwrap().as_slice(), b"v1");
+    }
+    // No reopen check: flush_wal(false) only flushes the in-process WAL
+    // buffer without calling fsync, so durability across a crash is not
+    // guaranteed. Verifying that already-open reads still work is the
+    // meaningful assertion for this code path.
 }
 
 #[test]

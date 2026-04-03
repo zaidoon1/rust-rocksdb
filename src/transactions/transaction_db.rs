@@ -32,7 +32,7 @@ use crate::{
     DBIteratorWithThreadMode, DBPinnableSlice, DBRawIteratorWithThreadMode,
     DEFAULT_COLUMN_FAMILY_NAME, Direction, Error, IteratorMode, MultiThreaded, Options,
     ReadOptions, SingleThreaded, SnapshotWithThreadMode, ThreadMode, Transaction,
-    TransactionDBOptions, TransactionOptions, WriteBatchWithTransaction, WriteOptions,
+    FlushOptions, TransactionDBOptions, TransactionOptions, WriteBatchWithTransaction, WriteOptions,
     column_family::UnboundColumnFamily,
     db::{DBAccess, convert_values},
     db_options::OptionsMustOutliveDB,
@@ -40,7 +40,7 @@ use crate::{
     ffi_util::to_cpath,
 };
 use ffi::rocksdb_transaction_t;
-use libc::{c_char, c_int, c_void, size_t};
+use libc::{c_char, c_int, c_uchar, c_void, size_t};
 
 // Default options are kept per-thread to avoid re-allocating on every call while
 // also preventing cross-thread sharing. Some RocksDB option wrappers hold
@@ -50,6 +50,7 @@ use libc::{c_char, c_int, c_void, size_t};
 // explicit options.
 thread_local! { static DEFAULT_READ_OPTS: ReadOptions = ReadOptions::default(); }
 thread_local! { static DEFAULT_WRITE_OPTS: WriteOptions = WriteOptions::default(); }
+thread_local! { static DEFAULT_FLUSH_OPTS: FlushOptions = FlushOptions::default(); }
 
 #[cfg(not(feature = "multi-threaded-cf"))]
 type DefaultThreadMode = crate::SingleThreaded;
@@ -408,6 +409,34 @@ impl<T: ThreadMode> TransactionDB<T> {
 
     pub fn path(&self) -> &Path {
         self.path.as_path()
+    }
+
+    /// Flushes the WAL buffer. If `sync` is set to `true`, also syncs
+    /// the data to disk.
+    pub fn flush_wal(&self, sync: bool) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_transactiondb_flush_wal(
+                self.inner,
+                c_uchar::from(sync)
+            ));
+        }
+        Ok(())
+    }
+
+    /// Flushes database memtables to SST files on the disk.
+    pub fn flush_opt(&self, flushopts: &FlushOptions) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_transactiondb_flush(
+                self.inner,
+                flushopts.inner
+            ));
+        }
+        Ok(())
+    }
+
+    /// Flushes database memtables to SST files on the disk using default options.
+    pub fn flush(&self) -> Result<(), Error> {
+        DEFAULT_FLUSH_OPTS.with(|opts| self.flush_opt(opts))
     }
 
     /// Creates a transaction with default options.

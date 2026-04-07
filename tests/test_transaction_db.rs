@@ -772,13 +772,9 @@ fn transaction_db_flush_cf() {
         let mut opts = Options::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
-        let db: TransactionDB = TransactionDB::open_cf(
-            &opts,
-            &TransactionDBOptions::default(),
-            &path,
-            ["cf1"],
-        )
-        .unwrap();
+        let db: TransactionDB =
+            TransactionDB::open_cf(&opts, &TransactionDBOptions::default(), &path, ["cf1"])
+                .unwrap();
 
         let cf1 = db.cf_handle("cf1").unwrap();
         db.put_cf(&cf1, b"k1", b"v1").unwrap();
@@ -796,13 +792,9 @@ fn transaction_db_flush_cf_opt() {
         let mut opts = Options::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
-        let db: TransactionDB = TransactionDB::open_cf(
-            &opts,
-            &TransactionDBOptions::default(),
-            &path,
-            ["cf1"],
-        )
-        .unwrap();
+        let db: TransactionDB =
+            TransactionDB::open_cf(&opts, &TransactionDBOptions::default(), &path, ["cf1"])
+                .unwrap();
 
         let cf1 = db.cf_handle("cf1").unwrap();
         db.put_cf(&cf1, b"k1", b"v1").unwrap();

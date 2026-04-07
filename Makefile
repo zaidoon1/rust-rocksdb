@@ -35,6 +35,8 @@ bootstrap: ## Install high-performance build tools and setup Cargo config
 		sudo pacman -Sy --needed clang mold sccache ccache make llvm cmake ninja; \
 	elif command -v dnf >/dev/null 2>&1; then \
 		sudo dnf install -y clang mold sccache ccache make llvm cmake ninja-build; \
+	elif command -v brew >/dev/null 2>&1; then \
+		brew install llvm sccache ccache make cmake ninja; \
 	else \
 		echo "Unsupported package manager. Please install clang, mold, and sccache manually."; \
 	fi
@@ -71,7 +73,6 @@ bootstrap: ## Install high-performance build tools and setup Cargo config
 	fi
 	@echo "Bootstrap complete! Run 'make prebuild' to build with these optimized tools."
 
-
 .PHONY: prebuild
 prebuild: ## Build RocksDB shared library, static library, and ldb binary locally
 	@echo "Building RocksDB shared library, static library, and ldb binary using $(CXX_CMD)..."
@@ -81,20 +82,18 @@ prebuild: ## Build RocksDB shared library, static library, and ldb binary locall
 	fi
 	@mkdir -p $(PREFIX)/include $(PREFIX)/lib
 	cd librocksdb-sys/rocksdb && \
-		if ! command -v hostname >/dev/null 2>&1; then \
-			hostname() { uname -n; }; export -f hostname; \
-		fi && \
-		env ROCKSDB_NO_FBCODE=1 DISABLE_JEMALLOC=1 CC="$(CC_CMD)" CXX="$(CXX_CMD)" \
+		env ROCKSDB_NO_FBCODE=1 DISABLE_JEMALLOC=1 ROCKSDB_DISABLE_BENCHMARK=1 CC="$(CC_CMD)" CXX="$(CXX_CMD)" \
 		EXTRA_CXXFLAGS="$${EXTRA_CXXFLAGS:-} -I$(PREFIX)/include -Wno-error=unused-parameter" \
 		EXTRA_LDFLAGS="$${EXTRA_LDFLAGS:-} $(MOLD_LDFLAG) -L$(PREFIX)/lib" PORTABLE=0 USE_RTTI=1 \
 		make shared_lib static_lib -j$(NPROC_CMD)
-	cd librocksdb-sys/rocksdb && env DISABLE_WARNING_AS_ERROR=1 DEBUG_LEVEL=0 USE_RTTI=1 CC="$(CC_CMD)" CXX="$(CXX_CMD)" make ldb
+	cd librocksdb-sys/rocksdb && \
+		env DISABLE_WARNING_AS_ERROR=1 ROCKSDB_DISABLE_BENCHMARK=1 DEBUG_LEVEL=0 USE_RTTI=1 CC="$(CC_CMD)" CXX="$(CXX_CMD)" make ldb
 	@echo ""
 	@echo "Prebuild complete! Run 'make install' (or 'sudo make install PREFIX=/usr/local/zaidoon') to install natively."
 
 
 .PHONY: install
-install: prebuild ## Install RocksDB to the configured PREFIX
+install: prebuild ## Install built RocksDB to the configured PREFIX
 	@echo "Installing RocksDB to $(PREFIX)..."
 	cd librocksdb-sys/rocksdb && make install-shared INSTALL_PATH=$(PREFIX)
 	cd librocksdb-sys/rocksdb && make install-static INSTALL_PATH=$(PREFIX)

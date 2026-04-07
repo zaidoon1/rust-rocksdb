@@ -1,0 +1,81 @@
+---
+name: Prebuild Benchmark
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test-prebuild:
+    name: Test-Prebuild-${{ matrix.build }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        build: [Linux-ARM, Linux-x86, macOS]
+        include:
+          - build: Linux-ARM
+            os: ubuntu-24.04-arm
+          - build: Linux-x86
+            os: ubuntu-24.04
+          - build: macOS
+            os: macos-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      - uses: taiki-e/install-action@nextest
+
+      - name: Bootstrap Environment
+        run: make bootstrap
+
+      - name: Prebuild Native Artifacts
+        run: |
+          # Workaround for macOS SIP/Homebrew path issues finding llvm and brew packages in the PATH correctly.
+          if [ "${{ runner.os }}" = "macOS" ]; then
+             if [ -f /opt/homebrew/bin/brew ]; then
+                eval "$(/opt/homebrew/bin/brew shellenv)"
+             fi
+             export PATH="/opt/homebrew/opt/llvm/bin:$PATH" 2>/dev/null || true
+          fi
+          make install PREFIX=$HOME/.local
+
+      - name: Initial Cargo Build (Download Deps)
+        run: cargo build --tests
+        env:
+          ROCKSDB_STATIC: 1
+          ROCKSDB_LIB_DIR: ${{ env.HOME }}/.local/lib
+          ROCKSDB_INCLUDE_DIR: ${{ env.HOME }}/.local/include
+
+      - name: Clean Target Directory
+        run: rm -rf target/
+
+      - name: Benchmark Clean Prebuilt Cargo Build
+        # Running `time` natively outputs the real/user/sys seconds spent.
+        run: time cargo build --tests
+        env:
+          ROCKSDB_STATIC: 1
+          ROCKSDB_LIB_DIR: ${{ env.HOME }}/.local/lib
+          ROCKSDB_INCLUDE_DIR: ${{ env.HOME }}/.local/include
+
+      - name: Run Nextest
+        run: cargo nextest run --all
+        env:
+          ROCKSDB_STATIC: 1
+          ROCKSDB_LIB_DIR: ${{ env.HOME }}/.local/lib
+          ROCKSDB_INCLUDE_DIR: ${{ env.HOME }}/.local/include

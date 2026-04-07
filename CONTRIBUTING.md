@@ -50,9 +50,15 @@ make prebuild
 make install
 ```
 
-This will run the native RocksDB Makefile to generate the libraries (`librocksdb.so`, `librocksdb.a`, and the `ldb` tool), and install them to `/usr/local/zaidoon/`.
+This will run the native RocksDB Makefile to generate the libraries (`librocksdb.so`, `librocksdb.a`, and the `ldb` tool), and install them to `$HOME/.local` by default.
 
-To permanently bypass Cargo recompilations, do not modify `librocksdb-sys` paths directly. Instead, create a local `.cargo/config.toml`, make sure it is ignored in your local Git configuration before committing, and paste the following suggestion to configure Cargo to find the newly cached artifacts:
+To install to a system path (like `/usr/local/zaidoon`), override `PREFIX` and run with `sudo`:
+
+```bash
+sudo make install PREFIX=/usr/local/zaidoon
+```
+
+To permanently bypass Cargo recompilations, do not modify `librocksdb-sys` paths directly. Instead, create a `.cargo/config.toml` (which is gitignored) and paste the following suggestion to configure Cargo to find the newly cached artifacts (replace `/usr/local/zaidoon` with `$HOME/.local` if you did not override `PREFIX`):
 
 ```toml
 [env]

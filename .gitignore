@@ -9,3 +9,4 @@ path
 .DS_Store
 .idea
 .vscode
+.cargo/config.toml

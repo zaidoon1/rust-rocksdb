@@ -439,6 +439,50 @@ impl<T: ThreadMode> TransactionDB<T> {
         DEFAULT_FLUSH_OPTS.with(|opts| self.flush_opt(opts))
     }
 
+    /// Flushes database memtables to SST files on the disk for a given column family.
+    pub fn flush_cf_opt(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        flushopts: &FlushOptions,
+    ) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_transactiondb_flush_cf(
+                self.inner,
+                flushopts.inner,
+                cf.inner()
+            ));
+        }
+        Ok(())
+    }
+
+    /// Flushes multiple column families.
+    ///
+    /// If atomic flush is not enabled, it is equivalent to calling flush_cf multiple times.
+    /// If atomic flush is enabled, it will flush all column families specified in `cfs` up to the latest sequence
+    /// number at the time when flush is requested.
+    pub fn flush_cfs_opt(
+        &self,
+        cfs: &[&impl AsColumnFamilyRef],
+        opts: &FlushOptions,
+    ) -> Result<(), Error> {
+        let mut cfs = cfs.iter().map(|cf| cf.inner()).collect::<Vec<_>>();
+        unsafe {
+            ffi_try!(ffi::rocksdb_transactiondb_flush_cfs(
+                self.inner,
+                opts.inner,
+                cfs.as_mut_ptr(),
+                cfs.len() as c_int,
+            ));
+        }
+        Ok(())
+    }
+
+    /// Flushes database memtables to SST files on the disk for a given column family using default
+    /// options.
+    pub fn flush_cf(&self, cf: &impl AsColumnFamilyRef) -> Result<(), Error> {
+        DEFAULT_FLUSH_OPTS.with(|opts| self.flush_cf_opt(cf, opts))
+    }
+
     /// Creates a transaction with default options.
     pub fn transaction(&'_ self) -> Transaction<'_, Self> {
         DEFAULT_WRITE_OPTS.with(|opts| self.transaction_opt(opts, &TransactionOptions::default()))

@@ -39,6 +39,45 @@ Pull requests are welcome, and when contributing code, the author agrees to do s
 
 For pull requests that would benefit from discussion and review earlier in the development process, use a [Draft Pull Request](https://help.github.com/en/articles/about-pull-requests#draft-pull-requests).
 
+## Avoiding Re-Compilation Overhead (Developer Caching)
+[caching]: #caching
+Compiling the underlying RocksDB C++ source via `cargo` can be slow, especially when it is constantly re-built due to directory invalidation or branching.
+
+You can securely build and cache the native artifacts by using the provided `Makefile`:
+
+```bash
+make prebuild
+make install
+```
+
+This will run the native RocksDB Makefile to generate the libraries (`librocksdb.so`, `librocksdb.a`, and the `ldb` tool), and install them to `/usr/local/zaidoon/`.
+
+To permanently bypass Cargo recompilations, do not modify `librocksdb-sys` paths directly. Instead, create a `.cargo/config.toml` (which is gitignored) and paste the following suggestion to configure Cargo to find the newly cached artifacts:
+
+```toml
+[env]
+RUSTC_WRAPPER = { value = "sccache", force = false }
+ROCKSDB_LIB_DIR = { value = "/usr/local/zaidoon/lib", force = false }
+ROCKSDB_INCLUDE_DIR = { value = "/usr/local/zaidoon/include", force = false }
+PKG_CONFIG_PATH = { value = "/usr/local/zaidoon/lib/pkgconfig", force = false }
+LD_LIBRARY_PATH = { value = "/usr/local/zaidoon/lib", force = false }
+
+# You may need to install "mold", a more efficient linker than ld or cc
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = [
+    "-C", "link-arg=-fuse-ld=mold",
+    "-C", "link-arg=-Wl,-rpath,/usr/local/zaidoon/lib"
+]
+
+[target.aarch64-unknown-linux-gnu]
+linker = "clang"
+rustflags = [
+    "-C", "link-arg=-fuse-ld=mold",
+    "-C", "link-arg=-Wl,-rpath,/usr/local/zaidoon/lib"
+]
+```
+
 ## Additional Resources
 Some useful information for working with RocksDB in Rust:
 - [RocksDB library primary site](https://rocksdb.org)

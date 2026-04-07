@@ -15,7 +15,7 @@ env:
 
 jobs:
   test-prebuild:
-    name: Test-Prebuild-${{ matrix.build }}
+    name: ${{ matrix.build }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

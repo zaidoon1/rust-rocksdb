@@ -57,10 +57,6 @@ jobs:
 
       - name: Initial Cargo Build (Download Deps)
         run: cargo build --tests
-        env:
-          ROCKSDB_STATIC: 1
-          ROCKSDB_LIB_DIR: ${{ env.HOME }}/.local/lib
-          ROCKSDB_INCLUDE_DIR: ${{ env.HOME }}/.local/include
 
       - name: Clean Target Directory
         run: rm -rf target/
@@ -68,14 +64,6 @@ jobs:
       - name: Benchmark Clean Prebuilt Cargo Build
         # Running `time` natively outputs the real/user/sys seconds spent.
         run: time cargo build --tests
-        env:
-          ROCKSDB_STATIC: 1
-          ROCKSDB_LIB_DIR: ${{ env.HOME }}/.local/lib
-          ROCKSDB_INCLUDE_DIR: ${{ env.HOME }}/.local/include
 
       - name: Run Nextest
         run: cargo nextest run --all
-        env:
-          ROCKSDB_STATIC: 1
-          ROCKSDB_LIB_DIR: ${{ env.HOME }}/.local/lib
-          ROCKSDB_INCLUDE_DIR: ${{ env.HOME }}/.local/include

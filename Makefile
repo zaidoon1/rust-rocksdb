@@ -50,6 +50,8 @@ bootstrap: ## Install high-performance build tools and setup Cargo config
 		fi; \
 		echo "[env]" >> .cargo/config.toml; \
 		echo "ROCKSDB_LIB_DIR = \"$(PREFIX)/lib\"" >> .cargo/config.toml; \
+		echo "ROCKSDB_INCLUDE_DIR = \"$(PREFIX)/include\"" >> .cargo/config.toml; \
+		echo "PKG_CONFIG_PATH = { value = \"$(PREFIX)/lib/pkgconfig\", force = false }" >> .cargo/config.toml; \
 		echo "ROCKSDB_STATIC = \"1\"" >> .cargo/config.toml; \
 		echo "LD_LIBRARY_PATH = { value = \"$(PREFIX)/lib\", force = false }" >> .cargo/config.toml; \
 		if command -v sccache >/dev/null 2>&1 && command -v clang++ >/dev/null 2>&1; then \

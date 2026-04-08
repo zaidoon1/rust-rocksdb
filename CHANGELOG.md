@@ -4,8 +4,8 @@
 
 - upgrade RocksDB to 11.0.4 (zaidoon1)
 - feat: add flush, flush_wal, flush_cf, flush_cf_opt, flush_cfs_opt to TransactionDB (gdorsi)
-- feat: add timestamp() to DBRawIteratorWithThreadMode (asumpster)
-- feat: add IngestExternalFileOptions AsRawPtr impl (asumpster)
+- feat: add timestamp() to DBRawIteratorWithThreadMode (ali2992)
+- feat: add IngestExternalFileOptions AsRawPtr impl (ali2992)
 - feat: add Iterator::Refresh() bindings (joshsend)
 - fix: memory leak in Options.set_info_logger (evanj)
 - fix: sync build.rs defines with RocksDB; pass through -Ctarget-cpu and set aarch64 CRC32 flags (evanj)

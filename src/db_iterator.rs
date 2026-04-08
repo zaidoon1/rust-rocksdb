@@ -491,6 +491,17 @@ pub type DBIterator<'a> = DBIteratorWithThreadMode<'a, DB>;
 /// }
 /// let _ = DB::destroy(&Options::default(), path);
 /// ```
+///
+/// An iterator must not outlive the `DB` it iterates over:
+///
+/// ```compile_fail,E0597
+/// use rust_rocksdb::{IteratorMode, DB};
+///
+/// let _iter = {
+///     let db = DB::open_default("foo").unwrap();
+///     db.iterator(IteratorMode::Start)
+/// };
+/// ```
 pub struct DBIteratorWithThreadMode<'a, D: DBAccess> {
     raw: DBRawIteratorWithThreadMode<'a, D>,
     direction: Direction,

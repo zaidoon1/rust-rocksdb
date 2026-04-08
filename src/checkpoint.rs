@@ -34,6 +34,17 @@ const DEFAULT_LOG_SIZE_FOR_FLUSH: u64 = 0_u64;
 
 /// Database's checkpoint object.
 /// Used to create checkpoints of the specified DB from time to time.
+///
+/// A `Checkpoint` must not outlive the `DB` it was created from:
+///
+/// ```compile_fail,E0597
+/// use rust_rocksdb::{checkpoint::Checkpoint, DB};
+///
+/// let _checkpoint = {
+///     let db = DB::open_default("foo").unwrap();
+///     Checkpoint::new(&db)
+/// };
+/// ```
 pub struct Checkpoint<'db> {
     inner: *mut ffi::rocksdb_checkpoint_t,
     _db: PhantomData<&'db ()>,

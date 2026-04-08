@@ -37,6 +37,29 @@ thread_local! { static DEFAULT_READ_OPTS: ReadOptions = ReadOptions::default(); 
 ///
 /// [`TransactionDB`]: crate::TransactionDB
 /// [`OptimisticTransactionDB`]: crate::OptimisticTransactionDB
+///
+/// A `Transaction` must not outlive the `TransactionDB` it was created from:
+///
+/// ```compile_fail,E0597
+/// use rust_rocksdb::{SingleThreaded, TransactionDB};
+///
+/// let _txn = {
+///     let db = TransactionDB::<SingleThreaded>::open_default("foo").unwrap();
+///     db.transaction()
+/// };
+/// ```
+///
+/// A `Snapshot` taken from a `Transaction` must not outlive the `Transaction`:
+///
+/// ```compile_fail,E0597
+/// use rust_rocksdb::{SingleThreaded, TransactionDB};
+///
+/// let db = TransactionDB::<SingleThreaded>::open_default("foo").unwrap();
+/// let _snapshot = {
+///     let txn = db.transaction();
+///     txn.snapshot()
+/// };
+/// ```
 pub struct Transaction<'db, DB> {
     pub(crate) inner: *mut ffi::rocksdb_transaction_t,
     pub(crate) _marker: PhantomData<&'db DB>,

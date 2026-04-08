@@ -40,6 +40,16 @@ pub type Snapshot<'a> = SnapshotWithThreadMode<'a, DB>;
 /// let _ = DB::destroy(&Options::default(), path);
 /// ```
 ///
+/// A `Snapshot` must not outlive the `DB` it was created from:
+///
+/// ```compile_fail,E0597
+/// use rust_rocksdb::DB;
+///
+/// let _snapshot = {
+///     let db = DB::open_default("foo").unwrap();
+///     db.snapshot()
+/// };
+/// ```
 pub struct SnapshotWithThreadMode<'a, D: DBAccess> {
     db: &'a D,
     pub(crate) inner: *const ffi::rocksdb_snapshot_t,

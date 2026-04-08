@@ -86,6 +86,17 @@ type DefaultThreadMode = crate::MultiThreaded;
 /// ```
 ///
 /// [`SingleThreaded`]: crate::SingleThreaded
+///
+/// A `Snapshot` must not outlive the `TransactionDB` it was created from:
+///
+/// ```compile_fail,E0597
+/// use rust_rocksdb::{SingleThreaded, TransactionDB};
+///
+/// let _snapshot = {
+///     let db = TransactionDB::<SingleThreaded>::open_default("foo").unwrap();
+///     db.snapshot()
+/// };
+/// ```
 pub struct TransactionDB<T: ThreadMode = DefaultThreadMode> {
     pub(crate) inner: *mut ffi::rocksdb_transactiondb_t,
     cfs: T,

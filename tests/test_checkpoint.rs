@@ -617,9 +617,3 @@ pub fn test_export_checkpoint_column_family() {
         original_data,
     );
 }
-
-#[test]
-fn test_checkpoint_outlive_db() {
-    let t = trybuild::TestCases::new();
-    t.compile_fail("tests/fail/checkpoint_outlive_db.rs");
-}

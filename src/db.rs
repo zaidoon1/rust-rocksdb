@@ -257,6 +257,22 @@ pub trait DBInner {
 /// and [`OptimisticTransactionDB`].
 ///
 /// [`OptimisticTransactionDB`]: crate::OptimisticTransactionDB
+///
+/// When using [`SingleThreaded`] mode, `create_cf` requires `&mut self`,
+/// preventing multiple immutable references from calling it concurrently:
+///
+/// ```compile_fail,E0596
+/// use rust_rocksdb::{DBWithThreadMode, Options, SingleThreaded};
+///
+/// let db = DBWithThreadMode::<SingleThreaded>::open_default("/path/to/dummy").unwrap();
+/// let db_ref1 = &db;
+/// let db_ref2 = &db;
+/// let opts = Options::default();
+/// db_ref1.create_cf("cf1", &opts).unwrap();
+/// db_ref2.create_cf("cf2", &opts).unwrap();
+/// ```
+///
+/// [`SingleThreaded`]: crate::SingleThreaded
 pub struct DBCommon<T: ThreadMode, D: DBInner> {
     pub(crate) inner: D,
     cfs: T, // Column families are held differently depending on thread mode

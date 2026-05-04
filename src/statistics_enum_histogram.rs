@@ -72,5 +72,6 @@ iterable_named_enum! {
         MultiscanPrepareIterators("rocksdb.multiscan.op.prepare.iterators.micros"),
         MultiscanPrepareMicros("rocksdb.multiscan.prepare.micros"),
         MultiscanBlocksPerPrepare("rocksdb.multiscan.blocks.per.prepare"),
+        BlockKeyDistributionCv("rocksdb.block.key.distribution.cv"),
     }
 }

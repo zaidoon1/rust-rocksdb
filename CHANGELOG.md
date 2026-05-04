@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.48.0 (2026-05-04)
+
+- upgrade RocksDB to 11.1.1 (zaidoon1)
+
 ## 0.47.0 (2026-04-08)
 
 - upgrade RocksDB to 11.0.4 (zaidoon1)

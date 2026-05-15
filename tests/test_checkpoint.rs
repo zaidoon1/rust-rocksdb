@@ -17,10 +17,10 @@ mod util;
 use pretty_assertions::assert_eq;
 use std::path::Path;
 
-use rust_rocksdb::checkpoint::Checkpoint;
+use rust_rocksdb::checkpoint::{Checkpoint, TransactionDBCheckpoint};
 use rust_rocksdb::{
     DB, DBWithThreadMode, ExportImportFilesMetaData, ImportColumnFamilyOptions, IteratorMode,
-    MultiThreaded, OptimisticTransactionDB, Options,
+    MultiThreaded, OptimisticTransactionDB, Options, TransactionDB, TransactionDBOptions,
 };
 use std::fs;
 use util::DBPath;
@@ -345,6 +345,161 @@ pub fn test_optimistic_transaction_db_checkpoint_with_large_log_size_skips_flush
     assert_eq!(
         cp_db.get(b"memtable_key").unwrap().unwrap(),
         b"memtable_value"
+    );
+}
+
+/// Test that TransactionDB checkpoints include both direct writes and committed transaction writes.
+#[test]
+pub fn test_transaction_db_checkpoint_includes_direct_and_committed_writes() {
+    const PATH_PREFIX: &str = "_rust_rocksdb_txn_cp_basic_";
+
+    let db_path = DBPath::new(&format!("{PATH_PREFIX}db"));
+    let db: TransactionDB = TransactionDB::open_default(&db_path).unwrap();
+
+    db.put(b"direct_key", b"direct_value").unwrap();
+
+    let txn = db.transaction();
+    txn.put(b"txn_key", b"txn_value").unwrap();
+    txn.commit().unwrap();
+
+    let cp = TransactionDBCheckpoint::new(&db).unwrap();
+    let cp_path = DBPath::new(&format!("{PATH_PREFIX}cp"));
+    cp.create_checkpoint(&cp_path).unwrap();
+
+    let cp_db: TransactionDB = TransactionDB::open_default(&cp_path).unwrap();
+
+    assert_eq!(cp_db.get(b"direct_key").unwrap().unwrap(), b"direct_value");
+    assert_eq!(cp_db.get(b"txn_key").unwrap().unwrap(), b"txn_value");
+}
+
+/// Test that TransactionDB checkpoints do not include uncommitted transaction writes.
+#[test]
+pub fn test_transaction_db_checkpoint_excludes_uncommitted_writes() {
+    const PATH_PREFIX: &str = "_rust_rocksdb_txn_cp_uncommitted_";
+
+    let db_path = DBPath::new(&format!("{PATH_PREFIX}db"));
+    let db: TransactionDB = TransactionDB::open_default(&db_path).unwrap();
+
+    db.put(b"committed_key", b"committed_value").unwrap();
+
+    let txn = db.transaction();
+    txn.put(b"uncommitted_key", b"uncommitted_value").unwrap();
+
+    let cp = TransactionDBCheckpoint::new(&db).unwrap();
+    let cp_path = DBPath::new(&format!("{PATH_PREFIX}cp"));
+    cp.create_checkpoint(&cp_path).unwrap();
+
+    let cp_db: TransactionDB = TransactionDB::open_default(&cp_path).unwrap();
+
+    assert_eq!(
+        cp_db.get(b"committed_key").unwrap().unwrap(),
+        b"committed_value"
+    );
+    assert!(cp_db.get(b"uncommitted_key").unwrap().is_none());
+
+    txn.rollback().unwrap();
+}
+
+/// Test that the same TransactionDB checkpoint object can create multiple checkpoints.
+#[test]
+pub fn test_transaction_db_checkpoint_object_can_create_multiple_checkpoints() {
+    const PATH_PREFIX: &str = "_rust_rocksdb_txn_cp_multi_";
+
+    let db_path = DBPath::new(&format!("{PATH_PREFIX}db"));
+    let db: TransactionDB = TransactionDB::open_default(&db_path).unwrap();
+
+    db.put(b"k1", b"v1").unwrap();
+
+    let cp = TransactionDBCheckpoint::new(&db).unwrap();
+    let cp1_path = DBPath::new(&format!("{PATH_PREFIX}cp1"));
+    cp.create_checkpoint(&cp1_path).unwrap();
+
+    db.put(b"k2", b"v2").unwrap();
+
+    let cp2_path = DBPath::new(&format!("{PATH_PREFIX}cp2"));
+    cp.create_checkpoint(&cp2_path).unwrap();
+
+    let cp1_db: TransactionDB = TransactionDB::open_default(&cp1_path).unwrap();
+    assert_eq!(cp1_db.get(b"k1").unwrap().unwrap(), b"v1");
+    assert!(cp1_db.get(b"k2").unwrap().is_none());
+
+    let cp2_db: TransactionDB = TransactionDB::open_default(&cp2_path).unwrap();
+    assert_eq!(cp2_db.get(b"k1").unwrap().unwrap(), b"v1");
+    assert_eq!(cp2_db.get(b"k2").unwrap().unwrap(), b"v2");
+}
+
+/// Test that TransactionDB checkpoints preserve column family data.
+#[test]
+pub fn test_transaction_db_checkpoint_preserves_column_families() {
+    const PATH_PREFIX: &str = "_rust_rocksdb_txn_cp_cf_";
+
+    let db_path = DBPath::new(&format!("{PATH_PREFIX}db"));
+    let mut opts = Options::default();
+    opts.create_if_missing(true);
+    opts.create_missing_column_families(true);
+    let db: TransactionDB = TransactionDB::open_cf(
+        &opts,
+        &TransactionDBOptions::default(),
+        &db_path,
+        ["cf1", "cf2"],
+    )
+    .unwrap();
+
+    let cf1 = db.cf_handle("cf1").unwrap();
+    let cf2 = db.cf_handle("cf2").unwrap();
+
+    db.put(b"default_key", b"default_value").unwrap();
+    db.put_cf(&cf1, b"cf1_key", b"cf1_value").unwrap();
+    db.put_cf(&cf2, b"cf2_key", b"cf2_value").unwrap();
+
+    let cp = TransactionDBCheckpoint::new(&db).unwrap();
+    let cp_path = DBPath::new(&format!("{PATH_PREFIX}cp"));
+    cp.create_checkpoint(&cp_path).unwrap();
+
+    let cp_db: TransactionDB = TransactionDB::open_cf(
+        &Options::default(),
+        &TransactionDBOptions::default(),
+        &cp_path,
+        ["cf1", "cf2"],
+    )
+    .unwrap();
+
+    let cp_cf1 = cp_db.cf_handle("cf1").unwrap();
+    let cp_cf2 = cp_db.cf_handle("cf2").unwrap();
+
+    assert_eq!(
+        cp_db.get(b"default_key").unwrap().unwrap(),
+        b"default_value"
+    );
+    assert_eq!(
+        cp_db.get_cf(&cp_cf1, b"cf1_key").unwrap().unwrap(),
+        b"cf1_value"
+    );
+    assert_eq!(
+        cp_db.get_cf(&cp_cf2, b"cf2_key").unwrap().unwrap(),
+        b"cf2_value"
+    );
+}
+
+/// Test that TransactionDB checkpoint creation returns an error if the destination exists.
+#[test]
+pub fn test_transaction_db_checkpoint_fails_if_path_exists() {
+    const PATH_PREFIX: &str = "_rust_rocksdb_txn_cp_existing_path_";
+
+    let db_path = DBPath::new(&format!("{PATH_PREFIX}db"));
+    let db: TransactionDB = TransactionDB::open_default(&db_path).unwrap();
+
+    db.put(b"k1", b"v1").unwrap();
+
+    let cp_path = DBPath::new(&format!("{PATH_PREFIX}cp"));
+    fs::create_dir_all((&cp_path).as_ref()).unwrap();
+
+    let cp = TransactionDBCheckpoint::new(&db).unwrap();
+    let err = cp.create_checkpoint(&cp_path).unwrap_err();
+
+    assert!(
+        !err.to_string().is_empty(),
+        "checkpoint error should include RocksDB failure details"
     );
 }
 

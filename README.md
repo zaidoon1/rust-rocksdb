@@ -194,6 +194,19 @@ features = ["malloc-usable-size"]
 
 Required if you want to use RocksDB's `optimize_filters_for_memory` feature. See [RocksDB documentation](https://github.com/facebook/rocksdb/blob/v9.0.0/include/rocksdb/table.h#L401-L434) for details.
 
+#### NUMA-Aware Allocation
+
+> **Linux only**
+
+```toml
+[dependencies.rust-rocksdb]
+features = ["numa"]
+```
+
+Builds RocksDB with `-DNUMA` and links against `libnuma`. When this is on, RocksDB's `Options::use_numa_aware_alloc()` will actually pin memtable arena allocations to the calling thread's NUMA node via `numa_alloc_onnode()` instead of falling back to `malloc()`. Useful on multi-socket bare-metal hosts where cross-socket memory traffic is a real cost; not relevant on single-socket / cloud instances with no NUMA topology.
+
+Install `libnuma-dev` (Debian/Ubuntu) / `numactl-devel` (Fedora/RHEL) / `numactl` (Arch) / `numactl-dev` (Alpine) before building. The build script probes for it via pkg-config and fails with a clear error if it's missing.
+
 ### Platform-Specific Features
 
 #### Multi-threaded Column Family Operations

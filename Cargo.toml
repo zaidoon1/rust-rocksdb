@@ -22,6 +22,9 @@ members = ["librocksdb-sys"]
 default = ["snappy", "lz4", "zstd", "zlib", "bzip2", "bindgen-runtime"]
 jemalloc = ["rust-librocksdb-sys/jemalloc"]
 io-uring = ["rust-librocksdb-sys/io-uring"]
+# NUMA-aware memtable allocation. Linux only. See
+# `librocksdb-sys/Cargo.toml` for the system package this requires.
+numa = ["rust-librocksdb-sys/numa"]
 # Build RocksDB with folly + C++20 coroutines. See `librocksdb-sys/Cargo.toml`
 # and the "Coroutines / async MultiGet" section of the README for build
 # prerequisites. Linux only.

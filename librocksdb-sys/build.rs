@@ -357,6 +357,8 @@ mod vendor {
         let layout = apply_target_os(&mut cfg, target);
         apply_lfs_defines(&mut cfg, target, layout);
         apply_io_uring(&mut cfg, target);
+        apply_backtrace(&mut cfg, target);
+        apply_numa(&mut cfg, target);
 
         #[cfg(feature = "coroutines")]
         super::coroutines::apply_compile_config(&mut cfg);
@@ -650,6 +652,14 @@ mod vendor {
                 ] {
                     cfg.define(d, None);
                 }
+                // PTHREAD_MUTEX_ADAPTIVE_NP is a glibc extension. Without it,
+                // rocksdb uses default pthread mutexes; with it, contended
+                // mutexes spin briefly before falling back to a futex wait,
+                // which is a small win for read-heavy workloads. Enable on
+                // Linux glibc only - musl and bionic don't define the constant.
+                if target.env_abi != "musl" {
+                    cfg.define("ROCKSDB_PTHREAD_ADAPTIVE_MUTEX", None);
+                }
                 SourceLayout::Posix
             }
             "windows" => {
@@ -735,6 +745,70 @@ mod vendor {
                     )
                 });
                 _cfg.define("ROCKSDB_IOURING_PRESENT", Some("1"));
+            }
+        }
+    }
+
+    /// Enable rocksdb's `execinfo.h`-based stack tracer (`port/stack_trace.cc`).
+    /// Without `ROCKSDB_BACKTRACE` defined, that file compiles a no-op
+    /// stub and rocksdb crashes (segfaults, aborts, assertion failures)
+    /// print no C++ frames at all - a real DX regression vs. the Makefile
+    /// build, which sets this define on every glibc-Linux and Apple target.
+    ///
+    /// We enable it on the same set: Linux glibc and Apple (macOS/iOS).
+    /// Skip:
+    ///   - musl Linux: doesn't ship libexecinfo by default; some distros
+    ///     patch it in via the `libexecinfo` package but we can't assume.
+    ///   - Android: bionic only added `<execinfo.h>` in API 33; older API
+    ///     levels would fail to compile.
+    ///   - Windows / MSVC: no equivalent; would need DbgHelp instead.
+    ///   - BSDs: would need libexecinfo from ports. We don't build the
+    ///     vendored sources on FreeBSD anyway.
+    fn apply_backtrace(cfg: &mut cc::Build, target: &Target) {
+        let supported = match target.os.as_str() {
+            "linux" => target.env_abi != "musl",
+            "macos" | "ios" => true,
+            _ => false,
+        };
+        if supported {
+            cfg.define("ROCKSDB_BACKTRACE", None);
+        }
+    }
+
+    /// NUMA-aware memtable allocation, opt-in via the `numa` cargo feature.
+    /// When enabled, rocksdb's `Options::use_numa_aware_alloc()` becomes
+    /// effective, the memtable arena uses `numa_alloc_onnode()` to pin
+    /// allocations to the current thread's NUMA node, and a handful of
+    /// internal counters get NUMA-aware variants.
+    ///
+    /// Mirrors how `apply_io_uring` handles its system library: probe via
+    /// pkg-config so the user gets a clear "install libnuma-dev" message
+    /// up front rather than a confusing link failure later.
+    fn apply_numa(_cfg: &mut cc::Build, _target: &Target) {
+        #[cfg(feature = "numa")]
+        {
+            if _target.os == "linux" {
+                pkg_config::probe_library("numa").unwrap_or_else(|e| {
+                    panic!(
+                        "the `numa` feature was requested but pkg-config probe for \
+                         `numa` failed: {e}\n\
+                         Hints:\n\
+                          - Debian/Ubuntu:  apt-get install libnuma-dev\n\
+                          - Fedora/RHEL:    dnf install numactl-devel\n\
+                          - Arch:           pacman -S numactl\n\
+                          - Alpine:         apk add numactl-dev\n\
+                          - or set PKG_CONFIG_PATH to a directory containing numa.pc\n\
+                          - when cross-compiling, also set PKG_CONFIG_ALLOW_CROSS=1\n\
+                            and point PKG_CONFIG_PATH at the target sysroot's pkgconfig dir."
+                    )
+                });
+                _cfg.define("NUMA", Some("1"));
+            } else {
+                println!(
+                    "cargo::warning=`numa` feature requested but target OS is \
+                     `{}`; NUMA is Linux-only, the define will not be set",
+                    _target.os
+                );
             }
         }
     }

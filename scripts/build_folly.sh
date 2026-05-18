@@ -43,9 +43,11 @@ case "$(uname -s)" in
         ;;
 esac
 
-for tool in git python3 patchelf perl; do
+for tool in git python3 patchelf perl wget; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "Error: required tool '$tool' is not on PATH." >&2
+        echo "Hint: on Debian/Ubuntu, install with:" >&2
+        echo "    apt-get install -y git python3 patchelf perl wget" >&2
         exit 1
     fi
 done

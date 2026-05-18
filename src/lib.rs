@@ -159,6 +159,27 @@ pub use crate::{
 
 use rust_librocksdb_sys as ffi;
 
+/// Returns `true` if this crate was built with the `coroutines` feature, in
+/// which case librocksdb was compiled with `USE_COROUTINES` and linked
+/// against folly.
+///
+/// When `true`, calling [`ReadOptions::set_async_io(true)`][async-io] on a
+/// `MultiGet` activates the multi-level parallel-read path described in the
+/// RocksDB [Asynchronous IO blog post]. When `false`, `MultiGet` with
+/// `async_io=true` can only parallelize reads within a single LSM level.
+///
+/// Note: this reflects how this crate was configured, not what is in the
+/// linked `librocksdb`. If you used `ROCKSDB_LIB_DIR` to link against an
+/// externally-built `librocksdb.a`, the answer here may not match what that
+/// library was actually compiled with.
+///
+/// [async-io]: ReadOptions::set_async_io
+/// [Asynchronous IO blog post]: https://rocksdb.org/blog/2022/10/07/asynchronous-io-in-rocksdb.html
+#[must_use]
+pub fn built_with_coroutines() -> bool {
+    cfg!(feature = "coroutines")
+}
+
 #[cfg(feature = "raw-ptr")]
 mod raw_ptr;
 

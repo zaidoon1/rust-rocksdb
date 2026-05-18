@@ -35,6 +35,14 @@ bindgen-runtime = ["bindgen/runtime"]
 bindgen-static = ["bindgen/static"]
 mt_static = []
 io-uring = ["pkg-config"]
+# Build RocksDB with `USE_COROUTINES=1 USE_FOLLY=1` and link against a folly
+# install. Enables the multi-level parallel `MultiGet` async-IO path described
+# in the RocksDB blog post "Asynchronous IO in RocksDB". Linux only. Requires
+# the `ROCKSDB_FOLLY_INSTALL_PATH` env var to point at a folly install built
+# by `scripts/build_folly.sh` (or equivalent). Adds a runtime dependency on
+# `libglog.so` and `libgflags.so` because folly's build does not produce
+# static archives for those two.
+coroutines = []
 snappy = []
 lz4 = ["lz4-sys"]
 zstd = ["zstd-sys"]

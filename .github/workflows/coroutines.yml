@@ -14,12 +14,23 @@ env:
 
 jobs:
   build-and-test:
-    name: Build & test with coroutines feature
+    name: ${{ matrix.build }} (coroutines)
+    strategy:
+      fail-fast: false
+      matrix:
+        build: [Linux-x64, Linux-ARM]
+        include:
+          - build: Linux-x64
+            os: ubuntu-24.04
+          - build: Linux-ARM
+            os: ubuntu-24.04-arm
     # The host runner just hosts the container; the actual build happens
     # inside `ubuntu:25.10` (see `container:` below). We pin a specific host
     # image rather than using `ubuntu-latest` so a GHA runner image rollover
-    # doesn't silently change anything visible to the build.
-    runs-on: ubuntu-24.04
+    # doesn't silently change anything visible to the build. The container
+    # image is multi-arch on Docker Hub, so the same `image:` works for
+    # both x86_64 and aarch64 hosts.
+    runs-on: ${{ matrix.os }}
     container:
       # The pinned folly commit (see librocksdb-sys/rocksdb/folly.mk) requires
       # liburing >= 2.7 for the io_uring_zcrx_* zero-copy receive APIs used

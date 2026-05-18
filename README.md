@@ -375,6 +375,57 @@ cd rust-rocksdb
 git submodule update --init --recursive
 ```
 
+### Linking Against a Prebuilt RocksDB
+
+By default, `rust-rocksdb` builds RocksDB from the bundled submodule. To link against a system-installed `librocksdb` instead (e.g. to share a single library across multiple Rust projects, cut compile time, or use a distro's package), the build script honors these opt-in environment variables:
+
+| Variable                   | Effect                                                                                                       |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `ROCKSDB_USE_PKG_CONFIG=1` | Probe `pkg-config rocksdb` to discover lib + include paths automatically. Accepts `1` or `true`.             |
+| `ROCKSDB_LIB_DIR=<path>`   | Look for `librocksdb.{a,so,dylib,dll}` in `<path>`. **Requires `ROCKSDB_INCLUDE_DIR` to be set too.**        |
+| `ROCKSDB_STATIC`           | Static-link the system rocksdb (default is dynamic). Any non-empty value enables it (legacy semantics).      |
+| `ROCKSDB_INCLUDE_DIR=<p>`  | Headers for `bindgen`. Mandatory with `ROCKSDB_LIB_DIR`; with `ROCKSDB_USE_PKG_CONFIG` it is *merged in front* of pkg-config's discovered paths (does not replace them). |
+| `ROCKSDB_COMPILE=1`        | Force the bundled vendored build even if the above are set. Accepts `1` or `true` (case-insensitive).        |
+| `ROCKSDB_CXX_STD=c++23`    | Override the C++ standard used to compile RocksDB (default `c++20`). Only used for vendored builds.          |
+| `CXXSTDLIB=stdc++`         | Override the C++ stdlib linked (e.g. `c++` for libc++, `stdc++` for libstdc++).                              |
+
+When you opt in via any of these:
+
+- `bindgen` runs against the **chosen backend's headers** (system rocksdb when linked from the system, bundled otherwise), so the generated FFI cannot silently drift from the linked library. If no include directory can be determined, the build script panics with an actionable error rather than guessing `/usr/include`.
+- No version pin is enforced &mdash; you're the power user. The bundled RocksDB version is the trailing component of `librocksdb-sys`'s `version = "X.Y.Z+RR.S.T"` in `Cargo.toml`; make sure your system rocksdb is API-compatible.
+- The `snappy` Cargo feature becomes a no-op: the system librocksdb is expected to provide snappy support itself, so building and linking a second copy would risk duplicate symbols. The build script emits a `cargo::warning=` so the silent skip isn't surprising.
+- The `coroutines` Cargo feature still emits folly link directives, but the build script emits a `cargo::warning=` reminding you that your prebuilt librocksdb must have been built with `USE_COROUTINES=1` and `USE_FOLLY=1` &mdash; otherwise you'll get unresolved-symbol link errors against folly.
+- On FreeBSD the system rocksdb is used unconditionally (the bundled sources don't currently build on FreeBSD). `ROCKSDB_COMPILE=1` is rejected up front with a clear error on FreeBSD targets to avoid a long, doomed C++ compile.
+
+Same set of variables exists for snappy (`SNAPPY_LIB_DIR`, `SNAPPY_STATIC`, `SNAPPY_COMPILE`) if you'd like to swap in a system libsnappy while keeping the bundled rocksdb.
+
+#### Examples
+
+```bash
+# Use distro-installed librocksdb via pkg-config (Debian/Ubuntu: librocksdb-dev)
+ROCKSDB_USE_PKG_CONFIG=1 cargo build
+
+# Manual path; static link
+ROCKSDB_LIB_DIR=/opt/rocksdb/lib \
+ROCKSDB_INCLUDE_DIR=/opt/rocksdb/include \
+ROCKSDB_STATIC=1 \
+  cargo build
+```
+
+#### Downstream `-sys` Integration
+
+Crates that depend on `rust-librocksdb-sys` and want access to its outputs can read these via the `links = "rocksdb"` metadata channel:
+
+| Build env var                     | Source                                                                                                                |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `DEP_ROCKSDB_INCLUDE`             | Path to the RocksDB headers in use. Always a single path; downstream crates needing the full pkg-config set should probe pkg-config themselves. |
+| `DEP_ROCKSDB_ROOT`                | `OUT_DIR` of `rust-librocksdb-sys`.                                                                                   |
+| `DEP_ROCKSDB_LINK_TARGET`         | Name of the linked library (always `rocksdb`). Project-local convenience; equivalently readable from `CARGO_MANIFEST_LINKS`. |
+| `DEP_ROCKSDB_FOLLY_GLOG_LIBDIR`   | glog lib dir (only with `coroutines` feature).                                                                        |
+| `DEP_ROCKSDB_FOLLY_GFLAGS_LIBDIR` | gflags lib dir (only with `coroutines` feature).                                                                      |
+| `DEP_ROCKSDB_CARGO_MANIFEST_DIR`  | *Legacy*. Manifest dir of `rust-librocksdb-sys`. Kept for backwards compatibility; prefer `DEP_ROCKSDB_INCLUDE` for header discovery. |
+| `DEP_ROCKSDB_OUT_DIR`             | *Legacy*. Alias for `DEP_ROCKSDB_ROOT`. Kept for backwards compatibility.                                             |
+
 ## 🤝 Contributing
 
 Feedback and pull requests welcome! Open an issue for feature requests or submit PRs. This fork maintains regular updates with latest RocksDB releases and Rust versions.

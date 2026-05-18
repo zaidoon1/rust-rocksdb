@@ -36,6 +36,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v5
+        with:
+          submodules: recursive
 
       - name: Install rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -51,6 +53,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v5
+        with:
+          submodules: recursive
 
       - name: Install rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -64,6 +68,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v5
+        with:
+          submodules: recursive
 
       - name: Install rust
         uses: actions-rust-lang/setup-rust-toolchain@v1

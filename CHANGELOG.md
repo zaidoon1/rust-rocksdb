@@ -1,5 +1,59 @@
 # Changelog
 
+## Unreleased
+
+- feat: add transactiondb checkpoint support (gdorsi)
+- feat: add opt-in `coroutines` feature for multi-level async `MultiGet`,
+  wrapping RocksDB's `USE_COROUTINES=1` / `USE_FOLLY=1` build path with a
+  `scripts/build_folly.sh` helper. Linux-only, requires liburing >= 2.7
+  and the `ROCKSDB_FOLLY_INSTALL_PATH` env var pointing at a folly
+  install. See README "Async MultiGet with C++20 Coroutines" for full
+  prerequisites and runtime constraints. (zaidoon1)
+- feat: add opt-in linking against a system-installed RocksDB. Set
+  `ROCKSDB_USE_PKG_CONFIG=1` to discover rocksdb via pkg-config, or
+  `ROCKSDB_LIB_DIR=<path>` to point at a prebuilt library directly.
+  Default behavior (vendored build) is unchanged. Closes #310. (zaidoon1)
+- refactor: rewrite `librocksdb-sys/build.rs` into typed `Target` and
+  `Backend` abstractions split across `mod vendor / system / snappy /
+  bindings / coroutines`, fixing several correctness bugs along the way.
+  (zaidoon1)
+- fix: bindgen now runs against the chosen backend's headers (vendored
+  vs system) instead of always the bundled headers. Eliminates a silent
+  ABI-mismatch hazard when linking system rocksdb. (zaidoon1)
+- fix: Windows runtime libs (`rpcrt4`, `shlwapi`) are now linked in both
+  vendored and system-link paths. Previously, linking a system rocksdb on
+  Windows produced unresolved-symbol errors. (zaidoon1)
+- fix: target-OS detection now reads `CARGO_CFG_TARGET_*` instead of host
+  `#[cfg(target_os=...)]`, eliminating a class of cross-compile bugs.
+  (zaidoon1)
+- fix: FreeBSD branch now honors `ROCKSDB_STATIC` and
+  `ROCKSDB_INCLUDE_DIR`; `ROCKSDB_COMPILE=1` on FreeBSD is rejected up
+  front with a clear error (the bundled sources don't build on FreeBSD).
+  (zaidoon1)
+- behavior change: on Android targets, the C++ stdlib link is now
+  `libc++` (NDK r18+, 2018) instead of `libstdc++`. Previous behavior
+  produced unresolved-symbol errors on modern NDK toolchains. (zaidoon1)
+- feat: added `cargo::metadata=include=` and `cargo::metadata=root=`
+  emissions; downstream `-sys` crates can read these as
+  `DEP_ROCKSDB_INCLUDE` and `DEP_ROCKSDB_ROOT`. Legacy
+  `cargo_manifest_dir`/`out_dir` keys preserved. (zaidoon1)
+- fix: iOS deployment target pinned via `-mios-version-min=12.0`
+  compiler flag instead of mutating process env, removing one of two
+  `unsafe { env::set_var }` blocks. Flag only emitted for actual iOS
+  targets (not tvos/watchos). (zaidoon1)
+- fix: comprehensive `cargo::rerun-if-env-changed=` coverage including
+  `CXXSTDLIB`, `CC`, `CXX`, `CFLAGS`, `CXXFLAGS`, `ROCKSDB_INCLUDE_DIR`,
+  `ROCKSDB_CXX_STD`, `CARGO_ENCODED_RUSTFLAGS`,
+  `BINDGEN_EXTRA_CLANG_ARGS`, `DEP_<LZ4/ZSTD/Z/BZIP2>_INCLUDE`,
+  `DEP_JEMALLOC_ROOT`, `PKG_CONFIG_*`. (zaidoon1)
+- fix: define `HAVE_FULLFSYNC` on Apple targets (macOS, iOS, tvOS,
+  watchOS) so RocksDB takes the `fcntl(F_FULLFSYNC)` path for true on-
+  disk durability rather than the weaker plain `fsync` (which on macOS
+  only flushes to the drive cache). Matches RocksDB's CMakeLists.txt.
+  (zaidoon1)
+- fix: emit `-DWIN32` (not `-DDWIN32`) on Windows targets so the define
+  matches what RocksDB's CMakeLists.txt sets. (zaidoon1)
+
 ## 0.48.0 (2026-05-04)
 
 - upgrade RocksDB to 11.1.1 (zaidoon1)

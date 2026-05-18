@@ -34,7 +34,7 @@ static = ["libz-sys?/static", "bzip2-sys?/static"]
 bindgen-runtime = ["bindgen/runtime"]
 bindgen-static = ["bindgen/static"]
 mt_static = []
-io-uring = ["pkg-config"]
+io-uring = []
 # Build RocksDB with `USE_COROUTINES=1 USE_FOLLY=1` and link against a folly
 # install. Enables the multi-level parallel `MultiGet` async-IO path described
 # in the RocksDB blog post "Asynchronous IO in RocksDB". Linux only. Requires
@@ -74,5 +74,4 @@ uuid = { version = "1", features = ["v4"] }
 cc = { version = "1.2", features = ["parallel"] }
 bindgen = { version = "0.72", default-features = false }
 glob = "0.3"
-pkg-config = { version = "0.3", optional = true }
-libc = "0.2"
+pkg-config = "0.3"

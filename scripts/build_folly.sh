@@ -62,6 +62,66 @@ FOLLY_DIR="$ROCKSDB_DIR/third-party/folly"
 mkdir -p "$ROCKSDB_DIR/third-party"
 mkdir -p "$SCRATCH_DIR"
 
+# The pinned folly commit needs liburing >= 2.7 - it references the
+# `io_uring_zcrx_*` zero-copy receive API in
+# `folly/io/async/IoUringZeroCopyBufferPool.cpp`, plus `IOU_PBUF_RING_INC` and
+# `io_uring_buf_ring_head` from liburing 2.6 in `IoUringProvidedBufferRing.cpp`.
+# folly's getdeps does not fetch liburing as a managed dep, so we must ensure
+# a sufficiently new version is on the system include/lib paths before
+# invoking it.
+#
+# Ubuntu 25.10+ and Debian trixie+ already package liburing >= 2.11 via apt.
+# Older distros (notably Ubuntu 24.04 LTS, which ships 2.5) need a manual
+# build. The check below is a no-op on hosts that are already up to date.
+need_liburing_build=yes
+if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists liburing; then
+    sys_version="$(pkg-config --modversion liburing)"
+    sys_major="${sys_version%%.*}"
+    sys_rest="${sys_version#*.}"
+    sys_minor="${sys_rest%%.*}"
+    if [ "${sys_major:-0}" -gt 2 ] \
+       || { [ "${sys_major:-0}" -eq 2 ] && [ "${sys_minor:-0}" -ge 7 ]; }; then
+        echo ">>> System liburing $sys_version is sufficient (need >= 2.7); skipping source build."
+        need_liburing_build=no
+    else
+        echo ">>> System liburing $sys_version is too old (need >= 2.7)."
+    fi
+else
+    echo ">>> liburing not found via pkg-config."
+fi
+
+if [ "$need_liburing_build" = "yes" ]; then
+    if ! command -v make >/dev/null 2>&1 || ! command -v cc >/dev/null 2>&1; then
+        echo "Error: liburing source build requires 'make' and a C compiler." >&2
+        echo "Either install them, or upgrade your system liburing to 2.7+" >&2
+        echo "(Ubuntu 25.10+, Debian trixie+, etc)." >&2
+        exit 1
+    fi
+    liburing_version="2.9"
+    liburing_prefix="$SCRATCH_DIR/liburing-$liburing_version"
+    if [ ! -f "$liburing_prefix/lib/pkgconfig/liburing.pc" ]; then
+        echo ">>> Building liburing $liburing_version from source..."
+        liburing_src="$SCRATCH_DIR/liburing-src-$liburing_version"
+        if [ ! -d "$liburing_src" ]; then
+            git clone --quiet --depth 1 \
+                --branch "liburing-$liburing_version" \
+                https://github.com/axboe/liburing.git "$liburing_src"
+        fi
+        (
+            cd "$liburing_src"
+            ./configure --prefix="$liburing_prefix" >/dev/null
+            make -j"$(nproc 2>/dev/null || echo 2)" >/dev/null
+            make install >/dev/null
+        )
+    fi
+    # Expose the freshly-built liburing to folly's CMake and to any subsequent
+    # build (rust-rocksdb's `io-uring` feature uses pkg-config too).
+    export PKG_CONFIG_PATH="$liburing_prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+    export CPATH="$liburing_prefix/include:${CPATH:-}"
+    export LIBRARY_PATH="$liburing_prefix/lib:${LIBRARY_PATH:-}"
+    export LD_LIBRARY_PATH="$liburing_prefix/lib:${LD_LIBRARY_PATH:-}"
+fi
+
 echo ">>> Cloning folly @ $FOLLY_COMMIT_HASH..."
 if [ -d "$FOLLY_DIR/.git" ]; then
     (cd "$FOLLY_DIR" && git fetch --quiet origin)

@@ -765,14 +765,29 @@ fn coroutines_install_root() -> PathBuf {
     PathBuf::from(raw)
 }
 
-/// Resolves a versioned folly-deps subdirectory (e.g. `boost-1.83.0_xyz`)
-/// by globbing under the install root. Panics if zero or more than one
-/// directory matches - multiple matches typically indicate a stale install
-/// from a prior `FOLLY_COMMIT_HASH` mixed with the current one, which would
-/// otherwise be resolved non-deterministically and could link the wrong
-/// version.
+/// Resolves a dependency directory under folly's `installed/` tree.
+///
+/// getdeps uses two naming conventions:
+///
+/// 1. The project being built (folly itself, in our case) installs to
+///    `<install_root>/<name>` with no version/hash suffix.
+/// 2. Its dependencies install to `<install_root>/<name>-<hash>` where the
+///    hash captures the manifest+ctx so changes to either reset the install.
+///
+/// We check (1) first - so `resolve_folly_dep(root, "folly")` returns
+/// `<root>/folly` directly when present - and fall back to globbing (2).
+/// Panics if zero or more than one directory matches in case (2): multiple
+/// matches typically indicate a stale install from a prior FOLLY_COMMIT_HASH
+/// mixed with the current one, which would otherwise be resolved
+/// non-deterministically and could link the wrong version.
 #[cfg(feature = "coroutines")]
 fn resolve_folly_dep(install_root: &Path, name: &str) -> PathBuf {
+    // Case 1: unsuffixed directory (used for the project being built).
+    let bare = install_root.join(name);
+    if bare.is_dir() {
+        return bare;
+    }
+    // Case 2: glob for the hashed dependency directory.
     let pattern = install_root.join(format!("{name}-*"));
     let pattern_str = pattern
         .to_str()
@@ -783,7 +798,7 @@ fn resolve_folly_dep(install_root: &Path, name: &str) -> PathBuf {
         .collect();
     match matches.as_slice() {
         [] => panic!(
-            "could not find `{name}-*` under {}; \
+            "could not find `{name}` or `{name}-*` under {}; \
              did `scripts/build_folly.sh` finish successfully?",
             install_root.display()
         ),

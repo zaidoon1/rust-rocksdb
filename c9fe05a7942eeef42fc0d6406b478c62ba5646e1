@@ -1,0 +1,25 @@
+scripts/build_folly.sh
+  fdc8426e8e63306a 46,49-50
+.github/workflows/coroutines.yml
+  fdc8426e8e63306a 57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "c9fe05a7942eeef42fc0d6406b478c62ba5646e1",
+  "prompts": {
+    "fdc8426e8e63306a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_1c72c65a7ffeqDp5QfGl0Qg4uV",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "zaidoon",
+      "messages": [],
+      "total_additions": 4,
+      "total_deletions": 1,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    }
+  }
+}

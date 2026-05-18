@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.49.0 (2026-05-18)
 
 - feat: add transactiondb checkpoint support (gdorsi)
 - feat: add opt-in `coroutines` feature for multi-level async `MultiGet`,
@@ -13,6 +13,18 @@
   `ROCKSDB_USE_PKG_CONFIG=1` to discover rocksdb via pkg-config, or
   `ROCKSDB_LIB_DIR=<path>` to point at a prebuilt library directly.
   Default behavior (vendored build) is unchanged. Closes #310. (zaidoon1)
+- feat: add opt-in `numa` cargo feature (Linux only). When enabled,
+  rocksdb's `Options::use_numa_aware_alloc()` pins memtable arena
+  allocations to the calling thread's NUMA node via `numa_alloc_onnode()`.
+  Useful on multi-socket bare-metal hosts. Requires `libnuma-dev` /
+  `numactl-devel` / equivalent. (zaidoon1)
+- fix: define `ROCKSDB_BACKTRACE` on Linux glibc and Apple targets
+  (macOS, iOS) so rocksdb's `port/stack_trace.cc` produces C++ frames in
+  crash output instead of compiling a no-op stub. Matches RocksDB's own
+  Makefile build path. (zaidoon1)
+- fix: define `ROCKSDB_PTHREAD_ADAPTIVE_MUTEX` on Linux glibc, enabling
+  brief adaptive spinning on contended mutexes before falling back to a
+  futex wait. (zaidoon1)
 - refactor: rewrite `librocksdb-sys/build.rs` into typed `Target` and
   `Backend` abstractions split across `mod vendor / system / snappy /
   bindings / coroutines`, fixing several correctness bugs along the way.
@@ -53,6 +65,10 @@
   (zaidoon1)
 - fix: emit `-DWIN32` (not `-DDWIN32`) on Windows targets so the define
   matches what RocksDB's CMakeLists.txt sets. (zaidoon1)
+- ci: run the coroutines workflow on both x86_64 and aarch64 Linux
+  (ubuntu-24.04 / ubuntu-24.04-arm hosts, ubuntu:25.10 container) so
+  arch-specific breakage in folly's build or our link config is caught
+  before release. (zaidoon1)
 
 ## 0.48.0 (2026-05-04)
 

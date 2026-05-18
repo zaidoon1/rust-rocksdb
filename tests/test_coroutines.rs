@@ -49,17 +49,22 @@ fn level_layout(db: &DB, max_levels: usize) -> (usize, Vec<u64>) {
     (non_empty, counts)
 }
 
+/// Verifies that `built_with_coroutines()` agrees with the crate's `coroutines`
+/// cargo feature.
+///
+/// This is intentionally tautological at the source level - the function is
+/// implemented as `cfg!(feature = "coroutines")` - but it's not pointless. If
+/// the function is ever refactored to read its answer from a runtime symbol
+/// (for example, after the upstream PR adding `rocksdb_compiled_with_coroutines`
+/// is merged and we bump the submodule), this test would catch a wiring bug
+/// where the runtime value disagrees with the build feature.
 #[test]
-fn built_with_coroutines_helper_is_callable() {
-    // We can't meaningfully assert equality with `cfg!(feature = ...)` here
-    // because `built_with_coroutines()` is implemented as exactly that - the
-    // assertion would be tautological. Just verify it's callable and stable
-    // within a single process. The real value of `built_with_coroutines()`
-    // is documentation: it gives callers a single source of truth they can
-    // log or surface in diagnostics.
-    let a = rust_rocksdb::built_with_coroutines();
-    let b = rust_rocksdb::built_with_coroutines();
-    assert_eq!(a, b);
+fn built_with_coroutines_matches_feature_flag() {
+    assert_eq!(
+        rust_rocksdb::built_with_coroutines(),
+        cfg!(feature = "coroutines"),
+        "built_with_coroutines() must match the cargo feature flag"
+    );
 }
 
 /// Verifies that `multi_get` with `async_io=true` returns correct results
@@ -93,6 +98,18 @@ fn multi_get_async_io_matches_serial_get_across_levels() {
         // in at least L0 and one deeper level.
         let value = vec![b'v'; 200];
 
+        // 30-second timeout for each compaction wait. With
+        // disable_auto_compactions=true and a high L0 trigger, no background
+        // work runs concurrently, but we still call wait_for_compact after
+        // each manual compaction as defense-in-depth so the level layout is
+        // settled before we measure it.
+        let make_wait_opts = || {
+            let mut o = WaitForCompactOptions::default();
+            o.set_flush(true);
+            o.set_timeout(30 * 1_000_000); // 30s in microseconds
+            o
+        };
+
         let put_batch = |start: u32, end: u32| {
             for i in start..end {
                 let key = format!("key-{i:08}");
@@ -107,6 +124,7 @@ fn multi_get_async_io_matches_serial_get_across_levels() {
         co.set_change_level(true);
         co.set_target_level(2);
         db.compact_range_opt::<&[u8], &[u8]>(None, None, &co);
+        db.wait_for_compact(&make_wait_opts()).unwrap();
 
         // Batch 2 -> L0 -> compact to L1.
         put_batch(200, 400);
@@ -114,15 +132,11 @@ fn multi_get_async_io_matches_serial_get_across_levels() {
         co.set_change_level(true);
         co.set_target_level(1);
         db.compact_range_opt::<&[u8], &[u8]>(None, None, &co);
+        db.wait_for_compact(&make_wait_opts()).unwrap();
 
         // Batch 3 -> stays in L0 (no further compaction).
         put_batch(400, 600);
-
-        // Wait for any in-flight background work (none expected, but cheap).
-        let mut wait_opts = WaitForCompactOptions::default();
-        wait_opts.set_flush(true);
-        wait_opts.set_timeout(30 * 1_000_000); // 30s
-        db.wait_for_compact(&wait_opts).unwrap();
+        db.wait_for_compact(&make_wait_opts()).unwrap();
 
         let (non_empty, counts) = level_layout(&db, 5);
         assert!(

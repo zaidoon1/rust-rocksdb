@@ -165,9 +165,8 @@ use rust_librocksdb_sys as ffi;
 ///
 /// When `true`, calling [`ReadOptions::set_async_io(true)`][async-io] on a
 /// `MultiGet` activates the multi-level parallel-read path described in the
-/// RocksDB [Asynchronous IO blog post]. When `false`, `async_io=true` still
-/// works for scans and parallelizes reads within a single LSM level for
-/// `MultiGet`, but cannot parallelize across levels.
+/// RocksDB [Asynchronous IO blog post]. When `false`, `MultiGet` with
+/// `async_io=true` can only parallelize reads within a single LSM level.
 ///
 /// Note: this reflects how this crate was configured, not what is in the
 /// linked `librocksdb`. If you used `ROCKSDB_LIB_DIR` to link against an

@@ -292,9 +292,9 @@ Trades ~6-15% extra CPU for ~30% lower MultiGet latency on IO-bound workloads. T
     ```bash
     export LD_LIBRARY_PATH="$ROCKSDB_FOLLY_INSTALL_PATH/glog-<hash>/lib64:$ROCKSDB_FOLLY_INSTALL_PATH/gflags-<hash>/lib:${LD_LIBRARY_PATH:-}"
     ```
-  - **Embed `rpath` in your own binary's `build.rs`.** This crate exports the discovered glog and gflags lib directories as `cargo:folly_glog_libdir` and `cargo:folly_gflags_libdir`, available in your build script as `DEP_ROCKSDB_FOLLY_GLOG_LIBDIR` and `DEP_ROCKSDB_FOLLY_GFLAGS_LIBDIR`:
+  - **Embed `rpath` in your final binary crate's `build.rs`.** Note: this must live in the crate that produces the binary you're shipping (a `[[bin]]` target), NOT in an intermediate library crate — `cargo:rustc-link-arg` does not propagate through transitive library dependencies, so adding this to a library crate would have the same problem as embedding rpath here in rust-rocksdb. This crate exports the discovered glog and gflags lib directories as `cargo:folly_glog_libdir` and `cargo:folly_gflags_libdir`, available in your build script as `DEP_ROCKSDB_FOLLY_GLOG_LIBDIR` and `DEP_ROCKSDB_FOLLY_GFLAGS_LIBDIR`:
     ```rust
-    // your-app/build.rs
+    // your-binary-crate/build.rs
     fn main() {
         if let Ok(d) = std::env::var("DEP_ROCKSDB_FOLLY_GLOG_LIBDIR") {
             println!("cargo:rustc-link-arg=-Wl,-rpath,{d}");

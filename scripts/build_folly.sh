@@ -2,23 +2,28 @@
 # Build folly + all its transitive dependencies for the `coroutines` cargo
 # feature.
 #
-# This wraps RocksDB's own `make build_folly` target, which invokes folly's
-# getdeps.py to build folly and its dependency chain (boost, fmt, glog,
-# gflags, double-conversion, libevent, libsodium, xz) at the exact commit
-# pinned by `librocksdb-sys/rocksdb/folly.mk:FOLLY_COMMIT_HASH`.
+# We do NOT use RocksDB's `make build_folly` target, because that runs
+# `getdeps.py` without `--scratch-path`. With no `--scratch-path`, getdeps
+# falls back to a `/tmp/fbcode_builder_getdeps-<munged-cwd>` directory
+# (see folly's `build/fbcode_builder/getdeps/buildopts.py:setup_build_options`),
+# which is unstable across machines and impossible to cache cleanly in CI.
+# Instead, we replicate the few things `make build_folly` does (clone + pin
+# folly, apply two upstream patches, run getdeps, patchelf libglog) and pass
+# `--scratch-path` so the install lands at a predictable location.
 #
-# The build is slow (15-30 minutes on a clean machine, longer on CI). It
-# downloads several hundred MB of source archives. Results live under
-# `librocksdb-sys/rocksdb/third-party/folly/build/fbcode_builder/installed/`
-# and are reusable across rust-rocksdb builds.
+# Usage:
+#   ./scripts/build_folly.sh                       # builds to default scratch dir
+#   ROCKSDB_FOLLY_SCRATCH_DIR=/path scripts/...    # explicit scratch dir
 #
-# On success, prints the path to set `ROCKSDB_FOLLY_INSTALL_PATH` to, then
-# subsequent `cargo build --features coroutines` will find folly.
+# The build is slow (~15-30 minutes on a clean machine, longer on CI). It
+# downloads several hundred MB of source archives. On a warm cache the script
+# is a near no-op.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ROCKSDB_DIR="$REPO_ROOT/librocksdb-sys/rocksdb"
+SCRATCH_DIR="${ROCKSDB_FOLLY_SCRATCH_DIR:-$REPO_ROOT/librocksdb-sys/folly-build}"
 
 if [ ! -f "$ROCKSDB_DIR/folly.mk" ]; then
     echo "Error: $ROCKSDB_DIR does not look like a RocksDB checkout." >&2
@@ -38,29 +43,77 @@ case "$(uname -s)" in
         ;;
 esac
 
-cd "$ROCKSDB_DIR"
+for tool in git python3 patchelf perl; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        echo "Error: required tool '$tool' is not on PATH." >&2
+        exit 1
+    fi
+done
 
-echo ">>> Cloning and pinning folly..."
-make checkout_folly
+# Extract the pinned folly commit from RocksDB's folly.mk
+FOLLY_COMMIT_HASH="$(grep -E '^FOLLY_COMMIT_HASH = ' "$ROCKSDB_DIR/folly.mk" \
+                       | sed -E 's/^FOLLY_COMMIT_HASH = //')"
+if [ -z "$FOLLY_COMMIT_HASH" ]; then
+    echo "Error: could not parse FOLLY_COMMIT_HASH from folly.mk." >&2
+    exit 1
+fi
 
-echo ">>> Building folly + dependencies (this may take 15-30 minutes)..."
-make build_folly
+FOLLY_DIR="$ROCKSDB_DIR/third-party/folly"
+mkdir -p "$ROCKSDB_DIR/third-party"
+mkdir -p "$SCRATCH_DIR"
 
-# getdeps.py's `show-inst-dir` prints folly's own install dir, e.g.
-# `.../installed/folly-<hash>`. Its sibling directories (boost-*, fmt-*, etc)
-# hold the rest of folly's deps. The install root is one level up.
-FOLLY_INST_PATH="$(cd third-party/folly \
-                    && python3 build/fbcode_builder/getdeps.py show-inst-dir)"
-INSTALL_ROOT="$(dirname "$FOLLY_INST_PATH")"
+echo ">>> Cloning folly @ $FOLLY_COMMIT_HASH..."
+if [ -d "$FOLLY_DIR/.git" ]; then
+    (cd "$FOLLY_DIR" && git fetch --quiet origin)
+else
+    git clone --quiet https://github.com/facebook/folly.git "$FOLLY_DIR"
+fi
+(cd "$FOLLY_DIR" && git reset --hard --quiet "$FOLLY_COMMIT_HASH")
+
+echo ">>> Applying upstream patches..."
+# These match the two `perl -pi -e` invocations in RocksDB's folly.mk
+# `checkout_folly` target; the upstream folly commit needs them to compile
+# cleanly against a modern toolchain. They are idempotent across re-runs.
+perl -pi -e 's/(#include <atomic>)/$1\n#include <cstring>/ unless /#include <cstring>/' \
+    "$FOLLY_DIR/folly/lang/Exception.h"
+perl -pi -e 's/: environ/: (const char**)(environ)/ unless /\(const char\*\*\)\(environ\)/' \
+    "$FOLLY_DIR/folly/Subprocess.cpp"
+
+echo ">>> Building folly + dependencies into $SCRATCH_DIR..."
+echo "    (allow 15-30 minutes on a cold cache)"
+cd "$FOLLY_DIR"
+GETDEPS_USE_WGET=1 \
+CXXFLAGS=" -DHAVE_CXX11_ATOMIC " \
+python3 build/fbcode_builder/getdeps.py \
+    --scratch-path "$SCRATCH_DIR" \
+    build --no-tests
+
+# RocksDB's folly.mk patchelfs libglog.so to embed an rpath pointing at
+# gflags, because folly's getdeps build links libglog -> libgflags but
+# doesn't bake the lookup path in. Without this, ld.so cannot resolve
+# libgflags when loading libglog at runtime, even if the user's binary has
+# an rpath to libglog.
+INSTALLED_DIR="$SCRATCH_DIR/installed"
+GFLAGS_DIR="$(ls -d "$INSTALLED_DIR/gflags-"* 2>/dev/null | head -1)"
+GLOG_DIR="$(ls -d "$INSTALLED_DIR/glog-"* 2>/dev/null | head -1)"
+if [ -n "$GLOG_DIR" ] && [ -n "$GFLAGS_DIR" ]; then
+    GLOG_SO="$(ls "$GLOG_DIR"/lib*/libglog.so.*.*.* 2>/dev/null | head -1 || true)"
+    if [ -n "$GLOG_SO" ]; then
+        echo ">>> Patching $GLOG_SO to find libgflags via rpath..."
+        patchelf --add-rpath "$GFLAGS_DIR/lib" "$GLOG_SO"
+    else
+        echo "Warning: could not locate libglog shared object to patchelf." >&2
+    fi
+fi
 
 cat <<EOF
 
 ==============================================================
 Folly and its dependencies are installed under:
-    $INSTALL_ROOT
+    $INSTALLED_DIR
 
 To build rust-rocksdb with the coroutines feature:
-    export ROCKSDB_FOLLY_INSTALL_PATH="$INSTALL_ROOT"
+    export ROCKSDB_FOLLY_INSTALL_PATH="$INSTALLED_DIR"
     cargo build --release --features coroutines,io-uring
 ==============================================================
 EOF

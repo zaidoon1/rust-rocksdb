@@ -15,7 +15,15 @@ env:
 jobs:
   build-and-test:
     name: Build & test with coroutines feature
-    runs-on: ubuntu-latest
+    # Pin to a specific Ubuntu image, NOT `ubuntu-latest`. Folly is built
+    # against the host's glibc, libstdc++ and apt-installed system packages
+    # (libdouble-conversion-dev, libssl-dev, etc.). If `ubuntu-latest` rolls
+    # forward (e.g. 24.04 -> 26.04) while the folly cache still hits, the
+    # cached binaries would link/run against a different ABI than the user's
+    # `cargo build` step expects, with confusing symptoms. The cache key
+    # below also encodes the image name so an explicit image bump invalidates
+    # the cache.
+    runs-on: ubuntu-24.04
     # Folly's getdeps build can take 30-60+ minutes on a cold cache on
     # standard GHA runners (small core count, no parallelism flags). 90
     # minutes is a comfortable upper bound. With a warm cache the whole
@@ -31,7 +39,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            cmake ninja-build python3 python3-pip pkg-config \
+            cmake ninja-build python3 python3-pip pkg-config patchelf \
             libdouble-conversion-dev libssl-dev liburing-dev \
             zlib1g-dev libbz2-dev autoconf automake libtool
 
@@ -41,9 +49,13 @@ jobs:
           cache-key: "v1-rust-coroutines"
           save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      # Folly takes 15-30 minutes to build from scratch. Cache it keyed on
-      # the exact FOLLY_COMMIT_HASH pinned by RocksDB's folly.mk so any
-      # upstream submodule bump invalidates the cache.
+      # The folly build's correctness depends on three independent inputs:
+      #   1. The folly commit (pinned by RocksDB's folly.mk:FOLLY_COMMIT_HASH).
+      #   2. The exact host OS image (glibc + libstdc++ + apt package versions).
+      #   3. The CPU arch (x86_64 vs aarch64).
+      # All three are encoded in the cache key. The `-v2` suffix lets us bump
+      # the cache manually if the build script changes in a way that
+      # invalidates prior caches.
       - name: Determine folly commit hash
         id: folly-hash
         run: |
@@ -56,8 +68,17 @@ jobs:
         id: cache-folly
         uses: actions/cache@v4
         with:
-          path: librocksdb-sys/rocksdb/third-party/folly
-          key: folly-${{ runner.os }}-${{ steps.folly-hash.outputs.hash }}-v1
+          # `build_folly.sh` uses --scratch-path so install artifacts live
+          # inside the workspace at a predictable location. Cache both that
+          # and the folly source checkout so a warm hit avoids both the
+          # clone and the build. Files written by the build:
+          #   librocksdb-sys/folly-build/installed/{folly,boost,...}-*/
+          #   librocksdb-sys/folly-build/{downloads,build,extracted,shipit}/
+          #   librocksdb-sys/rocksdb/third-party/folly/   (source + patches)
+          path: |
+            librocksdb-sys/folly-build
+            librocksdb-sys/rocksdb/third-party/folly
+          key: folly-${{ runner.os }}-${{ runner.arch }}-ubuntu-24.04-${{ steps.folly-hash.outputs.hash }}-v2
 
       - name: Build folly
         if: steps.cache-folly.outputs.cache-hit != 'true'
@@ -65,10 +86,14 @@ jobs:
 
       - name: Export ROCKSDB_FOLLY_INSTALL_PATH
         run: |
-          INST_PATH=$(cd librocksdb-sys/rocksdb/third-party/folly \
-                      && python3 build/fbcode_builder/getdeps.py show-inst-dir)
-          ROOT=$(dirname "$INST_PATH")
-          echo "ROCKSDB_FOLLY_INSTALL_PATH=$ROOT" >> "$GITHUB_ENV"
+          INSTALL_ROOT="$PWD/librocksdb-sys/folly-build/installed"
+          if [ ! -d "$INSTALL_ROOT" ]; then
+            echo "Error: $INSTALL_ROOT does not exist after cache restore." >&2
+            echo "Cache may have been corrupted or build_folly.sh failed." >&2
+            ls -la librocksdb-sys/folly-build/ || true
+            exit 1
+          fi
+          echo "ROCKSDB_FOLLY_INSTALL_PATH=$INSTALL_ROOT" >> "$GITHUB_ENV"
 
       - uses: taiki-e/install-action@nextest
 

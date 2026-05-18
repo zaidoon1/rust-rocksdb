@@ -568,6 +568,12 @@ fn main() {
     // outside `build_rocksdb()` so it also applies when ROCKSDB_LIB_DIR
     // points at an externally-built librocksdb that was compiled with
     // USE_COROUTINES.
+    //
+    // Note: the freebsd branch above returns early, but
+    // `validate_coroutines_target()` (called before this block) already
+    // panics on non-Linux targets, so the early return is unreachable when
+    // the `coroutines` feature is enabled. If we ever relax the target
+    // validation, this branch will need to handle freebsd explicitly.
     #[cfg(feature = "coroutines")]
     coroutines_link_config();
 
@@ -605,17 +611,22 @@ fn validate_coroutines_target(target: &str) {
 /// flags, and include paths for folly + its dependencies. Mirrors the logic
 /// in RocksDB's own `CMakeLists.txt` (lines 607-667) and `Makefile`
 /// (`USE_COROUTINES=1` branch around line 147).
+///
+/// Assumes `validate_coroutines_target()` has already been called by `main()`
+/// and the target is Linux.
 #[cfg(feature = "coroutines")]
-fn coroutines_compile_config(config: &mut cc::Build, target: &str) {
-    validate_coroutines_target(target);
-
+fn coroutines_compile_config(config: &mut cc::Build, _target: &str) {
     config.define("USE_COROUTINES", None);
     config.define("USE_FOLLY", None);
     config.define("FOLLY_NO_CONFIG", None);
     config.define("HAVE_CXX11_ATOMIC", None);
 
     // GCC needs explicit -fcoroutines to enable coroutine support; clang
-    // enables coroutines under -std=c++20 by default.
+    // enables coroutines under -std=c++20 by default. We use `flag()` not
+    // `flag_if_supported()` here: on a too-old GCC we want the build to
+    // fail loudly with "unrecognized option -fcoroutines" rather than
+    // silently drop the flag and produce a confusing C++ compile error
+    // deep inside folly headers that depend on coroutine support.
     if !config.get_compiler().is_like_clang() {
         config.flag("-fcoroutines");
     }
@@ -668,7 +679,13 @@ fn coroutines_link_config() {
     );
     println!("cargo:rustc-link-lib=static=folly");
 
-    // Boost components folly uses.
+    // Boost components. This list mirrors the static archives that RocksDB's
+    // own `folly.mk` links against (PLATFORM_LDFLAGS, ~line 50). The set is
+    // larger than what folly *strictly* needs because RocksDB's dependency
+    // chain reaches into more boost components than folly alone. If
+    // FOLLY_COMMIT_HASH is bumped and a component is no longer produced by
+    // the build, the link step will fail with "cannot find -lboost_<x>";
+    // that's the signal to trim this list.
     println!(
         "cargo:rustc-link-search=native={}",
         boost.join("lib").display()
@@ -712,8 +729,8 @@ fn coroutines_link_config() {
     // covers our own test binaries would be misleading. Downstream users must
     // handle runtime discovery of libglog/libgflags themselves - see the
     // "Async MultiGet with C++20 Coroutines" section in the top-level README.
-    let glog_libdir = lib_or_lib64(&glog);
-    let gflags_libdir = lib_or_lib64(&gflags);
+    let glog_libdir = libdir_containing(&glog, "glog");
+    let gflags_libdir = libdir_containing(&gflags, "gflags");
     println!("cargo:rustc-link-search=native={}", glog_libdir.display());
     println!("cargo:rustc-link-search=native={}", gflags_libdir.display());
     println!("cargo:rustc-link-lib=dylib=glog");
@@ -726,7 +743,7 @@ fn coroutines_link_config() {
     println!("cargo:folly_glog_libdir={}", glog_libdir.display());
     println!("cargo:folly_gflags_libdir={}", gflags_libdir.display());
 
-    let fmt_libdir = lib_or_lib64(&fmt);
+    let fmt_libdir = libdir_containing(&fmt, "fmt");
     println!("cargo:rustc-link-search=native={}", fmt_libdir.display());
     println!("cargo:rustc-link-lib=static=fmt");
 
@@ -786,19 +803,44 @@ fn resolve_folly_dep(install_root: &Path, name: &str) -> PathBuf {
     }
 }
 
-/// folly's getdeps installs some libraries under `lib/` and others under
-/// `lib64/` depending on the OS distribution conventions. As of the
-/// `FOLLY_COMMIT_HASH` pinned by `librocksdb-sys/rocksdb/folly.mk`, glog and
-/// fmt are typically under `lib64/` on RHEL-family distros and under `lib/`
-/// on Debian-family distros; gflags is consistently under `lib/`. Prefer
-/// `lib64/` when present since that's the more specific path; only one of
-/// the two ever contains the library for a given dep.
+/// Returns whichever of `<prefix>/lib` or `<prefix>/lib64` actually contains
+/// the named library (matching `lib<lib_name>.{so,a}*`). Panics with a clear
+/// error if neither does.
+///
+/// Folly's getdeps install layout sometimes creates an empty `lib64/` as a
+/// side effect of CMake's `GNUInstallDirs` probing (or vice-versa), so a
+/// plain `.exists()` check on the directory is not enough - we'd point the
+/// linker at an empty directory and get a confusing "cannot find -l<name>"
+/// later. Probing for the actual library file catches this at config time
+/// with a useful error message.
 #[cfg(feature = "coroutines")]
-fn lib_or_lib64(prefix: &Path) -> PathBuf {
-    let candidate = prefix.join("lib64");
-    if candidate.exists() {
-        candidate
-    } else {
-        prefix.join("lib")
+fn libdir_containing(prefix: &Path, lib_name: &str) -> PathBuf {
+    // Prefer `lib64/` when it has the library (more specific on RHEL-family
+    // distros); fall back to `lib/` (Debian-family).
+    for subdir in ["lib64", "lib"] {
+        let candidate = prefix.join(subdir);
+        if !candidate.is_dir() {
+            continue;
+        }
+        let glob_pattern = candidate.join(format!("lib{lib_name}.*"));
+        let pattern_str = match glob_pattern.to_str() {
+            Some(s) => s,
+            None => continue,
+        };
+        let mut iter = match glob::glob(pattern_str) {
+            Ok(it) => it,
+            Err(_) => continue,
+        };
+        if iter.any(|r| r.is_ok()) {
+            return candidate;
+        }
     }
+    panic!(
+        "could not find `lib{lib_name}.{{so,a}}*` in either `{}/lib/` or `{}/lib64/`. \
+         The folly install at `{}` looks incomplete - rerun `scripts/build_folly.sh` \
+         to rebuild from scratch.",
+        prefix.display(),
+        prefix.display(),
+        prefix.display()
+    );
 }

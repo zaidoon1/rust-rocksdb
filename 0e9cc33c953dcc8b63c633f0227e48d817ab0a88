@@ -1,0 +1,23 @@
+CHANGELOG.md
+  61b0adacab78da27 50-53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "0e9cc33c953dcc8b63c633f0227e48d817ab0a88",
+  "prompts": {
+    "61b0adacab78da27": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_20e79c012ffebLNHZxzN3bh5Mt",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "zaidoon",
+      "messages": [],
+      "total_additions": 5,
+      "total_deletions": 1,
+      "accepted_lines": 5,
+      "overriden_lines": 0
+    }
+  }
+}

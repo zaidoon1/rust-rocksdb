@@ -259,15 +259,17 @@ features = ["coroutines", "io-uring"]
 
 Builds RocksDB with `USE_COROUTINES=1` and links against [folly](https://github.com/facebook/folly). This enables the **multi-level parallel `MultiGet` path** described in the RocksDB [Asynchronous IO blog post](https://rocksdb.org/blog/2022/10/07/asynchronous-io-in-rocksdb.html). When you then call `ReadOptions::set_async_io(true)` on a `MultiGet`, RocksDB will issue parallel `io_uring` reads across SST files in different LSM levels, not just within a single level.
 
-**Performance — read this carefully before adopting.** Meta's [October 2022 benchmark](https://rocksdb.org/blog/2022/10/07/asynchronous-io-in-rocksdb.html#results) was run on their internal **remote/warm-storage flash** (`ws.flash.ftw3preprod1`), where storage round-trip latency is roughly two to three orders of magnitude higher than a local NVMe random read:
+**Performance — read this carefully before adopting.** The RocksDB team's [October 2022 benchmark](https://rocksdb.org/blog/2022/10/07/asynchronous-io-in-rocksdb.html#results) was run on their internal **remote/warm-storage flash** (`ws.flash.ftw3preprod1`), where storage round-trip latency is roughly two to three orders of magnitude higher than a local NVMe random read:
 
-| Configuration (Meta's remote flash) | μs/op |
+| Configuration (remote/warm-storage flash) | μs/op |
 |---|---|
-| `async_io=false` (default) | 1292 |
-| `async_io=true`, single-level parallel reads (works without this feature) | 775 |
-| `async_io=true` + `coroutines` feature, multi-level parallel reads | 508 |
+| `async_io=false` (baseline — no `coroutines` feature needed) | 1292 |
+| `async_io=true` + `coroutines`, `optimize_multiget_for_io=false` (single-level parallel) | 775 |
+| `async_io=true` + `coroutines`, `optimize_multiget_for_io=true` (multi-level parallel, default) | 508 |
 
-The Meta team **has not published** an equivalent benchmark for local NVMe. The mechanism (`async_io` hides per-read latency by overlapping multiple reads in flight) implies the relative gain should be smaller on local NVMe, where per-read latency is already low — but the actual numbers there could be anywhere from "still meaningful" to "noise". **Treat the table above as remote-flash-only and measure on your hardware before deciding.** A reasonable rule of thumb: this feature is most likely to pay off when (a) your storage is network-attached or remote, (b) your `MultiGet` batches commonly span many SST files across multiple LSM levels, or (c) both. Trades ~6–15% extra CPU per the same blog post.
+Both the 775 and 508 numbers require the `coroutines` feature. Without it, even setting `async_io=true` only buys you within-single-SST-file block prefetching (no parallel reads across files); you stay near the 1292 baseline for cross-file workloads.
+
+The RocksDB team **has not published** an equivalent benchmark for local NVMe. The mechanism (`async_io` hides per-read latency by overlapping multiple reads in flight) implies the relative gain should be smaller on local NVMe, where per-read latency is already low — but the actual numbers there could be anywhere from "still meaningful" to "noise". **Treat the table above as remote-flash-only and measure on your hardware before deciding.** A reasonable rule of thumb: this feature is most likely to pay off when (a) your storage is network-attached or remote, (b) your `MultiGet` batches commonly span many SST files across multiple LSM levels, or (c) both. Trades ~6–15% extra CPU per the same blog post.
 
 ##### Prerequisites
 
@@ -327,7 +329,7 @@ This feature is harder to build than the rest of the crate. Read all of the cons
   - **System-install the `.so` files** (copy them into `/usr/local/lib` and run `ldconfig`).
 
 - **Not compatible with `mt_static`.** Folly's build precludes producing a fully static link.
-- **`optimize_multiget_for_io` cannot be set from Rust yet.** It defaults to `true` in `ReadOptions`, which is the right choice for coroutine builds anyway. Once [facebook/rocksdb#14752](https://github.com/facebook/rocksdb/pull/14752) merges and we bump the submodule, a setter will be exposed for users who want to opt out of the multi-level path (e.g. to reduce CPU at the cost of slightly higher MultiGet latency).
+- **`optimize_multiget_for_io` is a tuning knob within the coroutine-enabled space, not an on/off switch for coroutines.** The flag controls whether `MultiGet` parallelizes reads *across* LSM levels (`true`, default) or only *within* a single level (`false`). Both rely on the coroutine machinery this feature compiles in; without the `coroutines` feature, neither path runs and `MultiGet` falls back to the synchronous one-file-at-a-time loop. Per the performance table above, turning it off keeps ~40% of the latency reduction (1292→775 μs/op) at lower CPU cost than the multi-level path (1292→508). The flag currently cannot be set from Rust until [facebook/rocksdb#14752](https://github.com/facebook/rocksdb/pull/14752) merges and we bump the submodule; the C++ default of `true` is the right starting point for most workloads.
 - **The folly install is large and slow to rebuild.** ~2 GB on disk. Cache `librocksdb-sys/folly-build/` between CI runs (see `.github/workflows/coroutines.yml` for an `actions/cache` example with a cache key that pins the OS image, arch, and `FOLLY_COMMIT_HASH`).
 
 ##### Verifying the feature is active

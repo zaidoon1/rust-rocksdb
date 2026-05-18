@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.49.1 (2026-05-18)
+
+- removed: drop the `numa` cargo feature that shipped in 0.49.0. The
+  feature set `-DNUMA` on the C++ build and linked `libnuma`, but the
+  `Options::use_numa_aware_alloc()` runtime knob and the
+  `numa_alloc_onnode()` arena code path were removed from rocksdb's
+  library proper before 11.1.1 — `NUMA` is now only referenced by
+  `tools/db_bench_tool.cc` and `tools/trace_analyzer_tool.cc`, neither
+  of which rust-rocksdb compiles. The feature was therefore a no-op
+  for library users while adding a build-time dependency on
+  `libnuma-dev`. For NUMA-local memtable arenas on multi-socket hosts
+  use OS-level pinning (`numactl --cpunodebind --membind`, systemd
+  `NUMAPolicy=` / `NUMAMask=`) instead. If you had `features = ["numa"]`
+  in your `Cargo.toml`, remove it. (zaidoon1)
+
 ## 0.49.0 (2026-05-18)
 
 - feat: add transactiondb checkpoint support (gdorsi)

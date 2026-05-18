@@ -77,7 +77,7 @@ jobs:
           components: clippy
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y liburing-dev libnuma-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y liburing-dev pkg-config
 
       - name: Set PKG_CONFIG_PATH
         run: echo "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig" >> $GITHUB_ENV
@@ -87,7 +87,6 @@ jobs:
           cargo clippy --all-targets --features \
             "jemalloc \
             io-uring \
-            numa \
             valgrind \
             mt_static \
             rtti \

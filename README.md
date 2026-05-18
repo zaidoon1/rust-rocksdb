@@ -250,7 +250,7 @@ Holds digested dictionaries in block cache for read-heavy workloads. Uses experi
 
 #### Async MultiGet with C++20 Coroutines
 
-> **⚠️ Experimental, Linux only**
+> **⚠️ Experimental, Linux only.** The feature builds and tests in CI but has not been exercised on real production workloads from this crate. Benchmark your specific workload before adopting.
 
 ```toml
 [dependencies.rust-rocksdb]
@@ -259,40 +259,59 @@ features = ["coroutines", "io-uring"]
 
 Builds RocksDB with `USE_COROUTINES=1` and links against [folly](https://github.com/facebook/folly). This enables the **multi-level parallel `MultiGet` path** described in the RocksDB [Asynchronous IO blog post](https://rocksdb.org/blog/2022/10/07/asynchronous-io-in-rocksdb.html). When you then call `ReadOptions::set_async_io(true)` on a `MultiGet`, RocksDB will issue parallel `io_uring` reads across SST files in different LSM levels, not just within a single level.
 
-**Performance**: per Meta's [own benchmark](https://rocksdb.org/blog/2022/10/07/asynchronous-io-in-rocksdb.html#results) on remote flash:
+**Performance — read this carefully before adopting.** Meta's [October 2022 benchmark](https://rocksdb.org/blog/2022/10/07/asynchronous-io-in-rocksdb.html#results) was run on their internal **remote/warm-storage flash** (`ws.flash.ftw3preprod1`), where storage round-trip latency is roughly two to three orders of magnitude higher than a local NVMe random read:
 
-| Configuration | μs/op |
+| Configuration (Meta's remote flash) | μs/op |
 |---|---|
 | `async_io=false` (default) | 1292 |
-| `async_io=true` (this crate today, single-level parallel reads) | 775 |
-| `async_io=true` + `coroutines` feature (multi-level parallel reads) | 508 |
+| `async_io=true`, single-level parallel reads (works without this feature) | 775 |
+| `async_io=true` + `coroutines` feature, multi-level parallel reads | 508 |
 
-Trades ~6-15% extra CPU for ~30% lower MultiGet latency on IO-bound workloads. The gain shrinks on local NVMe; benchmark before adopting in production.
+The Meta team **has not published** an equivalent benchmark for local NVMe. The mechanism (`async_io` hides per-read latency by overlapping multiple reads in flight) implies the relative gain should be smaller on local NVMe, where per-read latency is already low — but the actual numbers there could be anywhere from "still meaningful" to "noise". **Treat the table above as remote-flash-only and measure on your hardware before deciding.** A reasonable rule of thumb: this feature is most likely to pay off when (a) your storage is network-attached or remote, (b) your `MultiGet` batches commonly span many SST files across multiple LSM levels, or (c) both. Trades ~6–15% extra CPU per the same blog post.
 
-**Prerequisites:**
+##### Prerequisites
 
-1. **Linux** (any glibc-based distro). macOS and Windows are not supported.
-2. **GCC ≥ 11 or Clang ≥ 14** with `-std=c++20` support.
-3. **folly + 8 transitive dependencies** built at the exact commit pinned by `librocksdb-sys/rocksdb/folly.mk`. Use the included helper:
+This feature is harder to build than the rest of the crate. Read all of the constraints below before starting.
+
+1. **Linux only.** macOS and Windows are not supported. Folly's build (`getdeps.py`) doesn't reliably work on macOS, and RocksDB's coroutine code path needs `io_uring`.
+2. **liburing ≥ 2.7.** The pinned folly commit references `io_uring_zcrx_*` symbols from liburing 2.7 (`IoUringZeroCopyBufferPool.cpp`) and `IOU_PBUF_RING_INC` / `io_uring_buf_ring_head` from liburing 2.6 (`IoUringProvidedBufferRing.cpp`). Distro coverage:
+   - Ubuntu 25.10+ (`liburing-dev` 2.11): works out of the box.
+   - Ubuntu 24.04 LTS (`liburing-dev` 2.5): too old. `scripts/build_folly.sh` auto-detects this and builds liburing 2.9 from source under the scratch directory, then exports `PKG_CONFIG_PATH` so folly and rust-rocksdb's `io-uring` feature both pick it up.
+   - Debian, RHEL, etc.: check `pkg-config --modversion liburing`; the script handles either case.
+3. **A C/C++ compiler that is not GCC 15.** Folly's pinned libunwind dependency contains test code using legacy K&R-style empty parameter lists, which GCC 15 rejects under its default `-std=gnu23`. GCC 11–14 and Clang ≥ 14 all work. On Ubuntu 25.10 you can install `gcc-14`/`g++-14` from apt and switch via `update-alternatives` (see the CI workflow at `.github/workflows/coroutines.yml` for the exact commands).
+4. **Build dependencies.** On Ubuntu / Debian:
+   ```bash
+   apt-get install -y build-essential cmake ninja-build python3 python3-pip \
+     pkg-config patchelf wget \
+     libdouble-conversion-dev libssl-dev liburing-dev \
+     zlib1g-dev libbz2-dev autoconf automake libtool
+   ```
+   `wget` is needed because folly's getdeps shells out to it (`GETDEPS_USE_WGET=1`, inherited from RocksDB's own `folly.mk`).
+5. **Build folly + its 8 transitive deps** (boost, fmt, glog, gflags, double-conversion, libevent, libsodium, fast_float, xz, lz4, zstd, snappy, libdwarf, libiberty, ...):
    ```bash
    ./scripts/build_folly.sh
    ```
-   This wraps RocksDB's own `make build_folly` target. Allow 15-30 minutes for a clean build. It produces an install directory under `librocksdb-sys/rocksdb/third-party/folly/build/fbcode_builder/installed/`.
-4. Set the install path env var before building:
+   The script invokes folly's `getdeps.py` directly with `--scratch-path`, clones folly at the commit pinned by `librocksdb-sys/rocksdb/folly.mk:FOLLY_COMMIT_HASH`, applies the two upstream patches RocksDB's own `folly.mk` applies, and runs the build. Allow ~20–30 minutes on a cold cache. Outputs land under `librocksdb-sys/folly-build/installed/`.
+6. **Build the crate**:
    ```bash
-   export ROCKSDB_FOLLY_INSTALL_PATH=/path/printed/by/build_folly.sh
+   export ROCKSDB_FOLLY_INSTALL_PATH="$PWD/librocksdb-sys/folly-build/installed"
    cargo build --release --features coroutines,io-uring
    ```
 
-**Runtime constraints:**
+##### Runtime constraints
 
-- Folly's build produces `libglog.so` and `libgflags.so` (not `.a`) — these cannot be statically linked. Your final binary will have **runtime dynamic dependencies** on them. Cargo's `rustc-link-arg` does not propagate from a transitive `-sys` crate to a downstream binary ([rust-lang/cargo#9554](https://github.com/rust-lang/cargo/issues/9554)), so this crate cannot embed `rpath` on your binary for you. You must make these two libraries discoverable at runtime by one of the following:
+- **Dynamic dependencies on `libglog.so` and `libgflags.so`.** Folly's `getdeps` produces these two as shared libraries only (no static archives). Your final binary therefore has runtime `.so` dependencies on them. Cargo's `rustc-link-arg` does not propagate from a transitive `-sys` crate to a downstream binary ([rust-lang/cargo#9554](https://github.com/rust-lang/cargo/issues/9554)), so rust-rocksdb cannot embed `rpath` on your binary for you. Pick one of:
 
-  - **Set `LD_LIBRARY_PATH`** before running your binary:
+  - **Set `LD_LIBRARY_PATH`** when running the binary. Concretely:
     ```bash
-    export LD_LIBRARY_PATH="$ROCKSDB_FOLLY_INSTALL_PATH/glog-<hash>/lib64:$ROCKSDB_FOLLY_INSTALL_PATH/gflags-<hash>/lib:${LD_LIBRARY_PATH:-}"
+    GLOG_LIBDIR=$(ls -d "$ROCKSDB_FOLLY_INSTALL_PATH"/glog-*/lib* | head -1)
+    GFLAGS_LIBDIR=$(ls -d "$ROCKSDB_FOLLY_INSTALL_PATH"/gflags-*/lib* | head -1)
+    export LD_LIBRARY_PATH="$GLOG_LIBDIR:$GFLAGS_LIBDIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    ./your-binary
     ```
-  - **Embed `rpath` in your final binary crate's `build.rs`.** Note: this must live in the crate that produces the binary you're shipping (a `[[bin]]` target), NOT in an intermediate library crate — `cargo:rustc-link-arg` does not propagate through transitive library dependencies, so adding this to a library crate would have the same problem as embedding rpath here in rust-rocksdb. This crate exports the discovered glog and gflags lib directories as `cargo:folly_glog_libdir` and `cargo:folly_gflags_libdir`, available in your build script as `DEP_ROCKSDB_FOLLY_GLOG_LIBDIR` and `DEP_ROCKSDB_FOLLY_GFLAGS_LIBDIR`:
+    This is what `.github/workflows/coroutines.yml` does for test binaries; reference it for a working example.
+
+  - **Embed `rpath` in your final binary crate's `build.rs`.** This must live in the crate that produces the binary you're shipping (a `[[bin]]` target), **NOT** in an intermediate library crate — `cargo:rustc-link-arg` does not propagate through transitive library dependencies, so adding this to a library crate would have the same problem as embedding rpath here in rust-rocksdb. This crate exports the discovered glog and gflags lib directories via the `links` metadata, available in your binary's build script as `DEP_ROCKSDB_FOLLY_GLOG_LIBDIR` and `DEP_ROCKSDB_FOLLY_GFLAGS_LIBDIR`:
     ```rust
     // your-binary-crate/build.rs
     fn main() {
@@ -304,16 +323,22 @@ Trades ~6-15% extra CPU for ~30% lower MultiGet latency on IO-bound workloads. T
         }
     }
     ```
-  - **System-install the `.so` files** (e.g. copy them into `/usr/local/lib` and run `ldconfig`).
 
-- Not compatible with `mt_static`.
-- The `optimize_multiget_for_io` flag controlling whether to use the multi-level path defaults to `true` in `ReadOptions` and currently cannot be set from Rust until [facebook/rocksdb#14752](https://github.com/facebook/rocksdb/pull/14752) merges and we bump the submodule. For coroutine builds the default is the right choice for most workloads anyway.
+  - **System-install the `.so` files** (copy them into `/usr/local/lib` and run `ldconfig`).
 
-**Verifying the feature is active at runtime:**
+- **Not compatible with `mt_static`.** Folly's build precludes producing a fully static link.
+- **`optimize_multiget_for_io` cannot be set from Rust yet.** It defaults to `true` in `ReadOptions`, which is the right choice for coroutine builds anyway. Once [facebook/rocksdb#14752](https://github.com/facebook/rocksdb/pull/14752) merges and we bump the submodule, a setter will be exposed for users who want to opt out of the multi-level path (e.g. to reduce CPU at the cost of slightly higher MultiGet latency).
+- **The folly install is large and slow to rebuild.** ~2 GB on disk. Cache `librocksdb-sys/folly-build/` between CI runs (see `.github/workflows/coroutines.yml` for an `actions/cache` example with a cache key that pins the OS image, arch, and `FOLLY_COMMIT_HASH`).
+
+##### Verifying the feature is active
+
+At runtime:
 
 ```rust
 assert!(rust_rocksdb::built_with_coroutines());
 ```
+
+Note: this reflects how rust-rocksdb was *compiled* (i.e. whether the `coroutines` feature was on). If you used `ROCKSDB_LIB_DIR` to link against an externally-built `librocksdb.a`, the answer here may not match what that library was actually built with.
 
 #### Link-Time Optimization (LTO)
 

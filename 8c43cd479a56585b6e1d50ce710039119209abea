@@ -1,0 +1,31 @@
+librocksdb-sys/Cargo.toml
+  fdc8426e8e63306a 38-43
+README.md
+  fdc8426e8e63306a 197-209
+.github/workflows/rust.yml
+  fdc8426e8e63306a 80,90
+librocksdb-sys/build.rs
+  fdc8426e8e63306a 360-361,655-662,752-811
+Cargo.toml
+  fdc8426e8e63306a 25-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "8c43cd479a56585b6e1d50ce710039119209abea",
+  "prompts": {
+    "fdc8426e8e63306a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_1c72c65a7ffeqDp5QfGl0Qg4uV",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "zaidoon",
+      "messages": [],
+      "total_additions": 98,
+      "total_deletions": 1,
+      "accepted_lines": 98,
+      "overriden_lines": 0
+    }
+  }
+}

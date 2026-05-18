@@ -123,7 +123,7 @@ jobs:
         if: steps.cache-folly.outputs.cache-hit != 'true'
         run: ./scripts/build_folly.sh
 
-      - name: Export ROCKSDB_FOLLY_INSTALL_PATH
+      - name: Export ROCKSDB_FOLLY_INSTALL_PATH and LD_LIBRARY_PATH
         run: |
           INSTALL_ROOT="$PWD/librocksdb-sys/folly-build/installed"
           if [ ! -d "$INSTALL_ROOT" ]; then
@@ -133,6 +133,32 @@ jobs:
             exit 1
           fi
           echo "ROCKSDB_FOLLY_INSTALL_PATH=$INSTALL_ROOT" >> "$GITHUB_ENV"
+
+          # folly's getdeps produces libglog and libgflags as shared libs only
+          # (no static archives). librocksdb-sys/build.rs links them dynamically.
+          # `cargo:rustc-link-arg` for rpath would only apply to this crate's
+          # own test binaries (rust-lang/cargo#9554), not to the rust-rocksdb
+          # crate's test binaries that nextest actually runs - so set
+          # LD_LIBRARY_PATH for the rest of the job. This matches the
+          # "Set LD_LIBRARY_PATH" guidance in the README's runtime constraints
+          # section.
+          locate_libdir() {
+            local dep_dir
+            dep_dir=$(find "$INSTALL_ROOT" -maxdepth 1 -type d -name "$1-*" \
+                       | head -1)
+            if [ -z "$dep_dir" ]; then
+              echo "Error: could not find $1-* under $INSTALL_ROOT" >&2
+              exit 1
+            fi
+            if [ -d "$dep_dir/lib64" ]; then
+              echo "$dep_dir/lib64"
+            else
+              echo "$dep_dir/lib"
+            fi
+          }
+          GLOG_LIBDIR=$(locate_libdir glog)
+          GFLAGS_LIBDIR=$(locate_libdir gflags)
+          echo "LD_LIBRARY_PATH=$GLOG_LIBDIR:$GFLAGS_LIBDIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
 
       - uses: taiki-e/install-action@nextest
 

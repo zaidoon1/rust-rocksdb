@@ -1,0 +1,21 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "81491b8abdef090534fc8a8ac7b98b439035cf72",
+  "prompts": {
+    "61b0adacab78da27": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_20e79c012ffebLNHZxzN3bh5Mt",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "zaidoon",
+      "messages": [],
+      "total_additions": 5,
+      "total_deletions": 1,
+      "accepted_lines": 5,
+      "overriden_lines": 0
+    }
+  }
+}

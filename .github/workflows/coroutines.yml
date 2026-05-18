@@ -53,11 +53,32 @@ jobs:
       - name: Install build dependencies
         run: |
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build python3 python3-pip pkg-config patchelf \
+            build-essential gcc-14 g++-14 \
+            cmake ninja-build python3 python3-pip pkg-config patchelf \
             wget \
             libdouble-conversion-dev libssl-dev liburing-dev \
             zlib1g-dev libbz2-dev autoconf automake libtool \
             clang llvm
+
+      # Force gcc-14 instead of ubuntu:25.10's default gcc-15. folly's pinned
+      # libunwind commit (f081cf4...) was written pre-C23 and uses legacy
+      # K&R-style function declarations (`func()` meaning "unspecified
+      # arguments"). gcc-15 defaults to `-std=gnu23` for C, where `func()`
+      # means "no arguments", so calls like `func(s)` in libunwind's tests
+      # become hard errors. gcc-14 still defaults to `-std=gnu17`, which
+      # preserves the legacy semantic.
+      #
+      # gcc-14 and gcc-15 share the same libstdc++ ABI, so the subsequent
+      # `cargo build` (which uses gcc-14 here too via cc/c++ alternatives)
+      # links cleanly against folly's output.
+      - name: Switch default compiler to gcc-14
+        run: |
+          update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
+          update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
+          update-alternatives --install /usr/bin/cc  cc  /usr/bin/gcc-14 100
+          update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++-14 100
+          gcc --version
+          g++ --version
 
       - name: Install rust
         uses: actions-rust-lang/setup-rust-toolchain@v1

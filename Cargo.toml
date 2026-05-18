@@ -22,6 +22,10 @@ members = ["librocksdb-sys"]
 default = ["snappy", "lz4", "zstd", "zlib", "bzip2", "bindgen-runtime"]
 jemalloc = ["rust-librocksdb-sys/jemalloc"]
 io-uring = ["rust-librocksdb-sys/io-uring"]
+# Build RocksDB with folly + C++20 coroutines. See `librocksdb-sys/Cargo.toml`
+# and the "Coroutines / async MultiGet" section of the README for build
+# prerequisites. Linux only.
+coroutines = ["rust-librocksdb-sys/coroutines"]
 valgrind = []
 snappy = ["rust-librocksdb-sys/snappy"]
 lz4 = ["rust-librocksdb-sys/lz4"]

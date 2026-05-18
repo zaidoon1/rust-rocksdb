@@ -379,6 +379,9 @@ fn build_rocksdb() {
         config.define("ROCKSDB_IOURING_PRESENT", Some("1"));
     }
 
+    #[cfg(feature = "coroutines")]
+    coroutines_compile_config(&mut config, &target);
+
     if &target != "armv7-linux-androideabi"
         && env::var("CARGO_CFG_TARGET_POINTER_WIDTH").unwrap() != "64"
     {
@@ -536,6 +539,9 @@ fn main() {
     bindgen_rocksdb();
     let target = env::var("TARGET").unwrap();
 
+    #[cfg(feature = "coroutines")]
+    validate_coroutines_target(&target);
+
     if !try_to_find_and_link_lib("ROCKSDB") {
         // rocksdb only works with the prebuilt rocksdb system lib on freebsd.
         // we dont need to rebuild rocksdb
@@ -556,6 +562,15 @@ fn main() {
     } else {
         cpp_link_stdlib(&target);
     }
+
+    // Folly + transitive deps must be linked after rocksdb itself so the
+    // linker resolves rocksdb's coroutine references against folly. Done
+    // outside `build_rocksdb()` so it also applies when ROCKSDB_LIB_DIR
+    // points at an externally-built librocksdb that was compiled with
+    // USE_COROUTINES.
+    #[cfg(feature = "coroutines")]
+    coroutines_link_config();
+
     if cfg!(feature = "snappy") && !try_to_find_and_link_lib("SNAPPY") {
         println!("cargo:rerun-if-changed=snappy/");
         fail_on_empty_directory("snappy");
@@ -570,4 +585,190 @@ fn main() {
         env::var("CARGO_MANIFEST_DIR").unwrap()
     );
     println!("cargo:out_dir={}", env::var("OUT_DIR").unwrap());
+}
+
+/// Validates that the requested target is one we can build the `coroutines`
+/// feature for. Folly only ships a working build for Linux; on macOS, Windows,
+/// and the BSDs the folly toolchain is missing pieces (notably the io_uring
+/// async file system, and folly's getdeps build itself is flaky).
+#[cfg(feature = "coroutines")]
+fn validate_coroutines_target(target: &str) {
+    if !target.contains("linux") {
+        panic!(
+            "the `coroutines` feature is only supported on Linux \
+             (target was `{target}`)"
+        );
+    }
+}
+
+/// Compile-time configuration for the coroutines build: defines, compiler
+/// flags, and include paths for folly + its dependencies. Mirrors the logic
+/// in RocksDB's own `CMakeLists.txt` (lines 607-667) and `Makefile`
+/// (`USE_COROUTINES=1` branch around line 147).
+#[cfg(feature = "coroutines")]
+fn coroutines_compile_config(config: &mut cc::Build, target: &str) {
+    validate_coroutines_target(target);
+
+    config.define("USE_COROUTINES", None);
+    config.define("USE_FOLLY", None);
+    config.define("FOLLY_NO_CONFIG", None);
+    config.define("HAVE_CXX11_ATOMIC", None);
+
+    // GCC needs explicit -fcoroutines to enable coroutine support; clang
+    // enables coroutines under -std=c++20 by default.
+    if !config.get_compiler().is_like_clang() {
+        config.flag("-fcoroutines");
+    }
+    // Folly's headers trip warnings that RocksDB's stricter build flags
+    // would otherwise treat as significant.
+    config.flag_if_supported("-Wno-deprecated");
+    config.flag_if_supported("-Wno-redundant-move");
+    config.flag_if_supported("-Wno-maybe-uninitialized");
+    config.flag_if_supported("-Wno-invalid-memory-model");
+
+    let install_root = coroutines_install_root();
+    for dep in [
+        "folly",
+        "boost",
+        "fmt",
+        "glog",
+        "gflags",
+        "double-conversion",
+        "libevent",
+        "libsodium",
+    ] {
+        let dir = resolve_folly_dep(&install_root, dep);
+        config.include(dir.join("include"));
+    }
+}
+
+/// Link-time configuration for the coroutines build: emits the
+/// `cargo:rustc-link-*` directives for folly and its transitive dependencies.
+/// Order matters - folly must come after `librocksdb.a` on the linker command
+/// line so symbols resolve forward.
+#[cfg(feature = "coroutines")]
+fn coroutines_link_config() {
+    println!("cargo:rerun-if-env-changed=ROCKSDB_FOLLY_INSTALL_PATH");
+
+    let install_root = coroutines_install_root();
+
+    let folly = resolve_folly_dep(&install_root, "folly");
+    let boost = resolve_folly_dep(&install_root, "boost");
+    let fmt = resolve_folly_dep(&install_root, "fmt");
+    let glog = resolve_folly_dep(&install_root, "glog");
+    let gflags = resolve_folly_dep(&install_root, "gflags");
+    let dbl_conv = resolve_folly_dep(&install_root, "double-conversion");
+    let libevent = resolve_folly_dep(&install_root, "libevent");
+    let libsodium = resolve_folly_dep(&install_root, "libsodium");
+
+    // Folly itself.
+    println!(
+        "cargo:rustc-link-search=native={}",
+        folly.join("lib").display()
+    );
+    println!("cargo:rustc-link-lib=static=folly");
+
+    // Boost components folly uses.
+    println!(
+        "cargo:rustc-link-search=native={}",
+        boost.join("lib").display()
+    );
+    for lib in [
+        "context",
+        "filesystem",
+        "atomic",
+        "program_options",
+        "regex",
+        "system",
+        "thread",
+    ] {
+        println!("cargo:rustc-link-lib=static=boost_{lib}");
+    }
+
+    println!(
+        "cargo:rustc-link-search=native={}",
+        dbl_conv.join("lib").display()
+    );
+    println!("cargo:rustc-link-lib=static=double-conversion");
+
+    println!(
+        "cargo:rustc-link-search=native={}",
+        libevent.join("lib").display()
+    );
+    println!("cargo:rustc-link-lib=static=event");
+
+    println!(
+        "cargo:rustc-link-search=native={}",
+        libsodium.join("lib").display()
+    );
+    println!("cargo:rustc-link-lib=static=sodium");
+
+    // glog and gflags only build as shared libs from folly's getdeps, so we
+    // link them dynamically. Embed rpaths so the final binary can find the
+    // .so files at runtime without LD_LIBRARY_PATH gymnastics.
+    let glog_libdir = lib_or_lib64(&glog);
+    let gflags_libdir = lib_or_lib64(&gflags);
+    println!("cargo:rustc-link-search=native={}", glog_libdir.display());
+    println!("cargo:rustc-link-search=native={}", gflags_libdir.display());
+    println!("cargo:rustc-link-lib=dylib=glog");
+    println!("cargo:rustc-link-lib=dylib=gflags");
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", glog_libdir.display());
+    println!(
+        "cargo:rustc-link-arg=-Wl,-rpath,{}",
+        gflags_libdir.display()
+    );
+
+    let fmt_libdir = lib_or_lib64(&fmt);
+    println!("cargo:rustc-link-search=native={}", fmt_libdir.display());
+    println!("cargo:rustc-link-lib=static=fmt");
+
+    // libdl, needed by folly.
+    println!("cargo:rustc-link-lib=dylib=dl");
+}
+
+/// Returns the install root containing folly and its sibling dependency
+/// directories (e.g. `<root>/folly-<hash>`, `<root>/boost-<hash>`, etc).
+#[cfg(feature = "coroutines")]
+fn coroutines_install_root() -> PathBuf {
+    let raw = env::var("ROCKSDB_FOLLY_INSTALL_PATH").unwrap_or_else(|_| {
+        panic!(
+            "the `coroutines` feature requires the env var \
+             ROCKSDB_FOLLY_INSTALL_PATH to point at a folly install \
+             produced by `scripts/build_folly.sh` (or equivalent)."
+        )
+    });
+    PathBuf::from(raw)
+}
+
+/// Resolves a versioned folly-deps subdirectory (e.g. `boost-1.83.0_xyz`)
+/// by globbing under the install root.
+#[cfg(feature = "coroutines")]
+fn resolve_folly_dep(install_root: &Path, name: &str) -> PathBuf {
+    let pattern = install_root.join(format!("{name}-*"));
+    let pattern_str = pattern
+        .to_str()
+        .expect("ROCKSDB_FOLLY_INSTALL_PATH must be valid UTF-8");
+    glob::glob(pattern_str)
+        .unwrap_or_else(|e| panic!("invalid glob `{pattern_str}`: {e}"))
+        .filter_map(Result::ok)
+        .next()
+        .unwrap_or_else(|| {
+            panic!(
+                "could not find `{name}-*` under {}; \
+                 did `scripts/build_folly.sh` finish successfully?",
+                install_root.display()
+            )
+        })
+}
+
+/// folly's getdeps installs some libraries under `lib/` and others under
+/// `lib64/`. Prefer `lib64/` when it exists.
+#[cfg(feature = "coroutines")]
+fn lib_or_lib64(prefix: &Path) -> PathBuf {
+    let candidate = prefix.join("lib64");
+    if candidate.exists() {
+        candidate
+    } else {
+        prefix.join("lib")
+    }
 }

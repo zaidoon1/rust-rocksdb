@@ -1,0 +1,77 @@
+name: Coroutines build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-test:
+    name: Build & test with coroutines feature
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake ninja-build python3 python3-pip pkg-config \
+            libdouble-conversion-dev libssl-dev liburing-dev \
+            zlib1g-dev libbz2-dev autoconf automake libtool
+
+      - name: Install rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-key: "v1-rust-coroutines"
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      # Folly takes 15-30 minutes to build from scratch. Cache it keyed on
+      # the exact FOLLY_COMMIT_HASH pinned by RocksDB's folly.mk so any
+      # upstream submodule bump invalidates the cache.
+      - name: Determine folly commit hash
+        id: folly-hash
+        run: |
+          HASH=$(grep -E '^FOLLY_COMMIT_HASH = ' \
+                       librocksdb-sys/rocksdb/folly.mk \
+                  | sed -E 's/^FOLLY_COMMIT_HASH = //')
+          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
+
+      - name: Cache folly install
+        id: cache-folly
+        uses: actions/cache@v4
+        with:
+          path: librocksdb-sys/rocksdb/third-party/folly
+          key: folly-${{ runner.os }}-${{ steps.folly-hash.outputs.hash }}-v1
+
+      - name: Build folly
+        if: steps.cache-folly.outputs.cache-hit != 'true'
+        run: ./scripts/build_folly.sh
+
+      - name: Export ROCKSDB_FOLLY_INSTALL_PATH
+        run: |
+          INST_PATH=$(cd librocksdb-sys/rocksdb/third-party/folly \
+                      && python3 build/fbcode_builder/getdeps.py show-inst-dir)
+          ROOT=$(dirname "$INST_PATH")
+          echo "ROCKSDB_FOLLY_INSTALL_PATH=$ROOT" >> "$GITHUB_ENV"
+
+      - uses: taiki-e/install-action@nextest
+
+      - name: cargo build --features coroutines,io-uring
+        run: cargo build --release --features coroutines,io-uring
+
+      - name: Run tests with coroutines feature
+        run: cargo nextest run --release --features coroutines,io-uring
+
+      - name: Run doctests with coroutines feature
+        run: cargo test --doc --release --features coroutines,io-uring

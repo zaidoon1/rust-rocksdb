@@ -248,6 +248,54 @@ features = ["zstd", "zstd-static-linking-only"]
 
 Holds digested dictionaries in block cache for read-heavy workloads. Uses experimental APIs but is production-tested at Facebook. See [Dictionary Compression Blog](https://rocksdb.org/blog/2021/05/31/dictionary-compression.html).
 
+#### Async MultiGet with C++20 Coroutines
+
+> **⚠️ Experimental, Linux only**
+
+```toml
+[dependencies.rust-rocksdb]
+features = ["coroutines", "io-uring"]
+```
+
+Builds RocksDB with `USE_COROUTINES=1` and links against [folly](https://github.com/facebook/folly). This enables the **multi-level parallel `MultiGet` path** described in the RocksDB [Asynchronous IO blog post](https://rocksdb.org/blog/2022/10/07/asynchronous-io-in-rocksdb.html). When you then call `ReadOptions::set_async_io(true)` on a `MultiGet`, RocksDB will issue parallel `io_uring` reads across SST files in different LSM levels, not just within a single level.
+
+**Performance**: per Meta's [own benchmark](https://rocksdb.org/blog/2022/10/07/asynchronous-io-in-rocksdb.html#results) on remote flash:
+
+| Configuration | μs/op |
+|---|---|
+| `async_io=false` (default) | 1292 |
+| `async_io=true` (this crate today, single-level parallel reads) | 775 |
+| `async_io=true` + `coroutines` feature (multi-level parallel reads) | 508 |
+
+Trades ~6-15% extra CPU for ~30% lower MultiGet latency on IO-bound workloads. The gain shrinks on local NVMe; benchmark before adopting in production.
+
+**Prerequisites:**
+
+1. **Linux** (any glibc-based distro). macOS and Windows are not supported.
+2. **GCC ≥ 11 or Clang ≥ 14** with `-std=c++20` support.
+3. **folly + 8 transitive dependencies** built at the exact commit pinned by `librocksdb-sys/rocksdb/folly.mk`. Use the included helper:
+   ```bash
+   ./scripts/build_folly.sh
+   ```
+   This wraps RocksDB's own `make build_folly` target. Allow 15-30 minutes for a clean build. It produces an install directory under `librocksdb-sys/rocksdb/third-party/folly/build/fbcode_builder/installed/`.
+4. Set the install path env var before building:
+   ```bash
+   export ROCKSDB_FOLLY_INSTALL_PATH=/path/printed/by/build_folly.sh
+   cargo build --release --features coroutines,io-uring
+   ```
+
+**Runtime constraints:**
+
+- Folly's build produces `libglog.so` and `libgflags.so` (not `.a`) — these cannot be statically linked. Your final binary will have dynamic dependencies on them. Their paths are embedded via `rpath`, so the binary will work from its build location; if you move it, also move (or system-install) those two `.so` files.
+- Not compatible with `mt_static`.
+- The `optimize_multiget_for_io` flag controlling whether to use the multi-level path defaults to `true` in `ReadOptions` and currently cannot be set from Rust until [facebook/rocksdb#14752](https://github.com/facebook/rocksdb/pull/14752) merges and we bump the submodule. For coroutine builds the default is the right choice for most workloads anyway.
+
+**Verifying the feature is active at runtime:**
+
+```rust
+assert!(rust_rocksdb::built_with_coroutines());
+```
+
 #### Link-Time Optimization (LTO)
 
 ```toml

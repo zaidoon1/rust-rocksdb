@@ -1,0 +1,23 @@
+README.md
+  fdc8426e8e63306a 253,262,264,267-268,270,272,274-290,294-295,297,301,303,305,307-310,312-314,327,329-331,333,335,341
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "64de24509279011f86577fadb75a75dd04232230",
+  "prompts": {
+    "fdc8426e8e63306a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_1c72c65a7ffeqDp5QfGl0Qg4uV",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "zaidoon",
+      "messages": [],
+      "total_additions": 47,
+      "total_deletions": 22,
+      "accepted_lines": 47,
+      "overriden_lines": 0
+    }
+  }
+}

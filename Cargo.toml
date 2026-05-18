@@ -1,7 +1,7 @@
 [package]
 name = "rust-rocksdb"
 description = "Rust wrapper for Facebook's RocksDB embeddable database"
-version = "0.49.0"
+version = "0.49.1"
 edition = "2024"
 rust-version = "1.89.0"
 authors = [
@@ -22,9 +22,6 @@ members = ["librocksdb-sys"]
 default = ["snappy", "lz4", "zstd", "zlib", "bzip2", "bindgen-runtime"]
 jemalloc = ["rust-librocksdb-sys/jemalloc"]
 io-uring = ["rust-librocksdb-sys/io-uring"]
-# NUMA-aware memtable allocation. Linux only. See
-# `librocksdb-sys/Cargo.toml` for the system package this requires.
-numa = ["rust-librocksdb-sys/numa"]
 # Build RocksDB with folly + C++20 coroutines. See `librocksdb-sys/Cargo.toml`
 # and the "Coroutines / async MultiGet" section of the README for build
 # prerequisites. Linux only.
@@ -48,7 +45,7 @@ raw-ptr = []
 
 [dependencies]
 libc = "0.2"
-rust-librocksdb-sys = { path = "librocksdb-sys", version = "0.45.0", default-features = false, features = [
+rust-librocksdb-sys = { path = "librocksdb-sys", version = "0.45.1", default-features = false, features = [
     "static",
 ] }
 serde = { version = "1", features = ["derive"], optional = true }

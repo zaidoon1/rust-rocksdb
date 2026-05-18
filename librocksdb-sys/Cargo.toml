@@ -1,6 +1,6 @@
 [package]
 name = "rust-librocksdb-sys"
-version = "0.45.0+11.1.1"
+version = "0.45.1+11.1.1"
 edition = "2024"
 rust-version = "1.89.0"
 authors = [
@@ -35,12 +35,6 @@ bindgen-runtime = ["bindgen/runtime"]
 bindgen-static = ["bindgen/static"]
 mt_static = []
 io-uring = []
-# NUMA-aware memtable allocation via libnuma. Linux only. When enabled,
-# rocksdb's `Options::use_numa_aware_alloc()` actually pins memtable
-# allocations to the calling thread's NUMA node. Requires `libnuma-dev`
-# (Debian/Ubuntu) / `numactl-devel` (Fedora/RHEL) / `numactl` (Arch) /
-# `numactl-dev` (Alpine). Mostly useful on multi-socket bare-metal hosts.
-numa = []
 # Build RocksDB with `USE_COROUTINES=1 USE_FOLLY=1` and link against a folly
 # install. Enables the multi-level parallel `MultiGet` async-IO path described
 # in the RocksDB blog post "Asynchronous IO in RocksDB". Linux only. Requires

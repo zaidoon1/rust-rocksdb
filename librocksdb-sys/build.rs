@@ -358,7 +358,6 @@ mod vendor {
         apply_lfs_defines(&mut cfg, target, layout);
         apply_io_uring(&mut cfg, target);
         apply_backtrace(&mut cfg, target);
-        apply_numa(&mut cfg, target);
 
         #[cfg(feature = "coroutines")]
         super::coroutines::apply_compile_config(&mut cfg);
@@ -772,44 +771,6 @@ mod vendor {
         };
         if supported {
             cfg.define("ROCKSDB_BACKTRACE", None);
-        }
-    }
-
-    /// NUMA-aware memtable allocation, opt-in via the `numa` cargo feature.
-    /// When enabled, rocksdb's `Options::use_numa_aware_alloc()` becomes
-    /// effective, the memtable arena uses `numa_alloc_onnode()` to pin
-    /// allocations to the current thread's NUMA node, and a handful of
-    /// internal counters get NUMA-aware variants.
-    ///
-    /// Mirrors how `apply_io_uring` handles its system library: probe via
-    /// pkg-config so the user gets a clear "install libnuma-dev" message
-    /// up front rather than a confusing link failure later.
-    fn apply_numa(_cfg: &mut cc::Build, _target: &Target) {
-        #[cfg(feature = "numa")]
-        {
-            if _target.os == "linux" {
-                pkg_config::probe_library("numa").unwrap_or_else(|e| {
-                    panic!(
-                        "the `numa` feature was requested but pkg-config probe for \
-                         `numa` failed: {e}\n\
-                         Hints:\n\
-                          - Debian/Ubuntu:  apt-get install libnuma-dev\n\
-                          - Fedora/RHEL:    dnf install numactl-devel\n\
-                          - Arch:           pacman -S numactl\n\
-                          - Alpine:         apk add numactl-dev\n\
-                          - or set PKG_CONFIG_PATH to a directory containing numa.pc\n\
-                          - when cross-compiling, also set PKG_CONFIG_ALLOW_CROSS=1\n\
-                            and point PKG_CONFIG_PATH at the target sysroot's pkgconfig dir."
-                    )
-                });
-                _cfg.define("NUMA", Some("1"));
-            } else {
-                println!(
-                    "cargo::warning=`numa` feature requested but target OS is \
-                     `{}`; NUMA is Linux-only, the define will not be set",
-                    _target.os
-                );
-            }
         }
     }
 

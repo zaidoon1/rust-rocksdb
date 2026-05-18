@@ -704,19 +704,27 @@ fn coroutines_link_config() {
     println!("cargo:rustc-link-lib=static=sodium");
 
     // glog and gflags only build as shared libs from folly's getdeps, so we
-    // link them dynamically. Embed rpaths so the final binary can find the
-    // .so files at runtime without LD_LIBRARY_PATH gymnastics.
+    // link them dynamically. We deliberately do NOT emit `cargo:rustc-link-arg`
+    // for rpath here: per `cargo:rustc-link-arg` semantics, those args only
+    // apply to artifacts of the crate that emits them (tests/examples/benches
+    // of `rust-librocksdb-sys` itself), not to downstream binaries that depend
+    // on this crate (see rust-lang/cargo#9554). Embedding rpath that only
+    // covers our own test binaries would be misleading. Downstream users must
+    // handle runtime discovery of libglog/libgflags themselves - see the
+    // "Async MultiGet with C++20 Coroutines" section in the top-level README.
     let glog_libdir = lib_or_lib64(&glog);
     let gflags_libdir = lib_or_lib64(&gflags);
     println!("cargo:rustc-link-search=native={}", glog_libdir.display());
     println!("cargo:rustc-link-search=native={}", gflags_libdir.display());
     println!("cargo:rustc-link-lib=dylib=glog");
     println!("cargo:rustc-link-lib=dylib=gflags");
-    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", glog_libdir.display());
-    println!(
-        "cargo:rustc-link-arg=-Wl,-rpath,{}",
-        gflags_libdir.display()
-    );
+    // Export the discovered directories for downstream build scripts so they
+    // can set rpath on their own crate's binaries without re-globbing folly's
+    // install layout. Accessible as `DEP_ROCKSDB_FOLLY_GLOG_LIBDIR` and
+    // `DEP_ROCKSDB_FOLLY_GFLAGS_LIBDIR` in dependent crates' build scripts
+    // (via the `links = "rocksdb"` metadata).
+    println!("cargo:folly_glog_libdir={}", glog_libdir.display());
+    println!("cargo:folly_gflags_libdir={}", gflags_libdir.display());
 
     let fmt_libdir = lib_or_lib64(&fmt);
     println!("cargo:rustc-link-search=native={}", fmt_libdir.display());
@@ -741,28 +749,50 @@ fn coroutines_install_root() -> PathBuf {
 }
 
 /// Resolves a versioned folly-deps subdirectory (e.g. `boost-1.83.0_xyz`)
-/// by globbing under the install root.
+/// by globbing under the install root. Panics if zero or more than one
+/// directory matches - multiple matches typically indicate a stale install
+/// from a prior `FOLLY_COMMIT_HASH` mixed with the current one, which would
+/// otherwise be resolved non-deterministically and could link the wrong
+/// version.
 #[cfg(feature = "coroutines")]
 fn resolve_folly_dep(install_root: &Path, name: &str) -> PathBuf {
     let pattern = install_root.join(format!("{name}-*"));
     let pattern_str = pattern
         .to_str()
         .expect("ROCKSDB_FOLLY_INSTALL_PATH must be valid UTF-8");
-    glob::glob(pattern_str)
+    let matches: Vec<PathBuf> = glob::glob(pattern_str)
         .unwrap_or_else(|e| panic!("invalid glob `{pattern_str}`: {e}"))
         .filter_map(Result::ok)
-        .next()
-        .unwrap_or_else(|| {
-            panic!(
-                "could not find `{name}-*` under {}; \
-                 did `scripts/build_folly.sh` finish successfully?",
-                install_root.display()
-            )
-        })
+        .collect();
+    match matches.as_slice() {
+        [] => panic!(
+            "could not find `{name}-*` under {}; \
+             did `scripts/build_folly.sh` finish successfully?",
+            install_root.display()
+        ),
+        [only] => only.clone(),
+        many => panic!(
+            "found {} `{name}-*` directories under {}:\n  {}\n\
+             this usually means a stale install from a prior FOLLY_COMMIT_HASH \
+             is mixed with the current one. Remove the stale entries or point \
+             ROCKSDB_FOLLY_INSTALL_PATH at a clean install.",
+            many.len(),
+            install_root.display(),
+            many.iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        ),
+    }
 }
 
 /// folly's getdeps installs some libraries under `lib/` and others under
-/// `lib64/`. Prefer `lib64/` when it exists.
+/// `lib64/` depending on the OS distribution conventions. As of the
+/// `FOLLY_COMMIT_HASH` pinned by `librocksdb-sys/rocksdb/folly.mk`, glog and
+/// fmt are typically under `lib64/` on RHEL-family distros and under `lib/`
+/// on Debian-family distros; gflags is consistently under `lib/`. Prefer
+/// `lib64/` when present since that's the more specific path; only one of
+/// the two ever contains the library for a given dep.
 #[cfg(feature = "coroutines")]
 fn lib_or_lib64(prefix: &Path) -> PathBuf {
     let candidate = prefix.join("lib64");

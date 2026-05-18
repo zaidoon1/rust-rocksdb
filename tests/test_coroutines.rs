@@ -1,3 +1,5 @@
+// Copyright 2026 Tyler Neely
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -13,83 +15,136 @@
 //! Smoke tests for the async-IO `MultiGet` path.
 //!
 //! These tests run in both feature configurations. When the `coroutines`
-//! feature is disabled, `async_io=true` only parallelizes within a single
+//! feature is disabled, `async_io=true` parallelizes only within a single
 //! LSM level; when enabled, the multi-level coroutine path activates. The
-//! tests don't assert anything about *which* path was taken - only that the
-//! results are correct in both cases. That's the property that matters from
-//! the user's perspective.
+//! tests verify that results are *correct* in both configurations - they do
+//! not assert which dispatch branch ran.
+//!
+//! The multi-level test explicitly populates several LSM levels and asserts
+//! the layout via `rocksdb.num-files-at-levelN` before running the
+//! MultiGet, so failures from a "MultiGet across multiple levels" bug land
+//! in a test that actually has data in multiple levels.
 
 mod util;
 
 use pretty_assertions::assert_eq;
-use rust_rocksdb::{DB, Options, ReadOptions, WaitForCompactOptions, WriteOptions};
+use rust_rocksdb::{
+    CompactOptions, DB, Options, ReadOptions, WaitForCompactOptions, WriteOptions,
+    properties::num_files_at_level,
+};
 
 use util::DBPath;
 
-#[test]
-fn built_with_coroutines_matches_feature_flag() {
-    assert_eq!(
-        rust_rocksdb::built_with_coroutines(),
-        cfg!(feature = "coroutines")
-    );
+/// Counts non-empty levels by querying `rocksdb.num-files-at-level{N}` for
+/// each level. Returns `(non_empty_count, [files_per_level; max_levels])`.
+fn level_layout(db: &DB, max_levels: usize) -> (usize, Vec<u64>) {
+    let counts: Vec<u64> = (0..max_levels)
+        .map(|lvl| {
+            db.property_int_value(num_files_at_level(lvl))
+                .unwrap()
+                .unwrap_or(0)
+        })
+        .collect();
+    let non_empty = counts.iter().filter(|&&n| n > 0).count();
+    (non_empty, counts)
 }
 
-/// Builds a DB whose keyspace is spread across multiple LSM levels, then
-/// verifies that `multi_get` with `async_io=true` returns identical results
-/// to a loop of single `get`s. Both branches of `version_set.cc`'s
-/// `MultiGetFromSST{,Coroutine}` dispatch must produce correct results.
 #[test]
-fn multi_get_async_io_matches_serial_get() {
-    let path = DBPath::new("_rust_rocksdb_multi_get_async_io");
+fn built_with_coroutines_helper_is_callable() {
+    // We can't meaningfully assert equality with `cfg!(feature = ...)` here
+    // because `built_with_coroutines()` is implemented as exactly that - the
+    // assertion would be tautological. Just verify it's callable and stable
+    // within a single process. The real value of `built_with_coroutines()`
+    // is documentation: it gives callers a single source of truth they can
+    // log or surface in diagnostics.
+    let a = rust_rocksdb::built_with_coroutines();
+    let b = rust_rocksdb::built_with_coroutines();
+    assert_eq!(a, b);
+}
+
+/// Verifies that `multi_get` with `async_io=true` returns correct results
+/// when keys are actually spread across multiple LSM levels. Without an
+/// explicit level-layout check, a regression that breaks the multi-level
+/// dispatch path could pass silently because the test setup never produced
+/// such a layout.
+#[test]
+fn multi_get_async_io_matches_serial_get_across_levels() {
+    let path = DBPath::new("_rust_rocksdb_multi_get_async_io_multi_level");
     {
-        // Force many small SST files spread across several levels.
+        // Configure tiny memtables and SSTs so a moderate number of writes
+        // forces L0->L1->L2 compactions. Disable auto compactions so the
+        // test drives the layout deterministically via `compact_range_opt`.
         let mut opts = Options::default();
         opts.create_if_missing(true);
-        opts.set_write_buffer_size(64 * 1024);
-        opts.set_target_file_size_base(64 * 1024);
-        opts.set_max_bytes_for_level_base(256 * 1024);
-        opts.set_level_zero_file_num_compaction_trigger(2);
-        opts.set_num_levels(4);
-        opts.set_disable_auto_compactions(false);
+        opts.set_write_buffer_size(4 * 1024);
+        opts.set_target_file_size_base(4 * 1024);
+        opts.set_max_bytes_for_level_base(16 * 1024);
+        opts.set_max_bytes_for_level_multiplier(2.0);
+        opts.set_num_levels(5);
+        opts.set_disable_auto_compactions(true);
+        opts.set_level_zero_file_num_compaction_trigger(64); // effectively disabled
 
         let db = DB::open(&opts, &path).unwrap();
-
         let mut wo = WriteOptions::default();
         wo.set_sync(false);
 
-        // Insert enough data to span multiple non-empty levels after
-        // compactions settle.
-        let n: u32 = 4_000;
+        // Three batches, each flushed to its own L0 file, then compacted
+        // down one level at a time. After the dance there should be data
+        // in at least L0 and one deeper level.
         let value = vec![b'v'; 200];
-        for i in 0..n {
-            let key = format!("key-{i:08}");
-            db.put_opt(key.as_bytes(), &value, &wo).unwrap();
-        }
-        db.flush().unwrap();
 
-        // Trigger a full compaction and wait for it to finish so the
-        // resulting LSM has a stable level layout.
-        db.compact_range::<&[u8], &[u8]>(None, None);
+        let put_batch = |start: u32, end: u32| {
+            for i in start..end {
+                let key = format!("key-{i:08}");
+                db.put_opt(key.as_bytes(), &value, &wo).unwrap();
+            }
+            db.flush().unwrap();
+        };
+
+        // Batch 1 -> L0 -> compact to L2.
+        put_batch(0, 200);
+        let mut co = CompactOptions::default();
+        co.set_change_level(true);
+        co.set_target_level(2);
+        db.compact_range_opt::<&[u8], &[u8]>(None, None, &co);
+
+        // Batch 2 -> L0 -> compact to L1.
+        put_batch(200, 400);
+        let mut co = CompactOptions::default();
+        co.set_change_level(true);
+        co.set_target_level(1);
+        db.compact_range_opt::<&[u8], &[u8]>(None, None, &co);
+
+        // Batch 3 -> stays in L0 (no further compaction).
+        put_batch(400, 600);
+
+        // Wait for any in-flight background work (none expected, but cheap).
         let mut wait_opts = WaitForCompactOptions::default();
         wait_opts.set_flush(true);
-        wait_opts.set_timeout(30 * 1_000_000); // 30s in microseconds
+        wait_opts.set_timeout(30 * 1_000_000); // 30s
         db.wait_for_compact(&wait_opts).unwrap();
 
-        // Build a batch of keys mixing hits and misses, sparsely spread
-        // across the keyspace so they're likely to land in different SSTs
-        // and different levels.
-        let mut keys: Vec<Vec<u8>> = (0..n)
-            .step_by(53)
+        let (non_empty, counts) = level_layout(&db, 5);
+        assert!(
+            non_empty >= 2,
+            "test setup failed to spread data across multiple LSM levels: \
+             non_empty={non_empty}, counts={counts:?}; \
+             coroutines feature: {}",
+            cfg!(feature = "coroutines")
+        );
+
+        // Build a key batch spanning all three insertion batches plus some
+        // misses. Each batch landed in a different level, so a MultiGet
+        // across this set forces multi-level lookup.
+        let mut keys: Vec<Vec<u8>> = (0..600u32)
+            .step_by(37)
             .map(|i| format!("key-{i:08}").into_bytes())
             .collect();
         keys.push(b"key-99999999".to_vec()); // miss
-        keys.push(b"a-missing-key".to_vec()); // miss
-        keys.push(b"key-00000017".to_vec()); // hit, small key
+        keys.push(b"key-00001234".to_vec()); // miss
 
-        // Reference: a loop of single Gets.
         let reference: Vec<Option<Vec<u8>>> = keys.iter().map(|k| db.get(k).unwrap()).collect();
 
-        // Test path: multi_get_opt with async_io=true.
         let mut ro = ReadOptions::default();
         ro.set_async_io(true);
         let key_refs: Vec<&[u8]> = keys.iter().map(Vec::as_slice).collect();
@@ -99,24 +154,23 @@ fn multi_get_async_io_matches_serial_get() {
             .map(Result::unwrap)
             .collect();
 
-        assert_eq!(reference.len(), async_results.len());
         assert_eq!(
             reference,
             async_results,
             "async_io MultiGet results must match a serial Get loop \
-             (coroutines feature: {})",
+             (coroutines feature: {}, level counts: {counts:?})",
             cfg!(feature = "coroutines")
         );
     }
 }
 
-/// Same as above, but reads a batch of keys that are guaranteed to all hit
-/// the same single SST/level after compaction. Stresses the single-level
-/// async path even when coroutines are enabled (which forces a single-file
-/// fast-path in version_set.cc's `MultiGetFromSST`).
+/// Reads a batch of keys that all live in a single SST after a flush.
+/// Exercises the same-level fast path even when the coroutines feature is
+/// enabled, since version_set.cc's `MultiGetFromSST` short-circuits the
+/// coroutine dispatch when only one file is involved.
 #[test]
-fn multi_get_async_io_same_level_matches_serial_get() {
-    let path = DBPath::new("_rust_rocksdb_multi_get_async_io_same_level");
+fn multi_get_async_io_matches_serial_get_single_level() {
+    let path = DBPath::new("_rust_rocksdb_multi_get_async_io_single_level");
     {
         let mut opts = Options::default();
         opts.create_if_missing(true);

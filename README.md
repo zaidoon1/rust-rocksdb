@@ -286,7 +286,26 @@ Trades ~6-15% extra CPU for ~30% lower MultiGet latency on IO-bound workloads. T
 
 **Runtime constraints:**
 
-- Folly's build produces `libglog.so` and `libgflags.so` (not `.a`) — these cannot be statically linked. Your final binary will have dynamic dependencies on them. Their paths are embedded via `rpath`, so the binary will work from its build location; if you move it, also move (or system-install) those two `.so` files.
+- Folly's build produces `libglog.so` and `libgflags.so` (not `.a`) — these cannot be statically linked. Your final binary will have **runtime dynamic dependencies** on them. Cargo's `rustc-link-arg` does not propagate from a transitive `-sys` crate to a downstream binary ([rust-lang/cargo#9554](https://github.com/rust-lang/cargo/issues/9554)), so this crate cannot embed `rpath` on your binary for you. You must make these two libraries discoverable at runtime by one of the following:
+
+  - **Set `LD_LIBRARY_PATH`** before running your binary:
+    ```bash
+    export LD_LIBRARY_PATH="$ROCKSDB_FOLLY_INSTALL_PATH/glog-<hash>/lib64:$ROCKSDB_FOLLY_INSTALL_PATH/gflags-<hash>/lib:${LD_LIBRARY_PATH:-}"
+    ```
+  - **Embed `rpath` in your own binary's `build.rs`.** This crate exports the discovered glog and gflags lib directories as `cargo:folly_glog_libdir` and `cargo:folly_gflags_libdir`, available in your build script as `DEP_ROCKSDB_FOLLY_GLOG_LIBDIR` and `DEP_ROCKSDB_FOLLY_GFLAGS_LIBDIR`:
+    ```rust
+    // your-app/build.rs
+    fn main() {
+        if let Ok(d) = std::env::var("DEP_ROCKSDB_FOLLY_GLOG_LIBDIR") {
+            println!("cargo:rustc-link-arg=-Wl,-rpath,{d}");
+        }
+        if let Ok(d) = std::env::var("DEP_ROCKSDB_FOLLY_GFLAGS_LIBDIR") {
+            println!("cargo:rustc-link-arg=-Wl,-rpath,{d}");
+        }
+    }
+    ```
+  - **System-install the `.so` files** (e.g. copy them into `/usr/local/lib` and run `ldconfig`).
+
 - Not compatible with `mt_static`.
 - The `optimize_multiget_for_io` flag controlling whether to use the multi-level path defaults to `true` in `ReadOptions` and currently cannot be set from Rust until [facebook/rocksdb#14752](https://github.com/facebook/rocksdb/pull/14752) merges and we bump the submodule. For coroutine builds the default is the right choice for most workloads anyway.
 

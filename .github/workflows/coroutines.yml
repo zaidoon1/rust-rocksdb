@@ -16,6 +16,11 @@ jobs:
   build-and-test:
     name: Build & test with coroutines feature
     runs-on: ubuntu-latest
+    # Folly's getdeps build can take 30-60+ minutes on a cold cache on
+    # standard GHA runners (small core count, no parallelism flags). 90
+    # minutes is a comfortable upper bound. With a warm cache the whole
+    # job finishes in ~15 minutes.
+    timeout-minutes: 90
     steps:
       - name: Checkout sources
         uses: actions/checkout@v5

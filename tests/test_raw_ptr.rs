@@ -18,7 +18,10 @@
 
 mod util;
 
-use rust_rocksdb::{AsRawPtr, DB, Env, IngestExternalFileOptions, Options, SstFileWriter};
+use rust_rocksdb::{
+    AsRawPtr, DB, Env, IngestExternalFileOptions, MultiThreaded, OptimisticTransactionDB, Options,
+    SstFileWriter,
+};
 use util::DBPath;
 
 #[test]
@@ -267,4 +270,94 @@ fn test_ingest_external_file_options_raw_ptr_set_ingest() {
 
     //Verify the source files are gone
     assert!(!writer_path.exists(), "source SST should have been removed");
+}
+
+#[test]
+fn test_optimistic_transaction_db_as_raw_ptr() {
+    let path = DBPath::new("_rust_rocksdb_raw_ptr_optimistic_txn_db_test");
+    let db: OptimisticTransactionDB = OptimisticTransactionDB::open_default(&path).unwrap();
+
+    let raw_ptr = unsafe { db.as_raw_ptr() };
+    assert!(!raw_ptr.is_null());
+}
+
+#[test]
+fn test_optimistic_transaction_db_raw_ptr_stability() {
+    let path = DBPath::new("_rust_rocksdb_raw_ptr_optimistic_txn_db_stability");
+    let db: OptimisticTransactionDB = OptimisticTransactionDB::open_default(&path).unwrap();
+
+    let ptr1 = unsafe { db.as_raw_ptr() };
+    let ptr2 = unsafe { db.as_raw_ptr() };
+
+    // Multiple calls should return the same pointer
+    assert_eq!(ptr1, ptr2);
+}
+
+#[test]
+fn test_multiple_optimistic_transaction_dbs_have_different_raw_ptrs() {
+    let path1 = DBPath::new("_rust_rocksdb_raw_ptr_optimistic_txn_db_multi_1");
+    let path2 = DBPath::new("_rust_rocksdb_raw_ptr_optimistic_txn_db_multi_2");
+
+    let db1: OptimisticTransactionDB = OptimisticTransactionDB::open_default(&path1).unwrap();
+    let db2: OptimisticTransactionDB = OptimisticTransactionDB::open_default(&path2).unwrap();
+
+    let ptr1 = unsafe { db1.as_raw_ptr() };
+    let ptr2 = unsafe { db2.as_raw_ptr() };
+
+    assert_ne!(ptr1, ptr2);
+    assert!(!ptr1.is_null());
+    assert!(!ptr2.is_null());
+}
+
+#[test]
+fn test_optimistic_transaction_db_raw_ptr_valid_after_transaction() {
+    let path = DBPath::new("_rust_rocksdb_raw_ptr_optimistic_txn_db_txn");
+    let db: OptimisticTransactionDB = OptimisticTransactionDB::open_default(&path).unwrap();
+
+    let ptr_before = unsafe { db.as_raw_ptr() };
+    let seq_before = unsafe { rust_librocksdb_sys::rocksdb_get_latest_sequence_number(ptr_before) };
+
+    // Commit a transaction — the operation specific to OptimisticTransactionDB.
+    let txn = db.transaction();
+    txn.put(b"key1", b"value1").unwrap();
+    txn.commit().unwrap();
+
+    let ptr_after = unsafe { db.as_raw_ptr() };
+    let seq_after = unsafe { rust_librocksdb_sys::rocksdb_get_latest_sequence_number(ptr_after) };
+
+    // Pointer must be stable across transactions.
+    assert_eq!(ptr_before, ptr_after);
+    // The sequence number obtained through the raw pointer must reflect the
+    // committed write, proving the pointer is a valid rocksdb_t*.
+    assert!(seq_after > seq_before);
+}
+
+#[test]
+fn test_optimistic_transaction_db_multi_threaded_as_raw_ptr() {
+    let path = DBPath::new("_rust_rocksdb_raw_ptr_optimistic_txn_db_mt_test");
+    let db: OptimisticTransactionDB<MultiThreaded> =
+        OptimisticTransactionDB::open_default(&path).unwrap();
+
+    let raw_ptr = unsafe { db.as_raw_ptr() };
+    assert!(!raw_ptr.is_null());
+}
+
+#[test]
+fn test_optimistic_transaction_db_multi_threaded_raw_ptr_valid_after_transaction() {
+    let path = DBPath::new("_rust_rocksdb_raw_ptr_optimistic_txn_db_mt_txn");
+    let db: OptimisticTransactionDB<MultiThreaded> =
+        OptimisticTransactionDB::open_default(&path).unwrap();
+
+    let ptr_before = unsafe { db.as_raw_ptr() };
+    let seq_before = unsafe { rust_librocksdb_sys::rocksdb_get_latest_sequence_number(ptr_before) };
+
+    let txn = db.transaction();
+    txn.put(b"key1", b"value1").unwrap();
+    txn.commit().unwrap();
+
+    let ptr_after = unsafe { db.as_raw_ptr() };
+    let seq_after = unsafe { rust_librocksdb_sys::rocksdb_get_latest_sequence_number(ptr_after) };
+
+    assert_eq!(ptr_before, ptr_after);
+    assert!(seq_after > seq_before);
 }

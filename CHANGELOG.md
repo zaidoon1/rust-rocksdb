@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- bump MSRV to 1.91.0 per the rolling 6-month policy. 1.91.0 was
+  released 2025-10-30, the most recent stable that satisfies the
+  6-month window from today. No critical compiler bugs or soundness
+  fixes in 1.92+ apply to this codebase. (zaidoon1)
+
 ## 0.49.1 (2026-05-18)
 
 - removed: drop the `numa` cargo feature that shipped in 0.49.0. The

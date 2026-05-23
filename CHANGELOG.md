@@ -1,7 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.50.0 (2026-05-23)
 
+- breaking: bump MSRV to 1.91.0 per the rolling 6-month policy. 1.91.0
+  was released 2025-10-30, the most recent stable that satisfied the
+  6-month window at the time of the bump. No critical compiler bugs
+  or soundness fixes in 1.92+ apply to this codebase. (zaidoon1)
+- feat: implement `AsRawPtr<rocksdb_t>` for `OptimisticTransactionDB<T>`
+  (gated on the `raw-ptr` feature). Returns the underlying base DB
+  pointer for advanced C-API use cases such as verifying file
+  checksums directly. (ksurent)
 - fix: re-export two public types that were defined in private
   modules but appeared in the return type of a `pub` function in the
   crate-root surface, making them effectively unnameable by downstream

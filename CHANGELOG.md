@@ -2,10 +2,30 @@
 
 ## Unreleased
 
-- bump MSRV to 1.91.0 per the rolling 6-month policy. 1.91.0 was
-  released 2025-10-30, the most recent stable that satisfies the
-  6-month window from today. No critical compiler bugs or soundness
-  fixes in 1.92+ apply to this codebase. (zaidoon1)
+- feat(librocksdb-sys): add local C-API extensions for RocksDB C++
+  features that have no upstream C wrapper yet. Two new files in
+  `librocksdb-sys/c-api-extensions/` (`c_api_extensions.h` and
+  `c_api_extensions.cc`) declare and define the new C symbols
+  additively; the vendored RocksDB submodule is never modified.
+  `build.rs` compiles the extension `.cc` alongside the submodule's
+  sources (vendored backend) or links it against the user's
+  pre-built `librocksdb` (system backend). No build-time
+  dependencies beyond the C++ compiler the crate already requires —
+  in particular, no `git` is needed at build time. Three symbols
+  ship in this release, each mirroring an upstream PR against
+  `facebook/rocksdb`:
+  - `rocksdb_readoptions_{set,get}_optimize_multiget_for_io`,
+    matching upstream PR facebook/rocksdb#14752.
+  - `rocksdb_block_based_options_set_uniform_cv_threshold` and the
+    `rocksdb_block_based_table_index_block_search_type_auto = 2`
+    enum constant, both needed for `kAuto` index-block search to
+    take effect.
+  - `rocksdb_options_{set,get}_memtable_batch_lookup_optimization`
+    for the skip-list memtable's batch-lookup optimization for
+    MultiGet.
+  When upstream merges a matching PR and the submodule is bumped to
+  a release containing it, the local entry can be dropped.
+  (zaidoon1)
 
 ## 0.49.1 (2026-05-18)
 

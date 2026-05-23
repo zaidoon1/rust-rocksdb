@@ -234,6 +234,13 @@ fn main() {
 
     let backend = Backend::resolve(&target);
 
+    // Re-run build.rs if the local C-API extensions change. The
+    // extensions are a small handful of files outside the submodule
+    // (see librocksdb-sys/c-api-extensions/) compiled and linked into
+    // every build, vendored or system. There's no patch application
+    // step: the extensions just add new symbols additively.
+    println!("cargo::rerun-if-changed=c-api-extensions/");
+
     match &backend {
         Backend::Vendored { .. } => {
             println!("cargo::rerun-if-changed=rocksdb/");
@@ -245,6 +252,11 @@ fn main() {
             // We still need to link the C++ stdlib explicitly because
             // there's no `cc::Build` to do it for us.
             cpp_link_stdlib(&target);
+            // The C-API extensions are not part of the user's installed
+            // librocksdb, so we compile them ourselves and link the
+            // resulting tiny static archive into the final binary
+            // alongside the system rocksdb.
+            extensions::build_for_system_backend(&target, &backend);
         }
     }
 
@@ -366,6 +378,11 @@ mod vendor {
             cfg.file(format!("rocksdb/{src}"));
         }
         cfg.file("build_version.cc");
+        // Local C-API extensions are compiled as a regular translation
+        // unit alongside the submodule's `db/c.cc`. The two end up in the
+        // same `librocksdb.a`; the linker resolves the new symbols out of
+        // the extension's `.o` and everything else out of the submodule's.
+        cfg.file("c-api-extensions/c_api_extensions.cc");
 
         if !target.is_msvc() {
             // Force-include <cstdint>. Some translation units use uintN_t
@@ -379,11 +396,15 @@ mod vendor {
     }
 
     /// Base `cc::Build` with the always-on flags, defines, includes, and
-    /// warning settings.
+    /// warning settings. The local `c-api-extensions/` directory is
+    /// prepended to the include path so `c_api_extensions.cc` finds its
+    /// own header via `#include "c_api_extensions.h"` without needing a
+    /// fully qualified path.
     fn base_cfg(target: &Target) -> cc::Build {
         let mut cfg = cc::Build::new();
 
-        cfg.include("rocksdb/include/")
+        cfg.include("c-api-extensions/")
+            .include("rocksdb/include/")
             .include("rocksdb/")
             .include("rocksdb/third-party/gtest-1.8.1/fused-src/")
             .include(".");
@@ -1049,7 +1070,11 @@ mod bindings {
     /// rather than guessing `/usr/include` and silently misbinding.
     pub(super) fn generate(backend: &Backend) {
         let includes = backend.all_includes();
-        let primary = includes.first().unwrap_or_else(|| {
+        // The first include path is only used as a sanity check (it has to
+        // exist or the build will fail downstream); the actual primary
+        // header is our local extensions header, which `#include`s
+        // `rocksdb/c.h` and then declares the additional symbols.
+        let _primary = includes.first().unwrap_or_else(|| {
             panic!(
                 "could not determine the RocksDB include directory.\n\
                  Set ROCKSDB_INCLUDE_DIR to the directory containing \
@@ -1058,7 +1083,13 @@ mod bindings {
             )
         });
 
-        let header = primary.join("rocksdb").join("c.h");
+        // Bindgen reads our extensions header as the primary input. The
+        // extensions header pulls in `rocksdb/c.h` via `#include "rocksdb/c.h"`,
+        // so bindgen ends up scanning the full upstream C API surface plus
+        // our local additions in one pass.
+        let header = manifest_dir()
+            .join("c-api-extensions")
+            .join("c_api_extensions.h");
 
         let mut builder = bindgen::Builder::default()
             .header(header.display().to_string())
@@ -1068,8 +1099,9 @@ mod bindings {
             .ctypes_prefix("libc")
             .size_t_is_usize(true);
 
-        // Pass every include path so headers split across multiple roots
-        // (rare but happens with chained pkg-config deps) are all found.
+        // Pass every backend include path so headers split across multiple
+        // roots (rare but happens with chained pkg-config deps) are all
+        // found.
         for inc in includes {
             builder = builder.clang_arg(format!("-I{}", inc.display()));
         }
@@ -1407,6 +1439,65 @@ fn env_truthy(name: &str) -> bool {
             v == "1" || v.eq_ignore_ascii_case("true")
         }
         Err(_) => false,
+    }
+}
+
+// =========================================================================
+// Local C-API extensions
+// =========================================================================
+
+/// Local additions to the RocksDB C API for C++ options that have no
+/// upstream C wrapper yet. The actual sources live in
+/// `librocksdb-sys/c-api-extensions/`:
+///
+/// - `c_api_extensions.h` declares the new C symbols and `#include`s
+///   `rocksdb/c.h`, making it a clean superset of the upstream C API
+///   header that bindgen scans as its primary input.
+/// - `c_api_extensions.cc` defines the new symbols by reaching into the
+///   relevant C++ types (`ReadOptions`, `Options`, `BlockBasedTableOptions`).
+///
+/// For the Vendored backend, `vendor::build()` already adds the extension
+/// `.cc` to its `cc::Build` source list — there's nothing extra to do.
+/// This module exists for the System backend, where the user supplies a
+/// pre-built `librocksdb` that doesn't contain our extensions: we compile
+/// the extension as a tiny standalone static archive and link it
+/// alongside the system library.
+mod extensions {
+    use super::*;
+
+    /// Compile `c_api_extensions.cc` as a small standalone static
+    /// archive and emit the cargo link directives to pull it into the
+    /// final binary. Used only on the System backend; the Vendored
+    /// backend folds the same source into `librocksdb.a` directly.
+    pub(super) fn build_for_system_backend(target: &Target, backend: &Backend) {
+        let mut cfg = cc::Build::new();
+
+        // The extension references types from `rocksdb/options.h` and
+        // `rocksdb/table.h`, plus the opaque-handle types from
+        // `rocksdb/c.h`. Pass the system rocksdb's include dirs so those
+        // resolve against the version the user has installed.
+        cfg.include("c-api-extensions/");
+        for inc in backend.all_includes() {
+            cfg.include(inc);
+        }
+
+        cfg.file("c-api-extensions/c_api_extensions.cc");
+        cfg.cpp(true);
+
+        // Match the vendored build's C++ standard so the extension's
+        // headers compile the same way against the user's
+        // `rocksdb/options.h`.
+        let cxx_std = env::var("ROCKSDB_CXX_STD").unwrap_or_else(|_| DEFAULT_CXX_STD.to_string());
+        if target.is_msvc() {
+            cfg.flag(format!("/std:{cxx_std}"));
+        } else {
+            cfg.flag(format!("-std={cxx_std}"));
+            // See `vendor::build`'s identical force-include of <cstdint>:
+            // some translation units need it on stricter GCC versions.
+            cfg.flag("-include").flag("cstdint");
+        }
+
+        cfg.compile("rust_rocksdb_c_api_extensions");
     }
 }
 

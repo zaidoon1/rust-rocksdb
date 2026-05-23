@@ -24,7 +24,10 @@ exclude = [
     "*/examples",
     "*/tests",
     "tests",
-    "*.md",
+    # Strip the (large) vendored RocksDB documentation but KEEP
+    # `librocksdb-sys/patches/README.md`, which is referenced from the
+    # build-script panic that fires when a patch fails to apply.
+    "rocksdb/**/*.md",
 ]
 
 [features]

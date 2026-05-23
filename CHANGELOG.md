@@ -26,6 +26,32 @@
   When upstream merges a matching PR and the submodule is bumped to
   a release containing it, the local entry can be dropped.
   (zaidoon1)
+- feat: expose three new RocksDB option setters on the safe Rust API,
+  matching the three C-API extensions above. Getters are also exposed
+  for the two `bool` options so tests (and downstream callers) can
+  confirm the C-side actually accepted the value.
+  - `BlockBasedOptions::set_index_block_search_type(IndexBlockSearchType)`
+    and the new `IndexBlockSearchType` enum (`Binary`, `Interpolation`,
+    `Auto`) for selecting the index-block search algorithm.
+  - `BlockBasedOptions::set_uniform_cv_threshold(f64)` to set the
+    write-path uniformity threshold consulted by `Auto`. Any negative
+    value (including the default `-1`) disables the feature; `Auto`
+    then falls back to binary search at read time.
+  - `Options::{set,get}_memtable_batch_lookup_optimization(bool)` to
+    opt into the default skip-list memtable's batch-lookup
+    optimization for `MultiGet`. Reduces per-key cost from O(log N) to
+    O(log d), where d is the distance between consecutive keys; no-op
+    for non-skip-list memtable factories (`Vector`, `HashSkipList`,
+    `HashLinkList`). Immutable: must be set before opening the
+    column family.
+  - `ReadOptions::{set,get}_optimize_multiget_for_io(bool)` to toggle
+    between the multi-level (default `true`, lowest latency, higher
+    CPU) and single-level (lower CPU) parallel `MultiGet` paths.
+    Has no effect outside `coroutines`-enabled builds with
+    `set_async_io(true)` — with either condition unmet, both code
+    paths fall through to the synchronous per-file lookup regardless
+    of this flag.
+  (zaidoon1)
 
 ## 0.49.1 (2026-05-18)
 

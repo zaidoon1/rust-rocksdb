@@ -22,12 +22,13 @@ use std::{sync::Arc, thread, time::Duration};
 
 use rust_rocksdb::statistics::{Histogram, StatsLevel, Ticker};
 use rust_rocksdb::{
-    BlockBasedOptions, BottommostLevelCompaction, Cache, ColumnFamilyDescriptor, ColumnFamilyTtl,
-    CompactOptions, CuckooTableOptions, DB, DBAccess, DBCompactionStyle, DBWithThreadMode,
-    DEFAULT_COLUMN_FAMILY_NAME, Env, Error, ErrorKind, FifoCompactOptions, IteratorMode,
-    MultiThreaded, Options, PerfContext, PerfMetric, RateLimiterMode, ReadOptions, SingleThreaded,
-    SliceTransform, Snapshot, UniversalCompactOptions, UniversalCompactionStopStyle,
-    WaitForCompactOptions, WriteBatch, perf::get_memory_usage_stats,
+    BlockBasedOptions, BottommostLevelCompaction, Cache, ColumnFamilyDescriptor,
+    ColumnFamilyMetaData, ColumnFamilyTtl, CompactOptions, CuckooTableOptions, DB, DBAccess,
+    DBCompactionStyle, DBWithThreadMode, DEFAULT_COLUMN_FAMILY_NAME, Env, Error, ErrorKind,
+    FifoCompactOptions, IteratorMode, MultiThreaded, Options, PerfContext, PerfMetric,
+    RateLimiterMode, ReadOptions, SingleThreaded, SliceTransform, Snapshot,
+    UniversalCompactOptions, UniversalCompactionStopStyle, WaitForCompactOptions, WriteBatch,
+    perf::get_memory_usage_stats,
 };
 use util::{DBPath, U64Comparator, U64Timestamp, assert_iter, pair};
 
@@ -439,12 +440,16 @@ fn set_column_family_metadata_test() {
         db.flush_cf(&cf1).unwrap();
         db.flush_cf(&cf2).unwrap();
 
-        let default_cf_metadata = db.get_column_family_metadata();
-        assert_eq!(default_cf_metadata.size > 150, true);
+        // Annotate the return type to lock in that `ColumnFamilyMetaData`
+        // is reachable from the crate root, not just inside the crate (see
+        // zaidoon1/rust-rocksdb#224). A regression where the re-export is
+        // dropped would fail to compile here.
+        let default_cf_metadata: ColumnFamilyMetaData = db.get_column_family_metadata();
+        assert!(default_cf_metadata.size > 150);
         assert_eq!(default_cf_metadata.file_count, 1);
 
-        let cf2_metadata = db.get_column_family_metadata_cf(&cf2);
-        assert_eq!(cf2_metadata.size > default_cf_metadata.size, true);
+        let cf2_metadata: ColumnFamilyMetaData = db.get_column_family_metadata_cf(&cf2);
+        assert!(cf2_metadata.size > default_cf_metadata.size);
         assert_eq!(cf2_metadata.file_count, 1);
     }
 }

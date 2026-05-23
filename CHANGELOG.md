@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- fix: re-export two public types that were defined in private
+  modules but appeared in the return type of a `pub` function in the
+  crate-root surface, making them effectively unnameable by downstream
+  callers (zaidoon1/rust-rocksdb#224):
+  - `ColumnFamilyMetaData` — return type of
+    `DB::get_column_family_metadata{,_cf}`. Users need this to store
+    or pass the metadata through their own code.
+  - `CSlice` — returned wrapped in `(bool, Option<CSlice>)` by the
+    `key_may_exist_*_pinned_value` helpers. Users who want to hold
+    onto the pinned value past the immediate call site need the name.
+  A new `tests/test_public_api.rs` compile-checks both imports so a
+  future accidental un-export fails the test build rather than only
+  surfacing in downstream user reports. Thanks to JadedBlueEyes for
+  the report. (zaidoon1)
 - feat(librocksdb-sys): add local C-API extensions for RocksDB C++
   features that have no upstream C wrapper yet. Two new files in
   `librocksdb-sys/c-api-extensions/` (`c_api_extensions.h` and

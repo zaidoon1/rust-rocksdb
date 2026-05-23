@@ -120,8 +120,9 @@ pub use crate::{
     },
     compaction_filter::Decision as CompactionDecision,
     db::{
-        DB, DBAccess, DBCommon, DBWithThreadMode, ExportImportFilesMetaData, GetIntoBufferResult,
-        LiveFile, MultiThreaded, PrefixProber, Range, SingleThreaded, ThreadMode,
+        ColumnFamilyMetaData, DB, DBAccess, DBCommon, DBWithThreadMode, ExportImportFilesMetaData,
+        GetIntoBufferResult, LiveFile, MultiThreaded, PrefixProber, Range, SingleThreaded,
+        ThreadMode,
     },
     db_iterator::{
         DBIterator, DBIteratorWithThreadMode, DBRawIterator, DBRawIteratorWithThreadMode,
@@ -138,7 +139,7 @@ pub use crate::{
     },
     db_pinnable_slice::DBPinnableSlice,
     env::Env,
-    ffi_util::CStrLike,
+    ffi_util::{CSlice, CStrLike},
     iter_range::{IterateBounds, PrefixRange},
     merge_operator::MergeOperands,
     perf::{PerfContext, PerfMetric, PerfStatsLevel},

@@ -22,7 +22,8 @@ use std::{
 
 use rust_rocksdb::{
     BlockBasedOptions, BlockBasedPinningTier, Cache, DB, DBCompactionPri, DBCompressionType,
-    DataBlockIndexType, Env, LruCacheOptions, Options, ReadOptions, checkpoint::Checkpoint,
+    DataBlockIndexType, Env, IndexBlockSearchType, LruCacheOptions, Options, ReadOptions,
+    checkpoint::Checkpoint,
 };
 use util::DBPath;
 
@@ -176,6 +177,17 @@ fn test_read_options() {
     read_opts.set_verify_checksums(false);
     read_opts.set_deadline(121);
     read_opts.set_io_timeout(343);
+
+    // `optimize_multiget_for_io` is a ReadOptions flag consulted inside
+    // `USE_COROUTINES` builds only. It is not persisted to the DB's LOG.
+    // Round-trip through the getter to confirm the C-API setter actually
+    // mutates the underlying ReadOptions struct rather than being a no-op
+    // shim. C++ default is `true`.
+    assert!(read_opts.get_optimize_multiget_for_io());
+    read_opts.set_optimize_multiget_for_io(false);
+    assert!(!read_opts.get_optimize_multiget_for_io());
+    read_opts.set_optimize_multiget_for_io(true);
+    assert!(read_opts.get_optimize_multiget_for_io());
 }
 
 #[test]
@@ -221,6 +233,194 @@ fn test_set_data_block_index_type() {
             .expect("can read the LOG file");
         assert!(settings.contains("data_block_index_type: 1"));
         assert!(settings.contains("data_block_hash_table_util_ratio: 0.350000"));
+    }
+}
+
+#[test]
+fn test_set_index_block_search_type_and_uniform_cv_threshold() {
+    let path = "_rust_rocksdb_test_index_block_search_type";
+    let n = DBPath::new(path);
+
+    // Default state: uniform_cv_threshold should be the disabled sentinel
+    // (-1) so that BlockSearchType::Auto degenerates to binary search.
+    {
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+
+        let block_opts = BlockBasedOptions::default();
+        opts.set_block_based_table_factory(&block_opts);
+        let _db = DB::open(&opts, &n).expect("open default-options db works");
+
+        let mut rocksdb_log = fs::File::open(format!("{}/LOG", (&n).as_ref().to_str().unwrap()))
+            .expect("rocksdb creates a LOG file");
+        let mut settings = String::new();
+        rocksdb_log
+            .read_to_string(&mut settings)
+            .expect("can read the LOG file");
+        // RocksDB prints `uniform_cv_threshold` regardless of value; the
+        // -1.0 default lands in the LOG as `-1.000000`.
+        assert!(
+            settings.contains("uniform_cv_threshold: -1.000000"),
+            "expected default uniform_cv_threshold in LOG; got:\n{settings}",
+        );
+    }
+
+    // Enable Auto + a real threshold and verify the threshold round-trips
+    // into the LOG. The search-type field itself is not printed by
+    // BlockBasedTableFactory::GetPrintableOptions today, so we cannot read
+    // it back; the threshold is the meaningful behavioural input for Auto
+    // and is sufficient to confirm the wiring.
+    {
+        let mut opts = Options::default();
+        opts.create_if_missing(false);
+
+        let mut block_opts = BlockBasedOptions::default();
+        block_opts.set_index_block_search_type(IndexBlockSearchType::Auto);
+        block_opts.set_uniform_cv_threshold(0.2);
+        opts.set_block_based_table_factory(&block_opts);
+        let _db = DB::open(&opts, &n).expect("open db with Auto + threshold works");
+
+        let mut rocksdb_log = fs::File::open(format!("{}/LOG", (&n).as_ref().to_str().unwrap()))
+            .expect("rocksdb creates a LOG file");
+        let mut settings = String::new();
+        rocksdb_log
+            .read_to_string(&mut settings)
+            .expect("can read the LOG file");
+        assert!(
+            settings.contains("uniform_cv_threshold: 0.200000"),
+            "expected configured uniform_cv_threshold in LOG; got:\n{settings}",
+        );
+    }
+}
+
+#[test]
+fn test_set_index_block_search_type_all_variants() {
+    // Each variant in turn must round-trip through the setter without
+    // panicking and the resulting DB must open. This guards against drift
+    // between the Rust enum discriminants and the C API enum constants.
+    //
+    // We use an explicit (variant, name) table instead of `format!("{:?}")`
+    // so the on-disk path doesn't silently change if a future
+    // `#[derive(Debug)]` is replaced with a custom `impl Debug`.
+    let cases: &[(IndexBlockSearchType, &str)] = &[
+        (IndexBlockSearchType::Binary, "binary"),
+        (IndexBlockSearchType::Interpolation, "interpolation"),
+        (IndexBlockSearchType::Auto, "auto"),
+    ];
+    for (variant, name) in cases {
+        let n = DBPath::new(&format!(
+            "_rust_rocksdb_test_index_block_search_type_variant_{name}"
+        ));
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+
+        let mut block_opts = BlockBasedOptions::default();
+        block_opts.set_index_block_search_type(*variant);
+        // Set a valid threshold so Auto has something meaningful to read,
+        // and so we cover the case where the threshold is set even with
+        // Binary/Interpolation (which simply ignore it at read time).
+        block_opts.set_uniform_cv_threshold(0.2);
+        opts.set_block_based_table_factory(&block_opts);
+
+        let _db = DB::open(&opts, &n).unwrap_or_else(|e| panic!("open db with {name} failed: {e}"));
+    }
+}
+
+#[test]
+fn test_set_index_block_search_type_auto_with_default_threshold_degenerates() {
+    // The documented contract of `IndexBlockSearchType::Auto` is that it
+    // selects per-block search using the write-path `is_uniform` footer bit
+    // — which is never set when `uniform_cv_threshold` is left at its
+    // disabled-sentinel default of `-1`. In that combination `Auto` is
+    // documented to "degenerate to binary search".
+    //
+    // We can't observe the lookup path from Rust, but we CAN pin down the
+    // weaker (and the only externally testable) guarantee: opening a DB
+    // with `Auto` and NO call to `set_uniform_cv_threshold` must succeed
+    // and must report the default `-1.000000` threshold in the LOG. This
+    // catches a future regression where e.g. the default sentinel was
+    // changed and `Auto` started failing at DB-open instead of falling
+    // back silently.
+    let n = DBPath::new("_rust_rocksdb_test_index_block_search_type_auto_default_threshold");
+    let mut opts = Options::default();
+    opts.create_if_missing(true);
+
+    let mut block_opts = BlockBasedOptions::default();
+    block_opts.set_index_block_search_type(IndexBlockSearchType::Auto);
+    // Intentionally NOT calling set_uniform_cv_threshold — exercise the
+    // documented degenerate path.
+    opts.set_block_based_table_factory(&block_opts);
+
+    let _db = DB::open(&opts, &n).expect("open with Auto + default threshold must succeed");
+
+    let mut rocksdb_log = fs::File::open(format!("{}/LOG", (&n).as_ref().to_str().unwrap()))
+        .expect("rocksdb creates a LOG file");
+    let mut settings = String::new();
+    rocksdb_log
+        .read_to_string(&mut settings)
+        .expect("can read the LOG file");
+    assert!(
+        settings.contains("uniform_cv_threshold: -1.000000"),
+        "expected default uniform_cv_threshold (-1) in LOG; got:\n{settings}",
+    );
+}
+
+#[test]
+fn test_set_memtable_batch_lookup_optimization() {
+    let path = "_rust_rocksdb_test_memtable_batch_lookup_optimization";
+    let n = DBPath::new(path);
+
+    // Round-trip the setter through the getter first, before any DB open.
+    // This confirms the C-API setter is actually wired through to the
+    // ColumnFamilyOptions field, independently of whatever the LOG dumper
+    // emits.
+    let mut opts = Options::default();
+    assert!(
+        !opts.get_memtable_batch_lookup_optimization(),
+        "default C++ value is false",
+    );
+    opts.set_memtable_batch_lookup_optimization(true);
+    assert!(opts.get_memtable_batch_lookup_optimization());
+    opts.set_memtable_batch_lookup_optimization(false);
+    assert!(!opts.get_memtable_batch_lookup_optimization());
+
+    // Default: disabled. The cf_options dumper prefixes immutable
+    // ColumnFamilyOptions fields with `Options.` in the LOG.
+    {
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        let _db = DB::open(&opts, &n).expect("open default-options db works");
+
+        let mut rocksdb_log = fs::File::open(format!("{}/LOG", (&n).as_ref().to_str().unwrap()))
+            .expect("rocksdb creates a LOG file");
+        let mut settings = String::new();
+        rocksdb_log
+            .read_to_string(&mut settings)
+            .expect("can read the LOG file");
+        assert!(
+            settings.contains("Options.memtable_batch_lookup_optimization: false"),
+            "expected default memtable_batch_lookup_optimization=false in LOG; got:\n{settings}",
+        );
+    }
+
+    // Enabled.
+    {
+        let mut opts = Options::default();
+        opts.create_if_missing(false);
+        opts.set_memtable_batch_lookup_optimization(true);
+        let _db = DB::open(&opts, &n).expect("open db with batch lookup opt works");
+
+        let mut rocksdb_log = fs::File::open(format!("{}/LOG", (&n).as_ref().to_str().unwrap()))
+            .expect("rocksdb creates a LOG file");
+        let mut settings = String::new();
+        rocksdb_log
+            .read_to_string(&mut settings)
+            .expect("can read the LOG file");
+        assert!(
+            settings.contains("Options.memtable_batch_lookup_optimization: true"),
+            "expected configured memtable_batch_lookup_optimization=true in LOG; \
+             got:\n{settings}",
+        );
     }
 }
 

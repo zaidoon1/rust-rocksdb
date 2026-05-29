@@ -13,6 +13,7 @@
 #include "rocksdb/table.h"
 
 using ROCKSDB_NAMESPACE::BlockBasedTableOptions;
+using ROCKSDB_NAMESPACE::CompactRangeOptions;
 using ROCKSDB_NAMESPACE::Options;
 using ROCKSDB_NAMESPACE::ReadOptions;
 
@@ -79,4 +80,18 @@ extern "C" void rocksdb_options_set_memtable_batch_lookup_optimization(
 extern "C" unsigned char rocksdb_options_get_memtable_batch_lookup_optimization(
     rocksdb_options_t* opt) {
   return reinterpret_cast<Options*>(opt)->memtable_batch_lookup_optimization;
+}
+
+// -----------------------------------------------------------------------------
+// CompactOptions::blob_garbage_collection_age_cutoff
+// -----------------------------------------------------------------------------
+
+extern "C" void rocksdb_compactoptions_set_blob_garbage_collection_age_cutoff(
+    rocksdb_compactoptions_t* opt, double v) {
+  reinterpret_cast<CompactRangeOptions*>(opt)->blob_garbage_collection_age_cutoff = v;
+}
+
+extern "C" double rocksdb_compactoptions_get_blob_garbage_collection_age_cutoff(
+    rocksdb_compactoptions_t* opt) {
+  return reinterpret_cast<CompactRangeOptions*>(opt)->blob_garbage_collection_age_cutoff;
 }

@@ -5067,6 +5067,16 @@ impl CompactOptions {
             ffi::rocksdb_compactoptions_set_full_history_ts_low(self.inner, ptr, len);
         }
     }
+
+    /// If set to < 0 or > 1, RocksDB leaves blob_garbage_collection_age_cutoff
+    /// from ColumnFamilyOptions in effect. Otherwise, it will override the
+    /// user-provided setting. This enables customers to selectively override the
+    /// age cutoff.
+    pub fn set_blob_garbage_collection_age_cutoff(&mut self, v: c_double) {
+        unsafe {
+            ffi::rocksdb_compactoptions_set_blob_garbage_collection_age_cutoff(self.inner, v);
+        }
+    }
 }
 
 pub struct WaitForCompactOptions {

@@ -851,6 +851,7 @@ fn compact_range_test() {
         compact_opts.set_target_level(1);
         compact_opts.set_change_level(true);
         compact_opts.set_bottommost_level_compaction(BottommostLevelCompaction::ForceOptimized);
+        compact_opts.set_blob_garbage_collection_age_cutoff(0.5);
 
         // put and compact column family cf1
         let cfs = vec!["cf1"];

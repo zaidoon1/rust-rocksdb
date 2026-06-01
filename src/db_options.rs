@@ -5067,6 +5067,24 @@ impl CompactOptions {
             ffi::rocksdb_compactoptions_set_full_history_ts_low(self.inner, ptr, len);
         }
     }
+
+    /// Override `CompactRangeOptions::blob_garbage_collection_age_cutoff` for a
+    /// single manual compaction.
+    ///
+    /// If set to `< 0` or `> 1`, RocksDB leaves the
+    /// `blob_garbage_collection_age_cutoff` from `ColumnFamilyOptions` in
+    /// effect (this is the default, `-1`). Otherwise, it overrides the
+    /// user-provided setting for the duration of this compaction. This
+    /// enables callers to selectively override the age cutoff per
+    /// `compact_range` call.
+    ///
+    /// See [`Options::set_blob_gc_age_cutoff`] for the CF-level setter that
+    /// this value overrides.
+    pub fn set_blob_garbage_collection_age_cutoff(&mut self, v: c_double) {
+        unsafe {
+            ffi::rocksdb_compactoptions_set_blob_garbage_collection_age_cutoff(self.inner, v);
+        }
+    }
 }
 
 pub struct WaitForCompactOptions {

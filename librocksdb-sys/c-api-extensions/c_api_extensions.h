@@ -77,6 +77,17 @@ extern ROCKSDB_LIBRARY_API void rocksdb_options_set_memtable_batch_lookup_optimi
 extern ROCKSDB_LIBRARY_API unsigned char rocksdb_options_get_memtable_batch_lookup_optimization(
     rocksdb_options_t*);
 
+/* -------------------------------------------------------------------------
+ * CompactOptions::blob_garbage_collection_age_cutoff
+ *
+ * Sets the blob_garbage_collection_age_cutoff parameters on manual
+ * compactions. Matches upstream PR facebook/rocksdb#14768.
+ * ------------------------------------------------------------------------- */
+extern ROCKSDB_LIBRARY_API void rocksdb_compactoptions_set_blob_garbage_collection_age_cutoff(
+    rocksdb_compactoptions_t*, double);
+extern ROCKSDB_LIBRARY_API double rocksdb_compactoptions_get_blob_garbage_collection_age_cutoff(
+    rocksdb_compactoptions_t*);
+
 #ifdef __cplusplus
 }
 #endif

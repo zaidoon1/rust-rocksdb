@@ -196,6 +196,7 @@ pub enum DBBackgroundErrorReason {
     KManifestWrite = 4,
     KFlushNoWAL = 5,
     KManifestWriteNoWAL = 6,
+    KAsyncFileOpen = 7,
     KUnknown, // not an actual background error reason but will be used when we don't recognize the enum value
 }
 
@@ -209,7 +210,35 @@ impl From<u32> for DBBackgroundErrorReason {
             4 => DBBackgroundErrorReason::KManifestWrite,
             5 => DBBackgroundErrorReason::KFlushNoWAL,
             6 => DBBackgroundErrorReason::KManifestWriteNoWAL,
+            7 => DBBackgroundErrorReason::KAsyncFileOpen,
             _ => DBBackgroundErrorReason::KUnknown,
+        }
+    }
+}
+
+/// Severity carried by RocksDB's background error `Status`.
+#[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u8)]
+pub enum StatusSeverity {
+    KNoError = 0,
+    KSoftError = 1,
+    KHardError = 2,
+    KFatalError = 3,
+    KUnrecoverableError = 4,
+    KMaxSeverity = 5,
+    KUnknown,
+}
+
+impl From<u8> for StatusSeverity {
+    fn from(value: u8) -> Self {
+        match value {
+            0 => StatusSeverity::KNoError,
+            1 => StatusSeverity::KSoftError,
+            2 => StatusSeverity::KHardError,
+            3 => StatusSeverity::KFatalError,
+            4 => StatusSeverity::KUnrecoverableError,
+            5 => StatusSeverity::KMaxSeverity,
+            _ => StatusSeverity::KUnknown,
         }
     }
 }
@@ -478,16 +507,102 @@ impl MemTableInfo {
 
 pub struct MutableStatus {
     result: Result<(), Error>,
-    ptr: *mut ffi::rocksdb_status_ptr_t,
+    ptr: *mut ffi::rust_rocksdb_status_t,
 }
 
 impl MutableStatus {
     pub fn reset(&self) {
-        unsafe { ffi::rocksdb_reset_status(self.ptr) }
+        unsafe { ffi::rust_rocksdb_status_reset(self.ptr) }
     }
 
     pub fn result(&self) -> &Result<(), Error> {
         &self.result
+    }
+
+    pub fn severity(&self) -> StatusSeverity {
+        unsafe { StatusSeverity::from(ffi::rust_rocksdb_status_get_severity(self.ptr)) }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackgroundErrorStatus {
+    result: Result<(), Error>,
+    severity: StatusSeverity,
+}
+
+impl BackgroundErrorStatus {
+    pub fn result(&self) -> &Result<(), Error> {
+        &self.result
+    }
+
+    pub fn severity(&self) -> StatusSeverity {
+        self.severity
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackgroundErrorRecoveryInfo {
+    old_bg_error: BackgroundErrorStatus,
+    new_bg_error: BackgroundErrorStatus,
+}
+
+impl BackgroundErrorRecoveryInfo {
+    pub fn old_bg_error(&self) -> &BackgroundErrorStatus {
+        &self.old_bg_error
+    }
+
+    pub fn new_bg_error(&self) -> &BackgroundErrorStatus {
+        &self.new_bg_error
+    }
+}
+
+fn result_from_error_ptr(err: *mut c_char) -> Result<(), Error> {
+    if err.is_null() {
+        Ok(())
+    } else {
+        Err(convert_rocksdb_error(err))
+    }
+}
+
+fn status_result(status_ptr: *mut ffi::rust_rocksdb_status_t) -> Result<(), Error> {
+    unsafe {
+        let mut err: *mut c_char = std::ptr::null_mut();
+        ffi::rust_rocksdb_status_get_error(status_ptr, &raw mut err);
+        result_from_error_ptr(err)
+    }
+}
+
+fn background_error_status(status_ptr: *mut ffi::rust_rocksdb_status_t) -> BackgroundErrorStatus {
+    BackgroundErrorStatus {
+        result: status_result(status_ptr),
+        severity: unsafe {
+            StatusSeverity::from(ffi::rust_rocksdb_status_get_severity(status_ptr))
+        },
+    }
+}
+
+fn background_error_recovery_info(
+    info: *const ffi::rust_rocksdb_background_error_recovery_info_t,
+) -> BackgroundErrorRecoveryInfo {
+    unsafe {
+        let mut old_bg_error: *mut c_char = std::ptr::null_mut();
+        let mut new_bg_error: *mut c_char = std::ptr::null_mut();
+        ffi::rust_rocksdb_background_error_recovery_info_old_bg_error(info, &raw mut old_bg_error);
+        ffi::rust_rocksdb_background_error_recovery_info_new_bg_error(info, &raw mut new_bg_error);
+        BackgroundErrorRecoveryInfo {
+            old_bg_error: BackgroundErrorStatus {
+                result: result_from_error_ptr(old_bg_error),
+                severity: StatusSeverity::from(
+                    ffi::rust_rocksdb_background_error_recovery_info_old_bg_error_severity(info),
+                ),
+            },
+            new_bg_error: BackgroundErrorStatus {
+                result: result_from_error_ptr(new_bg_error),
+                severity: StatusSeverity::from(
+                    ffi::rust_rocksdb_background_error_recovery_info_new_bg_error_severity(info),
+                ),
+            },
+        }
     }
 }
 
@@ -511,6 +626,14 @@ pub trait EventListener: Send + Sync {
     fn on_stall_conditions_changed(&self, _: &WriteStallInfo) {}
     fn on_memtable_sealed(&self, _: &MemTableInfo) {}
     fn on_background_error(&self, _: DBBackgroundErrorReason, _: MutableStatus) {}
+    fn on_error_recovery_begin(
+        &self,
+        _: DBBackgroundErrorReason,
+        _: &BackgroundErrorStatus,
+        _: &mut bool,
+    ) {
+    }
+    fn on_error_recovery_end(&self, _: &BackgroundErrorRecoveryInfo) {}
 }
 
 extern "C" fn destructor<E: EventListener>(ctx: *mut c_void) {
@@ -521,7 +644,6 @@ extern "C" fn destructor<E: EventListener>(ctx: *mut c_void) {
 
 unsafe extern "C" fn on_flush_begin<E: EventListener>(
     ctx: *mut c_void,
-    _: *mut ffi::rocksdb_t,
     info: *const ffi::rocksdb_flushjobinfo_t,
 ) {
     let ctx = unsafe { &*(ctx as *mut E) };
@@ -531,7 +653,6 @@ unsafe extern "C" fn on_flush_begin<E: EventListener>(
 
 extern "C" fn on_flush_completed<E: EventListener>(
     ctx: *mut c_void,
-    _: *mut ffi::rocksdb_t,
     info: *const ffi::rocksdb_flushjobinfo_t,
 ) {
     let ctx = unsafe { &*(ctx as *mut E) };
@@ -541,7 +662,6 @@ extern "C" fn on_flush_completed<E: EventListener>(
 
 extern "C" fn on_compaction_begin<E: EventListener>(
     ctx: *mut c_void,
-    _: *mut ffi::rocksdb_t,
     info: *const ffi::rocksdb_compactionjobinfo_t,
 ) {
     let ctx = unsafe { &*(ctx as *mut E) };
@@ -551,7 +671,6 @@ extern "C" fn on_compaction_begin<E: EventListener>(
 
 extern "C" fn on_compaction_completed<E: EventListener>(
     ctx: *mut c_void,
-    _: *mut ffi::rocksdb_t,
     info: *const ffi::rocksdb_compactionjobinfo_t,
 ) {
     let ctx = unsafe { &*(ctx as *mut E) };
@@ -579,7 +698,6 @@ extern "C" fn on_subcompaction_completed<E: EventListener>(
 
 extern "C" fn on_external_file_ingested<E: EventListener>(
     ctx: *mut c_void,
-    _: *mut ffi::rocksdb_t,
     info: *const ffi::rocksdb_externalfileingestioninfo_t,
 ) {
     let ctx = unsafe { &*(ctx as *mut E) };
@@ -608,27 +726,48 @@ extern "C" fn on_memtable_sealed<E: EventListener>(
 extern "C" fn on_background_error<E: EventListener>(
     ctx: *mut c_void,
     reason: u32,
-    status_ptr: *mut ffi::rocksdb_status_ptr_t,
+    status_ptr: *mut ffi::rust_rocksdb_status_t,
 ) {
     let ctx = unsafe { &*(ctx as *mut E) };
-    let result = unsafe {
-        let mut err: *mut c_char = std::ptr::null_mut();
-        ffi::rocksdb_status_ptr_get_error(status_ptr, &raw mut err);
-        if err.is_null() {
-            Ok(())
-        } else {
-            Err(convert_rocksdb_error(err))
-        }
-    };
     let status = MutableStatus {
-        result,
+        result: status_result(status_ptr),
         ptr: status_ptr,
     };
     ctx.on_background_error(DBBackgroundErrorReason::from(reason), status);
 }
 
+extern "C" fn on_error_recovery_begin<E: EventListener>(
+    ctx: *mut c_void,
+    reason: u32,
+    status_ptr: *mut ffi::rust_rocksdb_status_t,
+    auto_recovery: *mut u8,
+) {
+    let ctx = unsafe { &*(ctx as *mut E) };
+    let status = background_error_status(status_ptr);
+    let mut auto_recovery_value = unsafe { !auto_recovery.is_null() && *auto_recovery != 0 };
+    ctx.on_error_recovery_begin(
+        DBBackgroundErrorReason::from(reason),
+        &status,
+        &mut auto_recovery_value,
+    );
+    if !auto_recovery.is_null() {
+        unsafe {
+            *auto_recovery = u8::from(auto_recovery_value);
+        }
+    }
+}
+
+extern "C" fn on_error_recovery_end<E: EventListener>(
+    ctx: *mut c_void,
+    info: *const ffi::rust_rocksdb_background_error_recovery_info_t,
+) {
+    let ctx = unsafe { &*(ctx as *mut E) };
+    let info = background_error_recovery_info(info);
+    ctx.on_error_recovery_end(&info);
+}
+
 pub struct DBEventListener {
-    pub(crate) inner: *mut ffi::rocksdb_eventlistener_t,
+    pub(crate) inner: *mut ffi::rust_rocksdb_eventlistener_t,
 }
 
 pub fn new_event_listener<E: EventListener>(e: E) -> DBEventListener {
@@ -638,7 +777,7 @@ pub fn new_event_listener<E: EventListener>(e: E) -> DBEventListener {
             // WARNING: none of the callbacks below are actually optional.
             // Rocksdb will try calling the callback as long as there is an
             // event listener setup, this means we must define all of them
-            inner: ffi::rocksdb_eventlistener_create(
+            inner: ffi::rust_rocksdb_eventlistener_create(
                 Box::into_raw(p) as *mut c_void,
                 Some(destructor::<E>),
                 Some(on_flush_begin::<E>),
@@ -649,6 +788,8 @@ pub fn new_event_listener<E: EventListener>(e: E) -> DBEventListener {
                 Some(on_subcompaction_completed::<E>),
                 Some(on_external_file_ingested::<E>),
                 Some(on_background_error::<E>),
+                Some(on_error_recovery_begin::<E>),
+                Some(on_error_recovery_end::<E>),
                 Some(on_stall_conditions_changed::<E>),
                 Some(on_memtable_sealed::<E>),
             ),

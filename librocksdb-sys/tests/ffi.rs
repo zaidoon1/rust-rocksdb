@@ -192,6 +192,14 @@ unsafe extern "C" fn CheckDel(ptr: *mut c_void, k: *const c_char, klen: size_t) 
     *state += 1;
 }
 
+// Callback from rocksdb_writebatch_iterate()
+unsafe extern "C" fn CheckLogData(ptr: *mut c_void, blob: *const c_char, blen: size_t) {
+    let mut state: *mut c_int = ptr as *mut c_int;
+    CheckCondition!(*state == 3);
+    CheckEqual(cstrp!("blob"), blob, blen);
+    *state += 1;
+}
+
 unsafe extern "C" fn CmpDestroy(arg: *mut c_void) {}
 
 unsafe extern "C" fn CmpCompare(
@@ -563,6 +571,25 @@ fn ffi() {
                 Some(CheckDel),
             );
             CheckCondition!(pos == 3);
+            rocksdb_writebatch_destroy(wb);
+        }
+
+        StartPhase("writebatch_log_data");
+        {
+            let wb = rocksdb_writebatch_create();
+            rocksdb_writebatch_put(wb, cstrp!("bar"), 3, cstrp!("b"), 1);
+            rocksdb_writebatch_put(wb, cstrp!("box"), 3, cstrp!("c"), 1);
+            rocksdb_writebatch_delete(wb, cstrp!("bar"), 3);
+            rocksdb_writebatch_put_log_data(wb, cstrp!("blob"), 4);
+            let mut pos: c_int = 0;
+            rust_rocksdb_writebatch_iterate(
+                wb,
+                (&mut pos as *mut c_int).cast::<c_void>(),
+                Some(CheckPut),
+                Some(CheckDel),
+                Some(CheckLogData),
+            );
+            CheckCondition!(pos == 4);
             rocksdb_writebatch_destroy(wb);
         }
 

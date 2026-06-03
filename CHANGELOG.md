@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- feat: expose `log_data` blobs during write-batch iteration.
+  `WriteBatchIterator` and `WriteBatchIteratorCf` both grow an optional
+  `log_data(&mut self, blob: &[u8])` method (default: no-op) that is
+  invoked for each blob written via `WriteBatchWithTransaction::put_log_data`
+  when iterating with `iterate()` / `iterate_cf()`.
+  Previously these blobs were silently dropped at the Rust layer even though
+  the underlying C API forwarded them. (lucas.vuillier)
+
 ## 0.50.0 (2026-05-23)
 
 - breaking: bump MSRV to 1.91.0 per the rolling 6-month policy. 1.91.0

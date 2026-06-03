@@ -164,6 +164,29 @@ extern ROCKSDB_LIBRARY_API void rust_rocksdb_eventlistener_destroy(
 extern ROCKSDB_LIBRARY_API void rust_rocksdb_options_add_eventlistener(
     rocksdb_options_t*, rust_rocksdb_eventlistener_t*);
 
+/* -------------------------------------------------------------------------
+ * WriteBatch iteration with log_data support
+ *
+ * The upstream rocksdb_writebatch_iterate / rocksdb_writebatch_iterate_cf
+ * do not expose the WriteBatch::Handler::LogData callback, so blobs written
+ * via rocksdb_writebatch_put_log_data are silently dropped during iteration.
+ * These wrappers add a log_data parameter so callers can observe those blobs.
+ * ------------------------------------------------------------------------- */
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_writebatch_iterate(
+    rocksdb_writebatch_t*, void* state,
+    void (*put)(void*, const char* k, size_t klen, const char* v, size_t vlen),
+    void (*deleted)(void*, const char* k, size_t klen),
+    void (*log_data)(void*, const char* blob, size_t blen));
+
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_writebatch_iterate_cf(
+    rocksdb_writebatch_t*, void* state,
+    void (*put_cf)(void*, uint32_t cfid, const char* k, size_t klen,
+                   const char* v, size_t vlen),
+    void (*deleted_cf)(void*, uint32_t cfid, const char* k, size_t klen),
+    void (*merge_cf)(void*, uint32_t cfid, const char* k, size_t klen,
+                     const char* v, size_t vlen),
+    void (*log_data)(void*, const char* blob, size_t blen));
+
 #ifdef __cplusplus
 }
 #endif

@@ -228,13 +228,58 @@ fn test_event_listener_background_error() {
     assert_eq!(counter.background_error.load(Ordering::SeqCst), 0);
 }
 
-#[derive(Default, Clone)]
-struct BackgroundErrorCleaner(Arc<AtomicUsize>);
+#[test]
+fn test_background_error_reason_async_file_open() {
+    assert_eq!(
+        DBBackgroundErrorReason::from(7),
+        DBBackgroundErrorReason::KAsyncFileOpen
+    );
+}
+
+#[derive(Clone)]
+struct BackgroundErrorCleaner {
+    count: Arc<AtomicUsize>,
+    severity: Arc<AtomicUsize>,
+    recovery_begin: Arc<AtomicUsize>,
+    recovery_end: Arc<AtomicUsize>,
+}
+
+impl Default for BackgroundErrorCleaner {
+    fn default() -> Self {
+        Self {
+            count: Arc::new(AtomicUsize::new(0)),
+            severity: Arc::new(AtomicUsize::new(StatusSeverity::KUnknown as usize)),
+            recovery_begin: Arc::new(AtomicUsize::new(0)),
+            recovery_end: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+}
 
 impl EventListener for BackgroundErrorCleaner {
     fn on_background_error(&self, _: DBBackgroundErrorReason, s: MutableStatus) {
+        assert!(s.result().is_err());
+        self.severity.store(s.severity() as usize, Ordering::SeqCst);
         s.reset();
-        self.0.fetch_add(1, Ordering::SeqCst);
+        assert_eq!(s.severity(), StatusSeverity::KNoError);
+        self.count.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn on_error_recovery_begin(
+        &self,
+        _: DBBackgroundErrorReason,
+        status: &BackgroundErrorStatus,
+        auto_recovery: &mut bool,
+    ) {
+        assert!(status.result().is_err());
+        assert_ne!(status.severity(), StatusSeverity::KNoError);
+        *auto_recovery = true;
+        self.recovery_begin.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn on_error_recovery_end(&self, info: &BackgroundErrorRecoveryInfo) {
+        assert!(info.old_bg_error().result().is_err());
+        assert_ne!(info.old_bg_error().severity(), StatusSeverity::KNoError);
+        self.recovery_end.fetch_add(1, Ordering::SeqCst);
     }
 }
 
@@ -244,7 +289,8 @@ fn test_event_listener_status_reset() {
 
     let mut opts = Options::default();
     let cleaner = BackgroundErrorCleaner::default();
-    let counter = cleaner.0.clone();
+    let counter = cleaner.count.clone();
+    let severity = cleaner.severity.clone();
     opts.add_event_listener(cleaner.clone());
     opts.create_if_missing(true);
     let db = DB::open(&opts, &path).unwrap();
@@ -266,6 +312,9 @@ fn test_event_listener_status_reset() {
 
     db.flush_opt(&fopts).unwrap();
     assert_eq!(counter.load(Ordering::SeqCst), 1);
+    assert!(
+        StatusSeverity::from(severity.load(Ordering::SeqCst) as u8) >= StatusSeverity::KHardError
+    );
 }
 
 fn corrupt_sst_file<P: AsRef<Path>>(db: &DB, path: P) {

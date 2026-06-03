@@ -88,6 +88,82 @@ extern ROCKSDB_LIBRARY_API void rocksdb_compactoptions_set_blob_garbage_collecti
 extern ROCKSDB_LIBRARY_API double rocksdb_compactoptions_get_blob_garbage_collection_age_cutoff(
     rocksdb_compactoptions_t*);
 
+/* -------------------------------------------------------------------------
+ * EventListener background error status severity and recovery callbacks
+ *
+ * RocksDB's C++ EventListener exposes Status::Severity on background errors
+ * and has callbacks for the automatic error recovery lifecycle. The upstream
+ * C listener wrapper available to this crate only forwards OnBackgroundError,
+ * so the Rust listener uses this local additive wrapper instead of changing
+ * the upstream rocksdb_eventlistener_create ABI.
+ * ------------------------------------------------------------------------- */
+typedef struct rust_rocksdb_status_t rust_rocksdb_status_t;
+typedef struct rust_rocksdb_eventlistener_t rust_rocksdb_eventlistener_t;
+typedef struct rust_rocksdb_background_error_recovery_info_t
+    rust_rocksdb_background_error_recovery_info_t;
+
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_status_get_error(
+    rust_rocksdb_status_t*, char**);
+extern ROCKSDB_LIBRARY_API unsigned char rust_rocksdb_status_get_severity(
+    rust_rocksdb_status_t*);
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_status_reset(
+    rust_rocksdb_status_t*);
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_background_error_recovery_info_old_bg_error(
+    const rust_rocksdb_background_error_recovery_info_t*, char**);
+extern ROCKSDB_LIBRARY_API unsigned char
+rust_rocksdb_background_error_recovery_info_old_bg_error_severity(
+    const rust_rocksdb_background_error_recovery_info_t*);
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_background_error_recovery_info_new_bg_error(
+    const rust_rocksdb_background_error_recovery_info_t*, char**);
+extern ROCKSDB_LIBRARY_API unsigned char
+rust_rocksdb_background_error_recovery_info_new_bg_error_severity(
+    const rust_rocksdb_background_error_recovery_info_t*);
+
+typedef void (*rust_rocksdb_on_flush_begin_cb)(
+    void*, const rocksdb_flushjobinfo_t*);
+typedef void (*rust_rocksdb_on_flush_completed_cb)(
+    void*, const rocksdb_flushjobinfo_t*);
+typedef void (*rust_rocksdb_on_compaction_begin_cb)(
+    void*, const rocksdb_compactionjobinfo_t*);
+typedef void (*rust_rocksdb_on_compaction_completed_cb)(
+    void*, const rocksdb_compactionjobinfo_t*);
+typedef void (*rust_rocksdb_on_subcompaction_begin_cb)(
+    void*, const rocksdb_subcompactionjobinfo_t*);
+typedef void (*rust_rocksdb_on_subcompaction_completed_cb)(
+    void*, const rocksdb_subcompactionjobinfo_t*);
+typedef void (*rust_rocksdb_on_external_file_ingested_cb)(
+    void*, const rocksdb_externalfileingestioninfo_t*);
+typedef void (*rust_rocksdb_on_background_error_cb)(
+    void*, uint32_t, rust_rocksdb_status_t*);
+typedef void (*rust_rocksdb_on_error_recovery_begin_cb)(
+    void*, uint32_t, rust_rocksdb_status_t*, unsigned char*);
+typedef void (*rust_rocksdb_on_error_recovery_end_cb)(
+    void*, const rust_rocksdb_background_error_recovery_info_t*);
+typedef void (*rust_rocksdb_on_stall_conditions_changed_cb)(
+    void*, const rocksdb_writestallinfo_t*);
+typedef void (*rust_rocksdb_on_memtable_sealed_cb)(
+    void*, const rocksdb_memtableinfo_t*);
+
+extern ROCKSDB_LIBRARY_API rust_rocksdb_eventlistener_t*
+rust_rocksdb_eventlistener_create(
+    void* state, void (*destructor)(void*),
+    rust_rocksdb_on_flush_begin_cb on_flush_begin,
+    rust_rocksdb_on_flush_completed_cb on_flush_completed,
+    rust_rocksdb_on_compaction_begin_cb on_compaction_begin,
+    rust_rocksdb_on_compaction_completed_cb on_compaction_completed,
+    rust_rocksdb_on_subcompaction_begin_cb on_subcompaction_begin,
+    rust_rocksdb_on_subcompaction_completed_cb on_subcompaction_completed,
+    rust_rocksdb_on_external_file_ingested_cb on_external_file_ingested,
+    rust_rocksdb_on_background_error_cb on_background_error,
+    rust_rocksdb_on_error_recovery_begin_cb on_error_recovery_begin,
+    rust_rocksdb_on_error_recovery_end_cb on_error_recovery_end,
+    rust_rocksdb_on_stall_conditions_changed_cb on_stall_conditions_changed,
+    rust_rocksdb_on_memtable_sealed_cb on_memtable_sealed);
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_eventlistener_destroy(
+    rust_rocksdb_eventlistener_t*);
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_options_add_eventlistener(
+    rocksdb_options_t*, rust_rocksdb_eventlistener_t*);
+
 #ifdef __cplusplus
 }
 #endif

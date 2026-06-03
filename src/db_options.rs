@@ -1786,7 +1786,7 @@ impl Options {
 
     pub fn add_event_listener<L: EventListener>(&mut self, l: L) {
         let handle = new_event_listener(l);
-        unsafe { ffi::rocksdb_options_add_eventlistener(self.inner, handle.inner) }
+        unsafe { ffi::rust_rocksdb_options_add_eventlistener(self.inner, handle.inner) }
     }
 
     /// This is a factory that provides compaction filter objects which allow

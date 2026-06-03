@@ -114,6 +114,84 @@ fn test_write_batch_cf_with_serialized_data() {
 }
 
 #[test]
+fn test_write_batch_iterate_log_data() {
+    struct Collector {
+        puts: Vec<(Vec<u8>, Vec<u8>)>,
+        log_blobs: Vec<Vec<u8>>,
+    }
+
+    impl WriteBatchIterator for Collector {
+        fn put(&mut self, key: &[u8], value: &[u8]) {
+            self.puts.push((key.to_vec(), value.to_vec()));
+        }
+
+        fn delete(&mut self, _: &[u8]) {}
+
+        fn log_data(&mut self, blob: &[u8]) {
+            self.log_blobs.push(blob.to_vec());
+        }
+    }
+
+    let mut batch = WriteBatch::default();
+    batch.put(b"key1", b"val1");
+    batch.put_log_data(b"blob1");
+    batch.put(b"key2", b"val2");
+    batch.put_log_data(b"blob2");
+
+    let mut collector = Collector {
+        puts: Vec::new(),
+        log_blobs: Vec::new(),
+    };
+    batch.iterate(&mut collector);
+
+    assert_eq!(collector.puts.len(), 2);
+    assert_eq!(
+        collector.log_blobs,
+        vec![b"blob1".to_vec(), b"blob2".to_vec()]
+    );
+}
+
+#[test]
+fn test_write_batch_cf_iterate_log_data() {
+    struct Collector {
+        puts: Vec<(u32, Vec<u8>, Vec<u8>)>,
+        log_blobs: Vec<Vec<u8>>,
+    }
+
+    impl WriteBatchIteratorCf for Collector {
+        fn put_cf(&mut self, cf_id: u32, key: &[u8], value: &[u8]) {
+            self.puts.push((cf_id, key.to_vec(), value.to_vec()));
+        }
+
+        fn delete_cf(&mut self, _: u32, _: &[u8]) {}
+
+        fn merge_cf(&mut self, _: u32, _: &[u8], _: &[u8]) {}
+
+        fn log_data(&mut self, blob: &[u8]) {
+            self.log_blobs.push(blob.to_vec());
+        }
+    }
+
+    let mut batch = WriteBatch::default();
+    batch.put(b"key1", b"val1");
+    batch.put_log_data(b"cf_blob1");
+    batch.put(b"key2", b"val2");
+    batch.put_log_data(b"cf_blob2");
+
+    let mut collector = Collector {
+        puts: Vec::new(),
+        log_blobs: Vec::new(),
+    };
+    batch.iterate_cf(&mut collector);
+
+    assert_eq!(collector.puts.len(), 2);
+    assert_eq!(
+        collector.log_blobs,
+        vec![b"cf_blob1".to_vec(), b"cf_blob2".to_vec()]
+    );
+}
+
+#[test]
 fn test_write_batch_put_log_data() {
     let path = DBPath::new("writebatch_put_log_data");
     let db = DB::open_default(&path).unwrap();

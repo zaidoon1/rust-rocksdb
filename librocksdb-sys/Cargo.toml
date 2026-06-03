@@ -78,3 +78,4 @@ cc = { version = "1.2", features = ["parallel"] }
 bindgen = { version = "0.72", default-features = false }
 glob = "0.3"
 pkg-config = "0.3"
+rustflags = "0.1"

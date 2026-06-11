@@ -40,7 +40,6 @@ Pull requests are welcome, and when contributing code, the author agrees to do s
 For pull requests that would benefit from discussion and review earlier in the development process, use a [Draft Pull Request](https://help.github.com/en/articles/about-pull-requests#draft-pull-requests).
 
 ## Avoiding Re-Compilation Overhead (Developer Caching)
-[caching]: #caching
 Compiling the underlying RocksDB C++ source via `cargo` can be slow, especially when it is constantly re-built due to directory invalidation or branching.
 
 You can securely build and cache the native artifacts by using the provided `Makefile`:
@@ -52,21 +51,21 @@ make install
 
 This will run the native RocksDB Makefile to generate the libraries (`librocksdb.so`, `librocksdb.a`, and the `ldb` tool), and install them to `$HOME/.local` by default.
 
-To install to a system path (like `/usr/local/zaidoon`), override `PREFIX` and run with `sudo`:
+To install to a system path (like `/usr/local/rust-rocksdb`), override `PREFIX` and run with `sudo`:
 
 ```bash
-sudo make install PREFIX=/usr/local/zaidoon
+sudo make install PREFIX=/usr/local/rust-rocksdb
 ```
 
-To permanently bypass Cargo recompilations, do not modify `librocksdb-sys` paths directly. Instead, create a `.cargo/config.toml` (which is gitignored) and paste the following suggestion to configure Cargo to find the newly cached artifacts (replace `/usr/local/zaidoon` with `$HOME/.local` if you did not override `PREFIX`):
+To permanently bypass Cargo recompilations, do not modify `librocksdb-sys` paths directly. Instead, create a `.cargo/config.toml` (which is gitignored) and paste the following suggestion to configure Cargo to find the newly cached artifacts. If you did not override `PREFIX`, replace the placeholder `/usr/local/rust-rocksdb` paths with your actual, expanded home directory path (e.g., `/home/yourusername/.local`), as `.cargo/config.toml` does not support environment variable expansion (such as `$HOME`):
 
 ```toml
 [env]
 RUSTC_WRAPPER = { value = "sccache", force = false }
-ROCKSDB_LIB_DIR = { value = "/usr/local/zaidoon/lib", force = false }
-ROCKSDB_INCLUDE_DIR = { value = "/usr/local/zaidoon/include", force = false }
-PKG_CONFIG_PATH = { value = "/usr/local/zaidoon/lib/pkgconfig", force = false }
-LD_LIBRARY_PATH = { value = "/usr/local/zaidoon/lib", force = false }
+ROCKSDB_LIB_DIR = { value = "/usr/local/rust-rocksdb/lib", force = false }
+ROCKSDB_INCLUDE_DIR = { value = "/usr/local/rust-rocksdb/include", force = false }
+PKG_CONFIG_PATH = { value = "/usr/local/rust-rocksdb/lib/pkgconfig", force = false }
+LD_LIBRARY_PATH = { value = "/usr/local/rust-rocksdb/lib", force = false }
 
 # Optional Linux-only performance tweaks:
 # Uncomment the matching target block below only if `clang` and `mold` are
@@ -76,14 +75,14 @@ LD_LIBRARY_PATH = { value = "/usr/local/zaidoon/lib", force = false }
 # linker = "clang"
 # rustflags = [
 #     "-C", "link-arg=-fuse-ld=mold",
-#     "-C", "link-arg=-Wl,-rpath,/usr/local/zaidoon/lib"
+#     "-C", "link-arg=-Wl,-rpath,/usr/local/rust-rocksdb/lib"
 # ]
 #
 # [target.aarch64-unknown-linux-gnu]
 # linker = "clang"
 # rustflags = [
 #     "-C", "link-arg=-fuse-ld=mold",
-#     "-C", "link-arg=-Wl,-rpath,/usr/local/zaidoon/lib"
+#     "-C", "link-arg=-Wl,-rpath,/usr/local/rust-rocksdb/lib"
 # ]
 ```
 

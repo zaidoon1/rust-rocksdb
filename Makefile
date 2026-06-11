@@ -2,6 +2,8 @@ SHELL=/bin/bash
 .DEFAULT_GOAL=_help
 
 PREFIX ?= $(HOME)/.local
+# Disable jemalloc by default for RocksDB build, but can be overridden from command line or env
+DISABLE_JEMALLOC ?= 1
 NPROC_CMD := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 UNAME_S := $(shell uname -s)
 
@@ -23,20 +25,21 @@ else
   CC_CMD ?= $(CC_COMPILER)
 endif
 
-MOLD_LDFLAG := $(if $(HAS_MOLD),-fuse-ld=mold,)
+UNAME_M := $(shell uname -m)
+MOLD_LDFLAG := $(if $(filter x86_64,$(UNAME_M)),$(if $(HAS_MOLD),-fuse-ld=mold,),)
 
 
 .PHONY: bootstrap
 bootstrap: ## Install high-performance build tools and setup Cargo config
 	@echo "Bootstrapping development environment (requires sudo)..."
 	@if command -v apt-get >/dev/null 2>&1; then \
-		sudo apt-get update && sudo apt-get install -y clang mold sccache ccache make llvm libclang-dev cmake ninja-build; \
+		sudo apt-get update && sudo apt-get install -y clang mold sccache ccache make llvm libclang-dev cmake ninja-build libsnappy-dev liblz4-dev libzstd-dev zlib1g-dev libbz2-dev; \
 	elif command -v pacman >/dev/null 2>&1; then \
-		sudo pacman -Sy --needed clang mold sccache ccache make llvm cmake ninja; \
+		sudo pacman -Sy --needed clang mold sccache ccache make llvm cmake ninja snappy lz4 zstd zlib bzip2; \
 	elif command -v dnf >/dev/null 2>&1; then \
-		sudo dnf install -y clang mold sccache ccache make llvm cmake ninja-build; \
+		sudo dnf install -y clang mold sccache ccache make llvm cmake ninja-build snappy-devel lz4-devel libzstd-devel zlib-devel bzip2-devel; \
 	elif command -v brew >/dev/null 2>&1; then \
-		brew install llvm sccache ccache make cmake ninja; \
+		brew install llvm sccache ccache make cmake ninja snappy lz4 zstd zlib bzip2; \
 	else \
 		echo "Unsupported package manager. Please install clang, mold, and sccache manually."; \
 	fi
@@ -68,6 +71,9 @@ bootstrap: ## Install high-performance build tools and setup Cargo config
 			echo "" >> .cargo/config.toml; \
 			echo "[target.x86_64-unknown-linux-gnu]" >> .cargo/config.toml; \
 			echo "rustflags = [\"-C\", \"link-arg=-fuse-ld=mold\"]" >> .cargo/config.toml; \
+			echo "" >> .cargo/config.toml; \
+			echo "[target.aarch64-unknown-linux-gnu]" >> .cargo/config.toml; \
+			echo "rustflags = [\"-C\", \"link-arg=-fuse-ld=mold\"]" >> .cargo/config.toml; \
 		fi; \
 		echo "Generated .cargo/config.toml pointing to $(PREFIX)."; \
 	else \
@@ -84,14 +90,14 @@ prebuild: ## Build RocksDB shared library, static library, and ldb binary locall
 	fi
 	@mkdir -p $(PREFIX)/include $(PREFIX)/lib
 	cd librocksdb-sys/rocksdb && \
-		env ROCKSDB_NO_FBCODE=1 DISABLE_JEMALLOC=1 ROCKSDB_DISABLE_BENCHMARK=1 CC="$(CC_CMD)" CXX="$(CXX_CMD)" \
+		env ROCKSDB_NO_FBCODE=1 DISABLE_JEMALLOC=$(DISABLE_JEMALLOC) ROCKSDB_DISABLE_BENCHMARK=1 CC="$(CC_CMD)" CXX="$(CXX_CMD)" \
 		EXTRA_CXXFLAGS="$${EXTRA_CXXFLAGS:-} -I$(PREFIX)/include -Wno-error=unused-parameter" \
 		EXTRA_LDFLAGS="$${EXTRA_LDFLAGS:-} $(MOLD_LDFLAG) -L$(PREFIX)/lib" PORTABLE=0 USE_RTTI=1 \
 		make shared_lib static_lib -j$(NPROC_CMD)
 	cd librocksdb-sys/rocksdb && \
 		env DISABLE_WARNING_AS_ERROR=1 ROCKSDB_DISABLE_BENCHMARK=1 DEBUG_LEVEL=0 USE_RTTI=1 CC="$(CC_CMD)" CXX="$(CXX_CMD)" make ldb
 	@echo ""
-	@echo "Prebuild complete! Run 'make install' (or 'sudo make install PREFIX=/usr/local/zaidoon') to install natively."
+	@echo "Prebuild complete! Run 'make install' (or 'sudo make install PREFIX=/usr/local/rust-rocksdb') to install natively."
 
 
 .PHONY: install
@@ -101,8 +107,24 @@ install: prebuild ## Install built RocksDB to the configured PREFIX
 	cd librocksdb-sys/rocksdb && make install-static INSTALL_PATH=$(PREFIX)
 	mkdir -p $(PREFIX)/bin
 	cp -p librocksdb-sys/rocksdb/ldb $(PREFIX)/bin/ldb
+	@if [ "$(UNAME_S)" = "Darwin" ]; then \
+		if command -v install_name_tool >/dev/null 2>&1; then \
+			install_name_tool -id "$(PREFIX)/lib/librocksdb.11.dylib" "$(PREFIX)/lib/librocksdb.11.dylib" 2>/dev/null || true; \
+			install_name_tool -id "$(PREFIX)/lib/librocksdb.11.0.dylib" "$(PREFIX)/lib/librocksdb.11.0.dylib" 2>/dev/null || true; \
+			install_name_tool -id "$(PREFIX)/lib/librocksdb.dylib" "$(PREFIX)/lib/librocksdb.dylib" 2>/dev/null || true; \
+			echo "Updated library install names to absolute paths for macOS dyld compatibility."; \
+		fi; \
+	fi
 	@if [ "$(UNAME_S)" = "Linux" ]; then \
-		ldconfig $(PREFIX)/lib 2>/dev/null || true; \
+		if [ -w "$(PREFIX)/lib" ] && [[ ! "$(PREFIX)" =~ ^"$(HOME)" ]]; then \
+			ldconfig $(PREFIX)/lib 2>/dev/null || echo "Warning: ldconfig failed. You may need to run: sudo ldconfig $(PREFIX)/lib" >&2; \
+		else \
+			if [[ "$(PREFIX)" =~ ^"$(HOME)" ]]; then \
+				echo "Skipping ldconfig for non-system installation path under HOME."; \
+			else \
+				echo "Warning: $(PREFIX)/lib is not writable. Skipping ldconfig update. Please run: sudo ldconfig $(PREFIX)/lib" >&2; \
+			fi; \
+		fi; \
 	fi
 	@echo "============================================================"
 	@echo "Installation complete!"

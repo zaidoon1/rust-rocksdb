@@ -12,6 +12,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-Ctarget-cpu=native"
 
 jobs:
   test-prebuild:

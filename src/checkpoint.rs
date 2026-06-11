@@ -312,3 +312,60 @@ impl Drop for TransactionDBCheckpoint<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Options, TransactionDBOptions};
+    use std::{fs, num::NonZeroU64};
+
+    #[test]
+    fn transaction_db_checkpoint_with_non_zero_log_size_forces_flush() -> Result<(), Error> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("db");
+        let cp_path = temp_dir.path().join("cp");
+
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        let db: TransactionDB =
+            TransactionDB::open(&opts, &TransactionDBOptions::default(), &db_path).unwrap();
+
+        db.put(b"flushed_key", b"flushed_value").unwrap();
+        db.flush().unwrap();
+
+        db.put(b"memtable_key", b"memtable_value").unwrap();
+
+        let checkpoint = TransactionDBCheckpoint::new(&db).unwrap();
+        let c_path = to_cpath(&cp_path)?;
+        unsafe {
+            ffi_try!(ffi::rocksdb_checkpoint_create(
+                checkpoint.inner,
+                c_path.as_ptr(),
+                NonZeroU64::new(1024 * 1024).unwrap().get(),
+            ));
+        }
+
+        let checkpoint_wal_size: u64 = fs::read_dir(&cp_path)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "log"))
+            .map(|e| e.metadata().unwrap().len())
+            .sum();
+        assert_eq!(
+            checkpoint_wal_size, 0,
+            "checkpoint WAL should be empty after TransactionDB checkpoint creation"
+        );
+
+        let cp_db: TransactionDB = TransactionDB::open_default(&cp_path).unwrap();
+        assert_eq!(
+            cp_db.get(b"flushed_key").unwrap().unwrap(),
+            b"flushed_value"
+        );
+        assert_eq!(
+            cp_db.get(b"memtable_key").unwrap().unwrap(),
+            b"memtable_value"
+        );
+
+        Ok(())
+    }
+}

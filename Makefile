@@ -7,6 +7,16 @@ DISABLE_JEMALLOC ?= 1
 NPROC_CMD := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 UNAME_S := $(shell uname -s)
 
+EXTRA_CXXFLAGS ?=
+EXTRA_LDFLAGS ?=
+
+ifeq ($(UNAME_S),Darwin)
+  ifneq ($(wildcard /opt/homebrew/include),)
+    EXTRA_CXXFLAGS += -I/opt/homebrew/include
+    EXTRA_LDFLAGS += -L/opt/homebrew/lib
+  endif
+endif
+
 
 # Auto-detect optimal compiler toolchain
 HAS_CLANG := $(shell command -v clang++ 2>/dev/null)
@@ -91,11 +101,14 @@ prebuild: ## Build RocksDB shared library, static library, and ldb binary locall
 	@mkdir -p $(PREFIX)/include $(PREFIX)/lib
 	cd librocksdb-sys/rocksdb && \
 		env ROCKSDB_NO_FBCODE=1 DISABLE_JEMALLOC=$(DISABLE_JEMALLOC) ROCKSDB_DISABLE_BENCHMARK=1 CC="$(CC_CMD)" CXX="$(CXX_CMD)" \
-		EXTRA_CXXFLAGS="$${EXTRA_CXXFLAGS:-} -I$(PREFIX)/include -Wno-error=unused-parameter" \
-		EXTRA_LDFLAGS="$${EXTRA_LDFLAGS:-} $(MOLD_LDFLAG) -L$(PREFIX)/lib" PORTABLE=0 USE_RTTI=1 \
+		EXTRA_CXXFLAGS="$${EXTRA_CXXFLAGS:-} $(EXTRA_CXXFLAGS) -I$(PREFIX)/include -Wno-error=unused-parameter" \
+		EXTRA_LDFLAGS="$${EXTRA_LDFLAGS:-} $(EXTRA_LDFLAGS) $(MOLD_LDFLAG) -L$(PREFIX)/lib" PORTABLE=0 USE_RTTI=1 \
 		make shared_lib static_lib -j$(NPROC_CMD)
 	cd librocksdb-sys/rocksdb && \
-		env DISABLE_WARNING_AS_ERROR=1 ROCKSDB_DISABLE_BENCHMARK=1 DEBUG_LEVEL=0 USE_RTTI=1 CC="$(CC_CMD)" CXX="$(CXX_CMD)" make ldb
+		env DISABLE_WARNING_AS_ERROR=1 ROCKSDB_DISABLE_BENCHMARK=1 DEBUG_LEVEL=0 USE_RTTI=1 CC="$(CC_CMD)" CXX="$(CXX_CMD)" \
+		EXTRA_CXXFLAGS="$${EXTRA_CXXFLAGS:-} $(EXTRA_CXXFLAGS)" \
+		EXTRA_LDFLAGS="$${EXTRA_LDFLAGS:-} $(EXTRA_LDFLAGS) $(MOLD_LDFLAG)" \
+		make ldb
 	@echo ""
 	@echo "Prebuild complete! Run 'make install' (or 'sudo make install PREFIX=/usr/local/rust-rocksdb') to install natively."
 

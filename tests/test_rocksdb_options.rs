@@ -753,16 +753,16 @@ fn test_crc32_build() {
         );
         None
     };
+    let is_supported = log_line.contains("Supported on ");
+
     if let Some(expected_supported) = expected_supported {
         if expected_supported {
-            assert!(
-                log_line.contains("Supported on "),
-                "expected 'Supported on ' log_line={log_line}"
-            );
+            assert!(is_supported, "expected 'Supported on ' log_line={log_line}");
         } else {
+            // It is fine if it is supported or not supported when Rust doesn't mandate it
             assert!(
-                log_line.contains("Not supported on "),
-                "expected 'Not supported on ' log_line={log_line}"
+                is_supported || log_line.contains("Not supported on "),
+                "expected 'Supported on ' or 'Not supported on ' log_line={log_line}"
             );
         }
     }
@@ -777,7 +777,7 @@ fn test_crc32_build() {
     } else if cfg!(target_arch = "aarch64") {
         // TODO: RocksDB has a bug: it can report x86 when the CRC feature is not enabled
         // This should just be "Arm64" when the RocksDB bug is fixed
-        if cfg!(target_feature = "crc") {
+        if is_supported {
             "Arm64".to_string()
         } else {
             "x86".to_string()

@@ -873,13 +873,10 @@ mod system {
         emit_link_directives(lib_dir);
 
         let mut includes = env_includes_override();
-        if includes.is_empty() {
-            if let Some(prefix) = lib_dir.parent() {
-                let candidate = prefix.join("include");
-                if candidate.join("rocksdb/c.h").exists() {
-                    includes.push(candidate);
-                }
-            }
+        if includes.is_empty()
+            && let Some(prefix) = lib_dir.parent()
+        {
+            let candidate = prefix.join("include");
         }
 
         Backend::System { includes }

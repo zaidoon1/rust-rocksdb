@@ -44,15 +44,16 @@ fn test_ldb_help() {
 
     // Check system PATH
     if ldb_path.is_none()
-        && let Ok(path) = env::var("PATH") {
-            for dir in env::split_paths(&path) {
-                let candidate = dir.join("ldb");
-                if candidate.exists() {
-                    ldb_path = Some(candidate);
-                    break;
-                }
+        && let Ok(path) = env::var("PATH")
+    {
+        for dir in env::split_paths(&path) {
+            let candidate = dir.join("ldb");
+            if candidate.exists() {
+                ldb_path = Some(candidate);
+                break;
             }
         }
+    }
 
     let Some(ldb) = ldb_path else {
         println!("Skipping ldb test: ldb binary not found.");

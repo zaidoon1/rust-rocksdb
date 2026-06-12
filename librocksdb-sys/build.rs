@@ -1189,8 +1189,8 @@ mod coroutines {
             "libevent",
             "libsodium",
         ] {
-            let dir = resolve_dep(&install_root, dep);
-            cfg.include(dir.join("include"));
+            let include = resolve_dep(&install_root, dep).join("include");
+            cfg.flag("-isystem").flag(include.as_os_str());
         }
     }
 

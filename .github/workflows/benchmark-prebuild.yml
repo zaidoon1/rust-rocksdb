@@ -63,7 +63,7 @@ jobs:
         run: cargo build --tests
 
       - name: Clean Target Directory
-        run: rm -rf target/
+        run: cargo clean && rm -rf target/
 
       - name: Benchmark Clean Prebuilt Cargo Build
         # Running `time` natively outputs the real/user/sys seconds spent.

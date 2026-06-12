@@ -867,13 +867,22 @@ mod system {
     /// Build a `Backend::System` from `ROCKSDB_LIB_DIR`. Emits the
     /// corresponding `cargo::rustc-link-*` directives.
     pub(super) fn from_lib_dir_env() -> Backend {
-        let lib_dir =
+        let lib_dir_str =
             env::var_os("ROCKSDB_LIB_DIR").expect("checked by caller in Backend::resolve");
-        emit_link_directives(Path::new(&lib_dir));
+        let lib_dir = Path::new(&lib_dir_str);
+        emit_link_directives(lib_dir);
 
-        Backend::System {
-            includes: env_includes_override(),
+        let mut includes = env_includes_override();
+        if includes.is_empty() {
+            if let Some(prefix) = lib_dir.parent() {
+                let candidate = prefix.join("include");
+                if candidate.join("rocksdb/c.h").exists() {
+                    includes.push(candidate);
+                }
+            }
         }
+
+        Backend::System { includes }
     }
 
     /// FreeBSD default: link `/usr/local/lib/librocksdb.{so,a}` and read

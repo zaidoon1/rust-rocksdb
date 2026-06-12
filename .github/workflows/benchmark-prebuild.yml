@@ -67,4 +67,4 @@ jobs:
         run: time cargo build --tests
 
       - name: Run Nextest
-        run: cargo nextest run --all
+        run: cargo nextest run --all --no-fail-fast

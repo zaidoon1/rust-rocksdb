@@ -258,9 +258,7 @@ impl Drop for CSlice {
 #[test]
 fn test_c_str_like_bake() {
     fn test<S: CStrLike>(value: S) -> Result<usize, S::Error> {
-        value
-            .bake()
-            .map(|value| unsafe { libc::strlen(value.as_ptr()) })
+        value.bake().map(|value| value.count_bytes())
     }
 
     assert_eq!(Ok(3), test("foo")); // &str

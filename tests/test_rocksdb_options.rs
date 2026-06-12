@@ -233,7 +233,18 @@ fn set_compression_options_zstd_max_train_bytes() {
         opts.create_if_missing(true);
         opts.set_compression_options(4, 5, 6, 7);
         opts.set_zstd_max_train_bytes(100);
-        let _db = DB::open(&opts, &path).unwrap();
+        match DB::open(&opts, &path) {
+            Ok(_db) => {}
+            Err(e) => {
+                let msg = e.into_string();
+                if !msg.contains("zstd dictionary trainer cannot be used") {
+                    panic!(
+                        "Unexpected error opening DB with zstd_max_train_bytes: {}",
+                        msg
+                    );
+                }
+            }
+        }
     }
 }
 

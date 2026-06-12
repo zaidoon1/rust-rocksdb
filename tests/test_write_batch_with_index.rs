@@ -36,3 +36,46 @@ fn test_write_batch_with_index_with_base_iterator() {
         assert_no_item(&iterator);
     }
 }
+
+#[test]
+fn test_write_batch_with_index_get_from_batch() {
+    let path = DBPath::new("_rust_rocksdb_wbwi_get");
+    {
+        let db = DB::open_default(&path).expect("DB should open");
+        let mut wbwi = WriteBatchWithIndex::new(0, true);
+
+        // Put keys into base DB
+        db.put(b"k_db", b"v_db").unwrap();
+
+        // Put keys into batch
+        wbwi.put(b"k_batch", b"v_batch");
+
+        let opts = rust_rocksdb::Options::default();
+
+        // 1. Test get_from_batch in a loop to ensure memory allocation & free works stably
+        for _ in 0..100 {
+            let val1 = wbwi.get_from_batch(b"k_batch", &opts).unwrap().unwrap();
+            assert_eq!(val1, b"v_batch");
+        }
+
+        // 2. Test get_from_batch_and_db
+        let readopts = ReadOptions::default();
+        let val2 = wbwi
+            .get_from_batch_and_db(&db, b"k_db", &readopts)
+            .unwrap()
+            .unwrap();
+        assert_eq!(val2, b"v_db");
+
+        // Test non-existent keys
+        assert!(
+            wbwi.get_from_batch(b"non_existent", &opts)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            wbwi.get_from_batch_and_db(&db, b"non_existent", &readopts)
+                .unwrap()
+                .is_none()
+        );
+    }
+}

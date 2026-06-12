@@ -67,14 +67,16 @@ ROCKSDB_INCLUDE_DIR = { value = "/usr/local/rust-rocksdb/include", force = false
 PKG_CONFIG_PATH = { value = "/usr/local/rust-rocksdb/lib/pkgconfig", force = false }
 LD_LIBRARY_PATH = { value = "/usr/local/rust-rocksdb/lib", force = false }
 
-# Optional Linux-only performance tweaks:
+# Optional Linux-only performance tweaks (and critical target-cpu native optimizations):
 # Uncomment the matching target block below only if `clang` and `mold` are
-# installed and you want to use them as the linker.
+# installed and you want to use them as the linker with target-cpu optimizations.
+# Enabling `target-cpu=native` is highly recommended for RocksDB builds to compile with SSE4.2 CRC-acceleration.
 #
 # [target.x86_64-unknown-linux-gnu]
 # linker = "clang"
 # rustflags = [
 #     "-C", "link-arg=-fuse-ld=mold",
+#     "-C", "target-cpu=native",
 #     "-C", "link-arg=-Wl,-rpath,/usr/local/rust-rocksdb/lib"
 # ]
 #
@@ -82,6 +84,7 @@ LD_LIBRARY_PATH = { value = "/usr/local/rust-rocksdb/lib", force = false }
 # linker = "clang"
 # rustflags = [
 #     "-C", "link-arg=-fuse-ld=mold",
+#     "-C", "target-cpu=native",
 #     "-C", "link-arg=-Wl,-rpath,/usr/local/rust-rocksdb/lib"
 # ]
 ```

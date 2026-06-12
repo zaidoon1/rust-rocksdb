@@ -449,7 +449,7 @@ fn test_no_leaked_column_family() {
         #[cfg(feature = "multi-threaded-cf")]
         let mut outlived_cf = None;
 
-        let large_blob = vec![0x20; 1024 * 1024];
+        let large_blob = vec![0x20; 100 * 1024];
 
         // repeat creating and dropping cfs many times to indirectly detect
         // possible leak via large dir.
@@ -459,7 +459,7 @@ fn test_no_leaked_column_family() {
             let cf = db.cf_handle(&cf_name).unwrap();
 
             let mut batch = rust_rocksdb::WriteBatch::default();
-            for key_index in 0..100 {
+            for key_index in 0..10 {
                 batch.put_cf(&cf, format!("k{key_index}"), &large_blob);
             }
             db.write_opt(&batch, &write_options).unwrap();

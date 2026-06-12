@@ -1,0 +1,73 @@
+---
+name: Prebuild Benchmark
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test-prebuild:
+    name: ${{ matrix.build }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        build: [Linux-ARM, Linux-x86, macOS]
+        include:
+          - build: Linux-ARM
+            os: ubuntu-24.04-arm
+          - build: Linux-x86
+            os: ubuntu-24.04
+          - build: macOS
+            os: macos-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v5.2.2
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install rust
+        uses: actions-rust-lang/setup-rust-toolchain@1fbea72663f6d4c03efaab13560c8a24cfd2a7cc # v1.12.1
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      - uses: taiki-e/install-action@74e87cbfa15a59692b158178d8905a61bf6fca95 # v2
+        with:
+          tool: nextest
+
+      - name: Bootstrap Environment
+        run: make bootstrap
+
+      - name: Prebuild Native Artifacts
+        run: |
+          # Workaround for macOS SIP/Homebrew path issues finding llvm and brew packages in the PATH correctly.
+          if [ "${{ runner.os }}" = "macOS" ]; then
+             if [ -f /opt/homebrew/bin/brew ]; then
+                eval "$(/opt/homebrew/bin/brew shellenv)"
+             fi
+             export PATH="/opt/homebrew/opt/llvm/bin:$PATH" 2>/dev/null || true
+          fi
+          make prebuild PREFIX=$HOME/.local
+          make install PREFIX=$HOME/.local
+
+      - name: Initial Cargo Build (Download Deps)
+        run: cargo build --tests
+
+      - name: Clean Target Directory
+        run: cargo clean && rm -rf target/
+
+      - name: Benchmark Clean Prebuilt Cargo Build
+        # Running `time` natively outputs the real/user/sys seconds spent.
+        run: time cargo build --tests
+
+      - name: Run Nextest
+        run: cargo nextest run --all --no-fail-fast

@@ -982,13 +982,17 @@ mod snappy {
     /// silently surprised that the feature is ignored.
     pub(super) fn ensure(target: &Target, backend: &Backend) {
         if matches!(backend, Backend::System { .. }) {
-            println!(
-                "cargo::warning=`snappy` feature is enabled but rocksdb \
-                 is being linked from the system; skipping vendored \
-                 snappy build (the system library is expected to provide \
-                 snappy support itself)."
-            );
-            return;
+            // When linking statically (ROCKSDB_STATIC is set), we still need to build and
+            // link snappy to resolve static symbols in librocksdb.a
+            if env::var_os("ROCKSDB_STATIC").is_none() {
+                println!(
+                    "cargo::warning=`snappy` feature is enabled but rocksdb \
+                     is being linked from the system; skipping vendored \
+                     snappy build (the system library is expected to provide \
+                     snappy support itself)."
+                );
+                return;
+            }
         }
         if try_system() {
             return;

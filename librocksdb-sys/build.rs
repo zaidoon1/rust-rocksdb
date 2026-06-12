@@ -1264,6 +1264,8 @@ mod coroutines {
             "-Wno-redundant-move",
             "-Wno-maybe-uninitialized",
             "-Wno-invalid-memory-model",
+            "-Wno-shadow",
+            "-Wno-sign-compare",
         ] {
             cfg.flag_if_supported(f);
         }

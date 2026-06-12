@@ -55,40 +55,37 @@ bootstrap: ## Install high-performance build tools and setup Cargo config
 	fi
 	@echo "Bootstrapping local Cargo caching configuration..."
 	@mkdir -p .cargo
-	@if [ ! -f .cargo/config.toml ]; then \
-		if command -v sccache >/dev/null 2>&1; then \
-			echo "[build]" > .cargo/config.toml; \
-			echo "rustc-wrapper = \"sccache\"" >> .cargo/config.toml; \
-			echo "" >> .cargo/config.toml; \
-		fi; \
-		echo "[env]" >> .cargo/config.toml; \
-		echo "ROCKSDB_LIB_DIR = \"$(PREFIX)/lib\"" >> .cargo/config.toml; \
-		echo "ROCKSDB_INCLUDE_DIR = \"$(PREFIX)/include\"" >> .cargo/config.toml; \
-		echo "PKG_CONFIG_PATH = { value = \"$(PREFIX)/lib/pkgconfig\", force = false }" >> .cargo/config.toml; \
-		echo "ROCKSDB_STATIC = \"1\"" >> .cargo/config.toml; \
-		echo "LD_LIBRARY_PATH = { value = \"$(PREFIX)/lib\", force = false }" >> .cargo/config.toml; \
-		if command -v sccache >/dev/null 2>&1 && command -v clang++ >/dev/null 2>&1; then \
-			echo "CC = \"sccache clang\"" >> .cargo/config.toml; \
-			echo "CXX = \"sccache clang++\"" >> .cargo/config.toml; \
-		elif command -v sccache >/dev/null 2>&1; then \
-			echo "CC = \"sccache gcc\"" >> .cargo/config.toml; \
-			echo "CXX = \"sccache g++\"" >> .cargo/config.toml; \
-		elif command -v clang++ >/dev/null 2>&1; then \
-			echo "CC = \"clang\"" >> .cargo/config.toml; \
-			echo "CXX = \"clang++\"" >> .cargo/config.toml; \
-		fi; \
-		if command -v mold >/dev/null 2>&1; then \
-			echo "" >> .cargo/config.toml; \
-			echo "[target.x86_64-unknown-linux-gnu]" >> .cargo/config.toml; \
-			echo "rustflags = [\"-C\", \"link-arg=-fuse-ld=mold\"]" >> .cargo/config.toml; \
-			echo "" >> .cargo/config.toml; \
-			echo "[target.aarch64-unknown-linux-gnu]" >> .cargo/config.toml; \
-			echo "rustflags = [\"-C\", \"link-arg=-fuse-ld=mold\"]" >> .cargo/config.toml; \
-		fi; \
-		echo "Generated .cargo/config.toml pointing to $(PREFIX)."; \
-	else \
-		echo ".cargo/config.toml already exists, skipping generation."; \
+	@echo "[build]" > .cargo/config.toml
+	@if command -v sccache >/dev/null 2>&1; then \
+		echo "rustc-wrapper = \"sccache\"" >> .cargo/config.toml; \
 	fi
+	@echo "rustflags = [\"-C\", \"target-cpu=native\"]" >> .cargo/config.toml
+	@echo "" >> .cargo/config.toml
+	@echo "[env]" >> .cargo/config.toml
+	@echo "ROCKSDB_LIB_DIR = \"$(PREFIX)/lib\"" >> .cargo/config.toml
+	@echo "ROCKSDB_INCLUDE_DIR = \"$(PREFIX)/include\"" >> .cargo/config.toml
+	@echo "PKG_CONFIG_PATH = { value = \"$(PREFIX)/lib/pkgconfig\", force = false }" >> .cargo/config.toml
+	@echo "ROCKSDB_STATIC = \"1\"" >> .cargo/config.toml
+	@echo "LD_LIBRARY_PATH = { value = \"$(PREFIX)/lib\", force = false }" >> .cargo/config.toml
+	@if command -v sccache >/dev/null 2>&1 && command -v clang++ >/dev/null 2>&1; then \
+		echo "CC = \"sccache clang\"" >> .cargo/config.toml; \
+		echo "CXX = \"sccache clang++\"" >> .cargo/config.toml; \
+	elif command -v sccache >/dev/null 2>&1; then \
+		echo "CC = \"sccache gcc\"" >> .cargo/config.toml; \
+		echo "CXX = \"sccache g++\"" >> .cargo/config.toml; \
+	elif command -v clang++ >/dev/null 2>&1; then \
+		echo "CC = \"clang\"" >> .cargo/config.toml; \
+		echo "CXX = \"clang++\"" >> .cargo/config.toml; \
+	fi
+	@if command -v mold >/dev/null 2>&1; then \
+		echo "" >> .cargo/config.toml; \
+		echo "[target.x86_64-unknown-linux-gnu]" >> .cargo/config.toml; \
+		echo "rustflags = [\"-C\", \"link-arg=-fuse-ld=mold\", \"-C\", \"target-cpu=native\"]" >> .cargo/config.toml; \
+		echo "" >> .cargo/config.toml; \
+		echo "[target.aarch64-unknown-linux-gnu]" >> .cargo/config.toml; \
+		echo "rustflags = [\"-C\", \"link-arg=-fuse-ld=mold\", \"-C\", \"target-cpu=native\"]" >> .cargo/config.toml; \
+	fi
+	@echo "Generated .cargo/config.toml pointing to $(PREFIX)."
 	@echo "Bootstrap complete! Run 'make prebuild' to build with these optimized tools."
 
 .PHONY: prebuild
@@ -114,7 +111,12 @@ prebuild: ## Build RocksDB shared library, static library, and ldb binary locall
 
 
 .PHONY: install
-install: prebuild ## Install built RocksDB to the configured PREFIX
+install: ## Install built RocksDB to the configured PREFIX
+	@if [ ! -f "librocksdb-sys/rocksdb/ldb" ] || [ ! -f "librocksdb-sys/rocksdb/librocksdb.a" ]; then \
+		echo "Error: RocksDB build artifacts are missing."; \
+		echo "Please run 'make prebuild' as a normal (non-root) user first, then run 'sudo make install'."; \
+		exit 1; \
+	fi
 	@echo "Installing RocksDB to $(PREFIX)..."
 	cd librocksdb-sys/rocksdb && make install-shared INSTALL_PATH=$(PREFIX)
 	cd librocksdb-sys/rocksdb && make install-static INSTALL_PATH=$(PREFIX)

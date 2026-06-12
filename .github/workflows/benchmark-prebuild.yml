@@ -12,7 +12,6 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: "-Ctarget-cpu=native"
 
 jobs:
   test-prebuild:
@@ -31,16 +30,17 @@ jobs:
             os: macos-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v5
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v5.2.2
         with:
           submodules: recursive
+          persist-credentials: false
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@1fbea72663f6d4c03efaab13560c8a24cfd2a7cc # v1.12.1
         with:
           save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@1e265f93ff4b83431eebeb30c8eebb5cc62b7f7b # nextest
 
       - name: Bootstrap Environment
         run: make bootstrap

@@ -40,7 +40,9 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      - uses: taiki-e/install-action@1e265f93ff4b83431eebeb30c8eebb5cc62b7f7b # nextest
+      - uses: taiki-e/install-action@74e87cbfa15a59692b158178d8905a61bf6fca95 # v2
+        with:
+          tool: nextest
 
       - name: Bootstrap Environment
         run: make bootstrap

@@ -65,13 +65,13 @@ impl WriteBatchWithIndex {
             if value_data.is_null() {
                 Ok(None)
             } else {
-                Ok(Some(
-                    Box::<[u8]>::from(std::slice::from_raw_parts(
-                        value_data as *const u8,
-                        value_size,
-                    ))
-                    .into(),
+                let vec = Box::<[u8]>::from(std::slice::from_raw_parts(
+                    value_data as *const u8,
+                    value_size,
                 ))
+                .into();
+                ffi::rocksdb_free(value_data as *mut _);
+                Ok(Some(vec))
             }
         }
     }
@@ -100,13 +100,13 @@ impl WriteBatchWithIndex {
             if value_data.is_null() {
                 Ok(None)
             } else {
-                Ok(Some(
-                    Box::<[u8]>::from(std::slice::from_raw_parts(
-                        value_data as *const u8,
-                        value_size,
-                    ))
-                    .into(),
+                let vec = Box::<[u8]>::from(std::slice::from_raw_parts(
+                    value_data as *const u8,
+                    value_size,
                 ))
+                .into();
+                ffi::rocksdb_free(value_data as *mut _);
+                Ok(Some(vec))
             }
         }
     }
@@ -145,13 +145,13 @@ impl WriteBatchWithIndex {
             if value_data.is_null() {
                 Ok(None)
             } else {
-                Ok(Some(
-                    Box::<[u8]>::from(std::slice::from_raw_parts(
-                        value_data as *const u8,
-                        value_size,
-                    ))
-                    .into(),
+                let vec = Box::<[u8]>::from(std::slice::from_raw_parts(
+                    value_data as *const u8,
+                    value_size,
                 ))
+                .into();
+                ffi::rocksdb_free(value_data as *mut _);
+                Ok(Some(vec))
             }
         }
     }
@@ -229,13 +229,13 @@ impl WriteBatchWithIndex {
             if value_data.is_null() {
                 Ok(None)
             } else {
-                Ok(Some(
-                    Box::<[u8]>::from(std::slice::from_raw_parts(
-                        value_data as *const u8,
-                        value_size,
-                    ))
-                    .into(),
+                let vec = Box::<[u8]>::from(std::slice::from_raw_parts(
+                    value_data as *const u8,
+                    value_size,
                 ))
+                .into();
+                ffi::rocksdb_free(value_data as *mut _);
+                Ok(Some(vec))
             }
         }
     }

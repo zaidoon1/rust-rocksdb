@@ -56,6 +56,7 @@ jobs:
              fi
              export PATH="/opt/homebrew/opt/llvm/bin:$PATH" 2>/dev/null || true
           fi
+          make prebuild PREFIX=$HOME/.local
           make install PREFIX=$HOME/.local
 
       - name: Initial Cargo Build (Download Deps)

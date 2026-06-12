@@ -131,10 +131,14 @@ install: ## Install built RocksDB to the configured PREFIX
 		fi; \
 	fi
 	@if [ "$(UNAME_S)" = "Linux" ]; then \
-		if [ -w "$(PREFIX)/lib" ] && [[ ! "$(PREFIX)" =~ ^"$(HOME)" ]]; then \
+		is_under_home=0; \
+		case "$(PREFIX)" in \
+			"$(HOME)"*) is_under_home=1 ;; \
+		esac; \
+		if [ -w "$(PREFIX)/lib" ] && [ "$$is_under_home" -eq 0 ]; then \
 			ldconfig $(PREFIX)/lib 2>/dev/null || echo "Warning: ldconfig failed. You may need to run: sudo ldconfig $(PREFIX)/lib" >&2; \
 		else \
-			if [[ "$(PREFIX)" =~ ^"$(HOME)" ]]; then \
+			if [ "$$is_under_home" -eq 1 ]; then \
 				echo "Skipping ldconfig for non-system installation path under HOME."; \
 			else \
 				echo "Warning: $(PREFIX)/lib is not writable. Skipping ldconfig update. Please run: sudo ldconfig $(PREFIX)/lib" >&2; \

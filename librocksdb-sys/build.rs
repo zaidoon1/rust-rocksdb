@@ -890,10 +890,11 @@ mod system {
         if let Some(lib_dir_str) = env::var_os("ROCKSDB_LIB_DIR") {
             let lib_dir = Path::new(&lib_dir_str);
             if !lib_dir.exists() {
-                panic!(
-                    "ROCKSDB_LIB_DIR is set to a path that does not exist: {}",
+                println!(
+                    "cargo::warning=ROCKSDB_LIB_DIR is set to a path that does not exist ({}). Falling back to vendored build.",
                     lib_dir.display()
                 );
+                return false;
             }
 
             let mut include_dir = None;
@@ -914,21 +915,21 @@ mod system {
                     if major >= 11 {
                         return true;
                     } else {
-                        panic!(
-                            "ROCKSDB_LIB_DIR points to an older RocksDB major version ({major} < 11). \
-                             You must update your prebuilt RocksDB library to 11.x to compile on this branch."
+                        println!(
+                            "cargo::warning=ROCKSDB_LIB_DIR points to an older RocksDB major version ({major} < 11). \
+                             Falling back to vendored build to avoid compilation errors."
                         );
                     }
                 } else {
-                    panic!(
-                        "ROCKSDB_LIB_DIR points to a path where the RocksDB version could not be parsed."
+                    println!(
+                        "cargo::warning=ROCKSDB_LIB_DIR points to a path where the RocksDB version could not be parsed. \
+                         Falling back to vendored build."
                     );
                 }
             } else {
-                panic!(
-                    "ROCKSDB_LIB_DIR is set but no matching RocksDB headers (rocksdb/c.h) \
-                     were found at the expected location. Please ensure ROCKSDB_INCLUDE_DIR is set \
-                     or that the headers exist in the parent 'include' directory."
+                println!(
+                    "cargo::warning=ROCKSDB_LIB_DIR is set but no matching RocksDB headers (rocksdb/c.h) \
+                     were found at the expected location. Falling back to vendored build."
                 );
             }
         }

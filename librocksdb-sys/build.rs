@@ -890,7 +890,10 @@ mod system {
         if let Some(lib_dir_str) = env::var_os("ROCKSDB_LIB_DIR") {
             let lib_dir = Path::new(&lib_dir_str);
             if !lib_dir.exists() {
-                return false;
+                panic!(
+                    "ROCKSDB_LIB_DIR is set to a path that does not exist: {}",
+                    lib_dir.display()
+                );
             }
 
             let mut include_dir = None;
@@ -911,21 +914,21 @@ mod system {
                     if major >= 11 {
                         return true;
                     } else {
-                        println!(
-                            "cargo::warning=ROCKSDB_LIB_DIR points to an older RocksDB major version ({major} < 11). \
-                             Falling back to vendored build to avoid compilation errors."
+                        panic!(
+                            "ROCKSDB_LIB_DIR points to an older RocksDB major version ({major} < 11). \
+                             You must update your prebuilt RocksDB library to 11.x to compile on this branch."
                         );
                     }
                 } else {
-                    println!(
-                        "cargo::warning=ROCKSDB_LIB_DIR points to a path where RocksDB version could not be parsed. \
-                         Falling back to vendored build."
+                    panic!(
+                        "ROCKSDB_LIB_DIR points to a path where the RocksDB version could not be parsed."
                     );
                 }
             } else {
-                println!(
-                    "cargo::warning=ROCKSDB_LIB_DIR is set but no matching RocksDB headers (rocksdb/c.h) \
-                     were found at the expected location. Falling back to vendored build."
+                panic!(
+                    "ROCKSDB_LIB_DIR is set but no matching RocksDB headers (rocksdb/c.h) \
+                     were found at the expected location. Please ensure ROCKSDB_INCLUDE_DIR is set \
+                     or that the headers exist in the parent 'include' directory."
                 );
             }
         }

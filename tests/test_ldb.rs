@@ -23,7 +23,7 @@ fn test_ldb_help() {
     // 1. Locate the ldb binary.
     let mut ldb_path = None;
 
-    // Check ROCKSDB_LIB_DIR (from .cargo/config.toml / environment)
+    // Only test ldb if we are explicitly using a prebuilt ROCKSDB_LIB_DIR
     if let Ok(lib_dir_str) = env::var("ROCKSDB_LIB_DIR") {
         let lib_dir = Path::new(&lib_dir_str);
         if let Some(prefix) = lib_dir.parent() {
@@ -34,29 +34,8 @@ fn test_ldb_help() {
         }
     }
 
-    // Check local repo prebuild path
-    if ldb_path.is_none() {
-        let candidate = PathBuf::from("librocksdb-sys/rocksdb/ldb");
-        if candidate.exists() {
-            ldb_path = Some(candidate);
-        }
-    }
-
-    // Check system PATH
-    if ldb_path.is_none()
-        && let Ok(path) = env::var("PATH")
-    {
-        for dir in env::split_paths(&path) {
-            let candidate = dir.join("ldb");
-            if candidate.exists() {
-                ldb_path = Some(candidate);
-                break;
-            }
-        }
-    }
-
     let Some(ldb) = ldb_path else {
-        println!("Skipping ldb test: ldb binary not found.");
+        println!("Skipping ldb test: ROCKSDB_LIB_DIR not set or ldb binary not found in prefix.");
         return;
     };
 

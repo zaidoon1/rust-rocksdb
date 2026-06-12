@@ -94,6 +94,7 @@ db/version_builder.cc
 db/version_edit.cc
 db/version_edit_handler.cc
 db/version_set.cc
+db/version_util.cc
 db/wal_edit.cc
 db/wal_manager.cc
 db/wide/wide_column_serialization.cc
@@ -188,6 +189,7 @@ table/block_based/full_filter_block.cc
 table/block_based/hash_index_reader.cc
 table/block_based/index_builder.cc
 table/block_based/index_reader_common.cc
+table/block_based/multi_scan_index_iterator.cc
 table/block_based/parsed_full_filter_block.cc
 table/block_based/partitioned_filter_block.cc
 table/block_based/partitioned_index_iterator.cc
@@ -256,6 +258,7 @@ util/stderr_logger.cc
 util/string_util.cc
 util/thread_local.cc
 util/threadpool_imp.cc
+util/io_dispatcher_imp.cc
 util/udt_util.cc
 util/write_batch_util.cc
 util/xxhash.cc
@@ -323,6 +326,9 @@ utilities/transactions/write_prepared_txn.cc
 utilities/transactions/write_prepared_txn_db.cc
 utilities/transactions/write_unprepared_txn.cc
 utilities/transactions/write_unprepared_txn_db.cc
+utilities/trie_index/bitvector.cc
+utilities/trie_index/louds_trie.cc
+utilities/trie_index/trie_index_factory.cc
 utilities/ttl/db_ttl_impl.cc
 utilities/types_util.cc
 utilities/wal_filter.cc

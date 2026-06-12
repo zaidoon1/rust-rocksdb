@@ -146,6 +146,19 @@ impl MemoryUsage {
 /// Creates [`MemoryUsage`] from DBs and caches.
 ///
 /// Most users should call [`get_memory_usage_stats`] instead.
+///
+/// A `MemoryUsageBuilder` must not outlive the `DB`s added to it:
+///
+/// ```compile_fail,E0597
+/// use rust_rocksdb::{perf::MemoryUsageBuilder, DB};
+///
+/// let mut builder = MemoryUsageBuilder::new().unwrap();
+/// {
+///     let db = DB::open_default("foo").unwrap();
+///     builder.add_db(&db);
+/// }
+/// let _memory_usage = builder.build().unwrap();
+/// ```
 pub struct MemoryUsageBuilder<'a> {
     inner: *mut ffi::rocksdb_memory_consumers_t,
     base_dbs: Vec<*mut ffi::rocksdb_t>,

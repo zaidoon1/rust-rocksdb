@@ -22,12 +22,13 @@ use std::{sync::Arc, thread, time::Duration};
 
 use rust_rocksdb::statistics::{Histogram, StatsLevel, Ticker};
 use rust_rocksdb::{
-    BlockBasedOptions, BottommostLevelCompaction, Cache, ColumnFamilyDescriptor, ColumnFamilyTtl,
-    CompactOptions, CuckooTableOptions, DB, DBAccess, DBCompactionStyle, DBWithThreadMode,
-    DEFAULT_COLUMN_FAMILY_NAME, Env, Error, ErrorKind, FifoCompactOptions, IteratorMode,
-    MultiThreaded, Options, PerfContext, PerfMetric, RateLimiterMode, ReadOptions, SingleThreaded,
-    SliceTransform, Snapshot, UniversalCompactOptions, UniversalCompactionStopStyle,
-    WaitForCompactOptions, WriteBatch, perf::get_memory_usage_stats,
+    BlockBasedOptions, BottommostLevelCompaction, Cache, ColumnFamilyDescriptor,
+    ColumnFamilyMetaData, ColumnFamilyTtl, CompactOptions, CuckooTableOptions, DB, DBAccess,
+    DBCompactionStyle, DBWithThreadMode, DEFAULT_COLUMN_FAMILY_NAME, Env, Error, ErrorKind,
+    FifoCompactOptions, IteratorMode, MultiThreaded, Options, PerfContext, PerfMetric,
+    RateLimiterMode, ReadOptions, SingleThreaded, SliceTransform, Snapshot,
+    UniversalCompactOptions, UniversalCompactionStopStyle, WaitForCompactOptions, WriteBatch,
+    perf::get_memory_usage_stats,
 };
 use util::{DBPath, U64Comparator, U64Timestamp, assert_iter, pair};
 
@@ -439,12 +440,16 @@ fn set_column_family_metadata_test() {
         db.flush_cf(&cf1).unwrap();
         db.flush_cf(&cf2).unwrap();
 
-        let default_cf_metadata = db.get_column_family_metadata();
-        assert_eq!(default_cf_metadata.size > 150, true);
+        // Annotate the return type to lock in that `ColumnFamilyMetaData`
+        // is reachable from the crate root, not just inside the crate (see
+        // zaidoon1/rust-rocksdb#224). A regression where the re-export is
+        // dropped would fail to compile here.
+        let default_cf_metadata: ColumnFamilyMetaData = db.get_column_family_metadata();
+        assert!(default_cf_metadata.size > 150);
         assert_eq!(default_cf_metadata.file_count, 1);
 
-        let cf2_metadata = db.get_column_family_metadata_cf(&cf2);
-        assert_eq!(cf2_metadata.size > default_cf_metadata.size, true);
+        let cf2_metadata: ColumnFamilyMetaData = db.get_column_family_metadata_cf(&cf2);
+        assert!(cf2_metadata.size > default_cf_metadata.size);
         assert_eq!(cf2_metadata.file_count, 1);
     }
 }
@@ -807,13 +812,6 @@ fn test_open_with_multiple_refs_as_multi_threaded() {
 }
 
 #[test]
-fn test_open_with_multiple_refs_as_single_threaded() {
-    // This tests multiple references CANNOT be allowed while creating column families
-    let t = trybuild::TestCases::new();
-    t.compile_fail("tests/fail/open_with_multiple_refs_as_single_threaded.rs");
-}
-
-#[test]
 fn test_open_utf8_path() {
     let path = DBPath::new("_rust_rocksdb_utf8_path_temporärer_Order");
 
@@ -853,6 +851,7 @@ fn compact_range_test() {
         compact_opts.set_target_level(1);
         compact_opts.set_change_level(true);
         compact_opts.set_bottommost_level_compaction(BottommostLevelCompaction::ForceOptimized);
+        compact_opts.set_blob_garbage_collection_age_cutoff(0.5);
 
         // put and compact column family cf1
         let cfs = vec!["cf1"];
@@ -1571,12 +1570,6 @@ fn key_may_exist_cf_value() {
 }
 
 #[test]
-fn test_snapshot_outlive_db() {
-    let t = trybuild::TestCases::new();
-    t.compile_fail("tests/fail/snapshot_outlive_db.rs");
-}
-
-#[test]
 fn cuckoo() {
     let path = DBPath::new("_rust_rocksdb_cuckoo");
 
@@ -1784,7 +1777,7 @@ fn test_db_version() {
         .expect("can read the LOG file");
 
     // Make sure to update this test when upgrading to a new version!
-    assert!(settings.contains("RocksDB version: 10.10.1"));
+    assert!(settings.contains("RocksDB version: 11.1.1"));
 }
 
 #[test]

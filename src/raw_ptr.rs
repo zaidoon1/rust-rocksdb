@@ -1,8 +1,9 @@
 use crate::{
-    db::{DB, DBInner},
+    db::{DB, DBInner, ThreadMode},
     db_options::IngestExternalFileOptions,
     db_options::Options,
     env::Env,
+    transactions::OptimisticTransactionDB,
 };
 use rust_librocksdb_sys as ffi;
 
@@ -75,5 +76,15 @@ impl AsRawPtr<ffi::rocksdb_ingestexternalfileoptions_t> for IngestExternalFileOp
     /// This allows direct access to the RocksDB Ingest External File Options C API for advanced use cases.
     unsafe fn as_raw_ptr(&self) -> *mut ffi::rocksdb_ingestexternalfileoptions_t {
         self.inner
+    }
+}
+
+impl<T: ThreadMode> AsRawPtr<ffi::rocksdb_t> for OptimisticTransactionDB<T> {
+    /// Returns a raw pointer to the underlying `rocksdb_t` (base DB) object.
+    ///
+    /// This allows direct access to the RocksDB C API for advanced use cases
+    /// such as verifying file checksums.
+    unsafe fn as_raw_ptr(&self) -> *mut ffi::rocksdb_t {
+        self.inner.inner()
     }
 }

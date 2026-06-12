@@ -1,8 +1,8 @@
 [package]
 name = "rust-librocksdb-sys"
-version = "0.42.0+10.10.1"
+version = "0.46.0+11.1.1"
 edition = "2024"
-rust-version = "1.89.0"
+rust-version = "1.91.0"
 authors = [
     "Karl Hobley <karlhobley10@gmail.com>",
     "Arkadiy Paronyan <arkadiy@ethcore.io>",
@@ -24,7 +24,10 @@ exclude = [
     "*/examples",
     "*/tests",
     "tests",
-    "*.md",
+    # Strip the (large) vendored RocksDB documentation but KEEP
+    # `librocksdb-sys/patches/README.md`, which is referenced from the
+    # build-script panic that fires when a patch fails to apply.
+    "rocksdb/**/*.md",
 ]
 
 [features]
@@ -34,7 +37,15 @@ static = ["libz-sys?/static", "bzip2-sys?/static"]
 bindgen-runtime = ["bindgen/runtime"]
 bindgen-static = ["bindgen/static"]
 mt_static = []
-io-uring = ["pkg-config"]
+io-uring = []
+# Build RocksDB with `USE_COROUTINES=1 USE_FOLLY=1` and link against a folly
+# install. Enables the multi-level parallel `MultiGet` async-IO path described
+# in the RocksDB blog post "Asynchronous IO in RocksDB". Linux only. Requires
+# the `ROCKSDB_FOLLY_INSTALL_PATH` env var to point at a folly install built
+# by `scripts/build_folly.sh` (or equivalent). Adds a runtime dependency on
+# `libglog.so` and `libgflags.so` because folly's build does not produce
+# static archives for those two.
+coroutines = []
 snappy = []
 lz4 = ["lz4-sys"]
 zstd = ["zstd-sys"]
@@ -66,5 +77,4 @@ uuid = { version = "1", features = ["v4"] }
 cc = { version = "1.2", features = ["parallel"] }
 bindgen = { version = "0.72", default-features = false }
 glob = "0.3"
-pkg-config = { version = "0.3", optional = true }
-libc = "0.2"
+pkg-config = "0.3"

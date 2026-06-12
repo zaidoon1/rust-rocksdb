@@ -1,5 +1,181 @@
 # Changelog
 
+## 0.50.0 (2026-05-23)
+
+- breaking: bump MSRV to 1.91.0 per the rolling 6-month policy. 1.91.0
+  was released 2025-10-30, the most recent stable that satisfied the
+  6-month window at the time of the bump. No critical compiler bugs
+  or soundness fixes in 1.92+ apply to this codebase. (zaidoon1)
+- feat: implement `AsRawPtr<rocksdb_t>` for `OptimisticTransactionDB<T>`
+  (gated on the `raw-ptr` feature). Returns the underlying base DB
+  pointer for advanced C-API use cases such as verifying file
+  checksums directly. (ksurent)
+- fix: re-export two public types that were defined in private
+  modules but appeared in the return type of a `pub` function in the
+  crate-root surface, making them effectively unnameable by downstream
+  callers (zaidoon1/rust-rocksdb#224):
+  - `ColumnFamilyMetaData` — return type of
+    `DB::get_column_family_metadata{,_cf}`. Users need this to store
+    or pass the metadata through their own code.
+  - `CSlice` — returned wrapped in `(bool, Option<CSlice>)` by the
+    `key_may_exist_*_pinned_value` helpers. Users who want to hold
+    onto the pinned value past the immediate call site need the name.
+  A new `tests/test_public_api.rs` compile-checks both imports so a
+  future accidental un-export fails the test build rather than only
+  surfacing in downstream user reports. Thanks to JadedBlueEyes for
+  the report. (zaidoon1)
+- feat(librocksdb-sys): add local C-API extensions for RocksDB C++
+  features that have no upstream C wrapper yet. Two new files in
+  `librocksdb-sys/c-api-extensions/` (`c_api_extensions.h` and
+  `c_api_extensions.cc`) declare and define the new C symbols
+  additively; the vendored RocksDB submodule is never modified.
+  `build.rs` compiles the extension `.cc` alongside the submodule's
+  sources (vendored backend) or links it against the user's
+  pre-built `librocksdb` (system backend). No build-time
+  dependencies beyond the C++ compiler the crate already requires —
+  in particular, no `git` is needed at build time. Three symbols
+  ship in this release, each mirroring an upstream PR against
+  `facebook/rocksdb`:
+  - `rocksdb_readoptions_{set,get}_optimize_multiget_for_io`,
+    matching upstream PR facebook/rocksdb#14752.
+  - `rocksdb_block_based_options_set_uniform_cv_threshold` and the
+    `rocksdb_block_based_table_index_block_search_type_auto = 2`
+    enum constant, both needed for `kAuto` index-block search to
+    take effect.
+  - `rocksdb_options_{set,get}_memtable_batch_lookup_optimization`
+    for the skip-list memtable's batch-lookup optimization for
+    MultiGet.
+  When upstream merges a matching PR and the submodule is bumped to
+  a release containing it, the local entry can be dropped.
+  (zaidoon1)
+- feat: expose three new RocksDB option setters on the safe Rust API,
+  matching the three C-API extensions above. Getters are also exposed
+  for the two `bool` options so tests (and downstream callers) can
+  confirm the C-side actually accepted the value.
+  - `BlockBasedOptions::set_index_block_search_type(IndexBlockSearchType)`
+    and the new `IndexBlockSearchType` enum (`Binary`, `Interpolation`,
+    `Auto`) for selecting the index-block search algorithm.
+  - `BlockBasedOptions::set_uniform_cv_threshold(f64)` to set the
+    write-path uniformity threshold consulted by `Auto`. Any negative
+    value (including the default `-1`) disables the feature; `Auto`
+    then falls back to binary search at read time.
+  - `Options::{set,get}_memtable_batch_lookup_optimization(bool)` to
+    opt into the default skip-list memtable's batch-lookup
+    optimization for `MultiGet`. Reduces per-key cost from O(log N) to
+    O(log d), where d is the distance between consecutive keys; no-op
+    for non-skip-list memtable factories (`Vector`, `HashSkipList`,
+    `HashLinkList`). Immutable: must be set before opening the
+    column family.
+  - `ReadOptions::{set,get}_optimize_multiget_for_io(bool)` to toggle
+    between the multi-level (default `true`, lowest latency, higher
+    CPU) and single-level (lower CPU) parallel `MultiGet` paths.
+    Has no effect outside `coroutines`-enabled builds with
+    `set_async_io(true)` — with either condition unmet, both code
+    paths fall through to the synchronous per-file lookup regardless
+    of this flag.
+  (zaidoon1)
+
+## 0.49.1 (2026-05-18)
+
+- removed: drop the `numa` cargo feature that shipped in 0.49.0. The
+  feature set `-DNUMA` on the C++ build and linked `libnuma`, but the
+  `Options::use_numa_aware_alloc()` runtime knob and the
+  `numa_alloc_onnode()` arena code path were removed from rocksdb's
+  library proper before 11.1.1 — `NUMA` is now only referenced by
+  `tools/db_bench_tool.cc` and `tools/trace_analyzer_tool.cc`, neither
+  of which rust-rocksdb compiles. The feature was therefore a no-op
+  for library users while adding a build-time dependency on
+  `libnuma-dev`. For NUMA-local memtable arenas on multi-socket hosts
+  use OS-level pinning (`numactl --cpunodebind --membind`, systemd
+  `NUMAPolicy=` / `NUMAMask=`) instead. If you had `features = ["numa"]`
+  in your `Cargo.toml`, remove it. (zaidoon1)
+
+## 0.49.0 (2026-05-18)
+
+- feat: add transactiondb checkpoint support (gdorsi)
+- feat: add opt-in `coroutines` feature for multi-level async `MultiGet`,
+  wrapping RocksDB's `USE_COROUTINES=1` / `USE_FOLLY=1` build path with a
+  `scripts/build_folly.sh` helper. Linux-only, requires liburing >= 2.7
+  and the `ROCKSDB_FOLLY_INSTALL_PATH` env var pointing at a folly
+  install. See README "Async MultiGet with C++20 Coroutines" for full
+  prerequisites and runtime constraints. (zaidoon1)
+- feat: add opt-in linking against a system-installed RocksDB. Set
+  `ROCKSDB_USE_PKG_CONFIG=1` to discover rocksdb via pkg-config, or
+  `ROCKSDB_LIB_DIR=<path>` to point at a prebuilt library directly.
+  Default behavior (vendored build) is unchanged. Closes #310. (zaidoon1)
+- feat: add opt-in `numa` cargo feature (Linux only). When enabled,
+  rocksdb's `Options::use_numa_aware_alloc()` pins memtable arena
+  allocations to the calling thread's NUMA node via `numa_alloc_onnode()`.
+  Useful on multi-socket bare-metal hosts. Requires `libnuma-dev` /
+  `numactl-devel` / equivalent. (zaidoon1)
+- fix: define `ROCKSDB_BACKTRACE` on Linux glibc and Apple targets
+  (macOS, iOS) so rocksdb's `port/stack_trace.cc` produces C++ frames in
+  crash output instead of compiling a no-op stub. Matches RocksDB's own
+  Makefile build path. (zaidoon1)
+- fix: define `ROCKSDB_PTHREAD_ADAPTIVE_MUTEX` on Linux glibc, enabling
+  brief adaptive spinning on contended mutexes before falling back to a
+  futex wait. (zaidoon1)
+- refactor: rewrite `librocksdb-sys/build.rs` into typed `Target` and
+  `Backend` abstractions split across `mod vendor / system / snappy /
+  bindings / coroutines`, fixing several correctness bugs along the way.
+  (zaidoon1)
+- fix: bindgen now runs against the chosen backend's headers (vendored
+  vs system) instead of always the bundled headers. Eliminates a silent
+  ABI-mismatch hazard when linking system rocksdb. (zaidoon1)
+- fix: Windows runtime libs (`rpcrt4`, `shlwapi`) are now linked in both
+  vendored and system-link paths. Previously, linking a system rocksdb on
+  Windows produced unresolved-symbol errors. (zaidoon1)
+- fix: target-OS detection now reads `CARGO_CFG_TARGET_*` instead of host
+  `#[cfg(target_os=...)]`, eliminating a class of cross-compile bugs.
+  (zaidoon1)
+- fix: FreeBSD branch now honors `ROCKSDB_STATIC` and
+  `ROCKSDB_INCLUDE_DIR`; `ROCKSDB_COMPILE=1` on FreeBSD is rejected up
+  front with a clear error (the bundled sources don't build on FreeBSD).
+  (zaidoon1)
+- behavior change: on Android targets, the C++ stdlib link is now
+  `libc++` (NDK r18+, 2018) instead of `libstdc++`. Previous behavior
+  produced unresolved-symbol errors on modern NDK toolchains. (zaidoon1)
+- feat: added `cargo::metadata=include=` and `cargo::metadata=root=`
+  emissions; downstream `-sys` crates can read these as
+  `DEP_ROCKSDB_INCLUDE` and `DEP_ROCKSDB_ROOT`. Legacy
+  `cargo_manifest_dir`/`out_dir` keys preserved. (zaidoon1)
+- fix: iOS deployment target pinned via `-mios-version-min=12.0`
+  compiler flag instead of mutating process env, removing one of two
+  `unsafe { env::set_var }` blocks. Flag only emitted for actual iOS
+  targets (not tvos/watchos). (zaidoon1)
+- fix: comprehensive `cargo::rerun-if-env-changed=` coverage including
+  `CXXSTDLIB`, `CC`, `CXX`, `CFLAGS`, `CXXFLAGS`, `ROCKSDB_INCLUDE_DIR`,
+  `ROCKSDB_CXX_STD`, `CARGO_ENCODED_RUSTFLAGS`,
+  `BINDGEN_EXTRA_CLANG_ARGS`, `DEP_<LZ4/ZSTD/Z/BZIP2>_INCLUDE`,
+  `DEP_JEMALLOC_ROOT`, `PKG_CONFIG_*`. (zaidoon1)
+- fix: define `HAVE_FULLFSYNC` on Apple targets (macOS, iOS, tvOS,
+  watchOS) so RocksDB takes the `fcntl(F_FULLFSYNC)` path for true on-
+  disk durability rather than the weaker plain `fsync` (which on macOS
+  only flushes to the drive cache). Matches RocksDB's CMakeLists.txt.
+  (zaidoon1)
+- fix: emit `-DWIN32` (not `-DDWIN32`) on Windows targets so the define
+  matches what RocksDB's CMakeLists.txt sets. (zaidoon1)
+- ci: run the coroutines workflow on both x86_64 and aarch64 Linux
+  (ubuntu-24.04 / ubuntu-24.04-arm hosts, ubuntu:25.10 container) so
+  arch-specific breakage in folly's build or our link config is caught
+  before release. (zaidoon1)
+
+## 0.48.0 (2026-05-04)
+
+- upgrade RocksDB to 11.1.1 (zaidoon1)
+
+## 0.47.0 (2026-04-08)
+
+- upgrade RocksDB to 11.0.4 (zaidoon1)
+- feat: add flush, flush_wal, flush_cf, flush_cf_opt, flush_cfs_opt to TransactionDB (gdorsi)
+- feat: add timestamp() to DBRawIteratorWithThreadMode (ali2992)
+- feat: add IngestExternalFileOptions AsRawPtr impl (ali2992)
+- feat: add Iterator::Refresh() bindings (joshsend)
+- fix: memory leak in Options.set_info_logger (evanj)
+- fix: sync build.rs defines with RocksDB; pass through -Ctarget-cpu and set aarch64 CRC32 flags (evanj)
+- breaking: remove set_skip_checking_sst_file_sizes_on_db_open (removed from RocksDB 11.0 C API) (zaidoon1)
+- chore: replace trybuild with compile_fail doctests, removing trybuild dev-dependency (zaidoon1)
+
 ## 0.46.0 (2026-02-03)
 
 - upgrade RocksDB to 10.10.1 (zaidoon1)

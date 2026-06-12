@@ -594,6 +594,69 @@ impl BlockBasedOptions {
         }
     }
 
+    /// Selects the search algorithm used inside each index block at lookup
+    /// time.
+    ///
+    /// Use [`IndexBlockSearchType::Interpolation`] when keys in index blocks
+    /// are known to be uniformly distributed and the byte-wise comparator is
+    /// in use, or [`IndexBlockSearchType::Auto`] to let RocksDB choose per
+    /// block. `Auto` requires the corresponding write-path threshold to be
+    /// set via [`Self::set_uniform_cv_threshold`]; otherwise it falls back to
+    /// binary search.
+    ///
+    /// Default: `IndexBlockSearchType::Binary`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_rocksdb::{BlockBasedOptions, IndexBlockSearchType};
+    ///
+    /// let mut block_opts = BlockBasedOptions::default();
+    /// block_opts.set_index_block_search_type(IndexBlockSearchType::Auto);
+    /// block_opts.set_uniform_cv_threshold(0.2);
+    /// ```
+    pub fn set_index_block_search_type(&mut self, search_type: IndexBlockSearchType) {
+        unsafe {
+            ffi::rocksdb_block_based_options_set_index_block_search_type(
+                self.inner,
+                search_type as c_int,
+            );
+        }
+    }
+
+    /// Coefficient of variation (CV) threshold used on the write path to
+    /// decide whether an index block's keys are "uniform" enough to benefit
+    /// from interpolation search at read time. When the CV of key gaps within
+    /// an index block is below this threshold, the per-block "is_uniform"
+    /// footer bit is set, which
+    /// [`IndexBlockSearchType::Auto`](Self::set_index_block_search_type)
+    /// consults at lookup time.
+    ///
+    /// Any negative value disables the feature; the magnitude is ignored.
+    /// With the default disabled value, [`IndexBlockSearchType::Auto`]
+    /// degenerates to binary search at read time because the per-block
+    /// "is_uniform" bit is never written. The recommended enabled range is
+    /// `0.0..=1.0`; a typical value is `0.2`.
+    ///
+    /// Note: currently only index blocks honour this; the value has no effect
+    /// on data blocks today.
+    ///
+    /// Default: `-1.0` (disabled)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_rocksdb::BlockBasedOptions;
+    ///
+    /// let mut block_opts = BlockBasedOptions::default();
+    /// block_opts.set_uniform_cv_threshold(0.2);
+    /// ```
+    pub fn set_uniform_cv_threshold(&mut self, threshold: f64) {
+        unsafe {
+            ffi::rocksdb_block_based_options_set_uniform_cv_threshold(self.inner, threshold);
+        }
+    }
+
     /// If cache_index_and_filter_blocks is true and the below is true, then
     /// filter and index blocks are stored in the cache, but a reference is
     /// held in the "table reader" object so the blocks are pinned and only
@@ -1723,7 +1786,7 @@ impl Options {
 
     pub fn add_event_listener<L: EventListener>(&mut self, l: L) {
         let handle = new_event_listener(l);
-        unsafe { ffi::rocksdb_options_add_eventlistener(self.inner, handle.inner) }
+        unsafe { ffi::rust_rocksdb_options_add_eventlistener(self.inner, handle.inner) }
     }
 
     /// This is a factory that provides compaction filter objects which allow
@@ -2674,6 +2737,41 @@ impl Options {
         }
     }
 
+    /// Enables the skip-list memtable's batch-lookup optimization for
+    /// `MultiGet`.
+    ///
+    /// When enabled, the search path is cached between consecutive keys in a
+    /// `MultiGet`, reducing per-key cost from `O(log N)` to `O(log d)` where
+    /// `d` is the distance between consecutive keys. The optimization
+    /// exploits the fact that `MultiGet` keys are sorted.
+    ///
+    /// Applies only to the default skip-list memtable (the one used when no
+    /// memtable factory is set via [`Self::set_memtable_factory`]). The
+    /// `MemtableFactory::Vector`, `HashSkipList`, and `HashLinkList` variants
+    /// all fall back to per-key lookups regardless of this flag.
+    ///
+    /// This option is immutable on the C++ side: it must be set before the
+    /// column family is opened and cannot be changed via `SetOptions`.
+    ///
+    /// Default: `false`
+    pub fn set_memtable_batch_lookup_optimization(&mut self, enable: bool) {
+        unsafe {
+            ffi::rocksdb_options_set_memtable_batch_lookup_optimization(
+                self.inner,
+                c_uchar::from(enable),
+            );
+        }
+    }
+
+    /// Returns the current value of
+    /// [`Self::set_memtable_batch_lookup_optimization`].
+    ///
+    /// Provided primarily for tests that want to confirm the setter is wired
+    /// through to the underlying C++ `AdvancedColumnFamilyOptions`.
+    pub fn get_memtable_batch_lookup_optimization(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_memtable_batch_lookup_optimization(self.inner) != 0 }
+    }
+
     /// Sets the maximum number of successive merge operations on a key in the memtable.
     ///
     /// When a merge operation is added to the memtable and the maximum number of
@@ -2743,24 +2841,6 @@ impl Options {
                 self.inner,
                 level_values.as_ptr().cast_mut(),
                 count,
-            );
-        }
-    }
-
-    /// If true, then DB::Open() will not fetch and check sizes of all sst files.
-    /// This may significantly speed up startup if there are many sst files,
-    /// especially when using non-default Env with expensive GetFileSize().
-    /// We'll still check that all required sst files exist.
-    /// If paranoid_checks is false, this option is ignored, and sst files are
-    /// not checked at all.
-    ///
-    /// Default: false
-    #[deprecated(note = "RocksDB >= 10.5: option is ignored: checking done with a thread pool")]
-    pub fn set_skip_checking_sst_file_sizes_on_db_open(&mut self, value: bool) {
-        unsafe {
-            ffi::rocksdb_options_set_skip_checking_sst_file_sizes_on_db_open(
-                self.inner,
-                c_uchar::from(value),
             );
         }
     }
@@ -4371,6 +4451,43 @@ impl ReadOptions {
         }
     }
 
+    /// Selects the multi-level vs single-level parallel `MultiGet` path when
+    /// the library is built with `USE_COROUTINES` (the `coroutines` cargo
+    /// feature) and `set_async_io(true)` has been called.
+    ///
+    /// When `true` (the C++ default), `MultiGet` parallelises reads across
+    /// LSM levels, giving the lowest latency at the cost of higher CPU and
+    /// coroutine scheduling overhead. When `false`, parallelism is limited
+    /// to within a single level, trading some latency for CPU savings.
+    ///
+    /// Has no effect outside of `USE_COROUTINES` builds with `async_io=true`.
+    /// With either condition unmet, both code paths in `db/version_set.cc`
+    /// fall through to the synchronous per-file lookup regardless of this
+    /// flag's value.
+    ///
+    /// See the RocksDB ["Asynchronous IO in RocksDB" blog
+    /// post](https://rocksdb.org/blog/2022/10/07/asynchronous-io-in-rocksdb.html)
+    /// for the qualitative tradeoff: `optimize_multiget_for_io=true`
+    /// (multi-level) is the lowest-latency configuration but costs the most
+    /// CPU; `optimize_multiget_for_io=false` (single-level, with `async_io`
+    /// still on) retains most of the latency win at meaningfully lower CPU.
+    ///
+    /// Default: `true`
+    pub fn set_optimize_multiget_for_io(&mut self, v: bool) {
+        unsafe {
+            ffi::rocksdb_readoptions_set_optimize_multiget_for_io(self.inner, c_uchar::from(v));
+        }
+    }
+
+    /// Returns the current value of [`Self::set_optimize_multiget_for_io`].
+    ///
+    /// Provided primarily for tests that want to confirm the setter is wired
+    /// through to the underlying C++ `ReadOptions`. Reads through to the C
+    /// API getter without exposing the underlying `c_uchar` representation.
+    pub fn get_optimize_multiget_for_io(&self) -> bool {
+        unsafe { ffi::rocksdb_readoptions_get_optimize_multiget_for_io(self.inner) != 0 }
+    }
+
     /// Deadline for completing an API call (Get/MultiGet/Seek/Next for now)
     /// in microseconds.
     /// It should be set to microseconds since epoch, i.e, gettimeofday or
@@ -4665,6 +4782,39 @@ pub enum BlockBasedPinningTier {
     All = ffi::rocksdb_block_based_k_all_pinning_tier as isize,
 }
 
+/// Index-block search algorithm selected by
+/// [`BlockBasedOptions::set_index_block_search_type`].
+///
+/// `Auto` is only meaningful in combination with
+/// [`BlockBasedOptions::set_uniform_cv_threshold`]: the threshold gates whether
+/// the per-block "is_uniform" footer bit is set on the write path, and `Auto`
+/// reads that bit at lookup time to choose between binary and interpolation
+/// search per index block. Without setting the threshold to a non-negative
+/// value, `Auto` degenerates to binary search.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde1", derive(serde::Serialize, serde::Deserialize))]
+pub enum IndexBlockSearchType {
+    /// Standard binary search. The default and safest choice.
+    Binary = ffi::rocksdb_block_based_table_index_block_search_type_binary as isize,
+    /// Interpolation search. Faster than binary search for index blocks whose
+    /// keys are uniformly distributed; significantly slower when they are not.
+    ///
+    /// Only applicable when the byte-wise comparator is in use; with any
+    /// other comparator the C++ code falls back to binary search regardless.
+    ///
+    /// Performance is significantly degraded when
+    /// `IndexShorteningMode::kShortenSeparatorsAndSuccessor` is also set,
+    /// because the shortened successor skews end-keys away from the uniform
+    /// distribution that interpolation search relies on. Avoid combining the
+    /// two.
+    Interpolation = ffi::rocksdb_block_based_table_index_block_search_type_interpolation as isize,
+    /// Per-block adaptive selection between binary and interpolation search,
+    /// based on the per-block "is_uniform" footer bit. Requires
+    /// `uniform_cv_threshold >= 0` on the write path; see
+    /// [`BlockBasedOptions::set_uniform_cv_threshold`].
+    Auto = ffi::rocksdb_block_based_table_index_block_search_type_auto as isize,
+}
+
 pub struct FifoCompactOptions {
     pub(crate) inner: *mut ffi::rocksdb_fifo_compaction_options_t,
 }
@@ -4915,6 +5065,24 @@ impl CompactOptions {
         self.full_history_ts_low = ts;
         unsafe {
             ffi::rocksdb_compactoptions_set_full_history_ts_low(self.inner, ptr, len);
+        }
+    }
+
+    /// Override `CompactRangeOptions::blob_garbage_collection_age_cutoff` for a
+    /// single manual compaction.
+    ///
+    /// If set to `< 0` or `> 1`, RocksDB leaves the
+    /// `blob_garbage_collection_age_cutoff` from `ColumnFamilyOptions` in
+    /// effect (this is the default, `-1`). Otherwise, it overrides the
+    /// user-provided setting for the duration of this compaction. This
+    /// enables callers to selectively override the age cutoff per
+    /// `compact_range` call.
+    ///
+    /// See [`Options::set_blob_gc_age_cutoff`] for the CF-level setter that
+    /// this value overrides.
+    pub fn set_blob_garbage_collection_age_cutoff(&mut self, v: c_double) {
+        unsafe {
+            ffi::rocksdb_compactoptions_set_blob_garbage_collection_age_cutoff(self.inner, v);
         }
     }
 }

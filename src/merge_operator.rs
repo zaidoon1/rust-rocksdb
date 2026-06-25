@@ -94,7 +94,7 @@ pub unsafe extern "C" fn delete_callback(
         if !value.is_null() {
             // Use pointer form to avoid implicit cast from slice reference to raw slice pointer
             drop(Box::from_raw(ptr::slice_from_raw_parts_mut(
-                value as *mut u8,
+                value.cast_mut().cast::<u8>(),
                 value_length,
             )));
         }
@@ -125,12 +125,12 @@ pub unsafe extern "C" fn full_merge_callback<F: MergeFn, PF: MergeFn>(
     unsafe {
         let cb = &mut *(raw_cb as *mut MergeOperatorCallback<F, PF>);
         let operands = &MergeOperands::new(operands_list, operands_list_len, num_operands);
-        let key = slice::from_raw_parts(raw_key as *const u8, key_len);
+        let key = slice::from_raw_parts(raw_key.cast::<u8>(), key_len);
         let oldval = if existing_value.is_null() {
             None
         } else {
             Some(slice::from_raw_parts(
-                existing_value as *const u8,
+                existing_value.cast::<u8>(),
                 existing_value_len,
             ))
         };
@@ -162,7 +162,7 @@ pub unsafe extern "C" fn partial_merge_callback<F: MergeFn, PF: MergeFn>(
     unsafe {
         let cb = &mut *(raw_cb as *mut MergeOperatorCallback<F, PF>);
         let operands = &MergeOperands::new(operands_list, operands_list_len, num_operands);
-        let key = slice::from_raw_parts(raw_key as *const u8, key_len);
+        let key = slice::from_raw_parts(raw_key.cast::<u8>(), key_len);
         (cb.partial_merge_fn)(key, None, operands).map_or_else(
             || {
                 *new_value_length = 0;
@@ -220,7 +220,7 @@ impl MergeOperands {
             unsafe {
                 let ptr = *self.operands_list.add(index);
                 let len = *self.operands_list_len.add(index);
-                Some(slice::from_raw_parts(ptr as *const u8, len))
+                Some(slice::from_raw_parts(ptr.cast::<u8>(), len))
             }
         }
     }

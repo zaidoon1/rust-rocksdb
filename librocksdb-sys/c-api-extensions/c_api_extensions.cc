@@ -17,6 +17,7 @@
 #include "rocksdb/listener.h"
 #include "rocksdb/options.h"
 #include "rocksdb/table.h"
+#include "rocksdb/write_batch.h"
 
 using ROCKSDB_NAMESPACE::BackgroundErrorRecoveryInfo;
 using ROCKSDB_NAMESPACE::BlockBasedTableOptions;
@@ -28,8 +29,10 @@ using ROCKSDB_NAMESPACE::ExternalFileIngestionInfo;
 using ROCKSDB_NAMESPACE::FlushJobInfo;
 using ROCKSDB_NAMESPACE::Options;
 using ROCKSDB_NAMESPACE::ReadOptions;
+using ROCKSDB_NAMESPACE::Slice;
 using ROCKSDB_NAMESPACE::Status;
 using ROCKSDB_NAMESPACE::SubcompactionJobInfo;
+using ROCKSDB_NAMESPACE::WriteBatch;
 using ROCKSDB_NAMESPACE::WriteStallInfo;
 using ROCKSDB_NAMESPACE::MemTableInfo;
 
@@ -349,4 +352,110 @@ extern "C" void rocksdb_compactoptions_set_blob_garbage_collection_age_cutoff(
 extern "C" double rocksdb_compactoptions_get_blob_garbage_collection_age_cutoff(
     rocksdb_compactoptions_t* opt) {
   return reinterpret_cast<CompactRangeOptions*>(opt)->blob_garbage_collection_age_cutoff;
+}
+
+// -----------------------------------------------------------------------------
+// WriteBatch iteration with log_data support
+//
+// rocksdb_writebatch_t is defined in rocksdb/db/c.cc as:
+//   struct rocksdb_writebatch_t { WriteBatch rep; };
+// The `rep` field is the first (and only) member, so a pointer to the opaque
+// C type is also a valid pointer to its embedded WriteBatch — same layout
+// trick used for ReadOptions, Options, and BlockBasedTableOptions above.
+// -----------------------------------------------------------------------------
+
+namespace {
+
+class RustWriteBatchHandler : public WriteBatch::Handler {
+ public:
+  void* state;
+  void (*put_fn)(void*, const char*, size_t, const char*, size_t);
+  void (*delete_fn)(void*, const char*, size_t);
+  void (*log_data_fn)(void*, const char*, size_t);
+
+  Status PutCF(uint32_t cf, const Slice& key, const Slice& value) override {
+    if (cf == 0 && put_fn != nullptr) {
+      put_fn(state, key.data(), key.size(), value.data(), value.size());
+    }
+    return Status::OK();
+  }
+
+  Status DeleteCF(uint32_t cf, const Slice& key) override {
+    if (cf == 0 && delete_fn != nullptr) {
+      delete_fn(state, key.data(), key.size());
+    }
+    return Status::OK();
+  }
+
+  void LogData(const Slice& blob) override {
+    if (log_data_fn != nullptr) {
+      log_data_fn(state, blob.data(), blob.size());
+    }
+  }
+};
+
+class RustWriteBatchCfHandler : public WriteBatch::Handler {
+ public:
+  void* state;
+  void (*put_cf_fn)(void*, uint32_t, const char*, size_t, const char*, size_t);
+  void (*delete_cf_fn)(void*, uint32_t, const char*, size_t);
+  void (*merge_cf_fn)(void*, uint32_t, const char*, size_t, const char*, size_t);
+  void (*log_data_fn)(void*, const char*, size_t);
+
+  Status PutCF(uint32_t cf, const Slice& key, const Slice& value) override {
+    if (put_cf_fn != nullptr) {
+      put_cf_fn(state, cf, key.data(), key.size(), value.data(), value.size());
+    }
+    return Status::OK();
+  }
+
+  Status DeleteCF(uint32_t cf, const Slice& key) override {
+    if (delete_cf_fn != nullptr) {
+      delete_cf_fn(state, cf, key.data(), key.size());
+    }
+    return Status::OK();
+  }
+
+  Status MergeCF(uint32_t cf, const Slice& key, const Slice& value) override {
+    if (merge_cf_fn != nullptr) {
+      merge_cf_fn(state, cf, key.data(), key.size(), value.data(), value.size());
+    }
+    return Status::OK();
+  }
+
+  void LogData(const Slice& blob) override {
+    if (log_data_fn != nullptr) {
+      log_data_fn(state, blob.data(), blob.size());
+    }
+  }
+};
+
+}  // namespace
+
+extern "C" void rust_rocksdb_writebatch_iterate(
+    rocksdb_writebatch_t* b, void* state,
+    void (*put)(void*, const char*, size_t, const char*, size_t),
+    void (*deleted)(void*, const char*, size_t),
+    void (*log_data)(void*, const char*, size_t)) {
+  RustWriteBatchHandler handler;
+  handler.state = state;
+  handler.put_fn = put;
+  handler.delete_fn = deleted;
+  handler.log_data_fn = log_data;
+  reinterpret_cast<WriteBatch*>(b)->Iterate(&handler);
+}
+
+extern "C" void rust_rocksdb_writebatch_iterate_cf(
+    rocksdb_writebatch_t* b, void* state,
+    void (*put_cf)(void*, uint32_t, const char*, size_t, const char*, size_t),
+    void (*deleted_cf)(void*, uint32_t, const char*, size_t),
+    void (*merge_cf)(void*, uint32_t, const char*, size_t, const char*, size_t),
+    void (*log_data)(void*, const char*, size_t)) {
+  RustWriteBatchCfHandler handler;
+  handler.state = state;
+  handler.put_cf_fn = put_cf;
+  handler.delete_cf_fn = deleted_cf;
+  handler.merge_cf_fn = merge_cf;
+  handler.log_data_fn = log_data;
+  reinterpret_cast<WriteBatch*>(b)->Iterate(&handler);
 }

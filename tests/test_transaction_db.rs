@@ -16,6 +16,10 @@
 mod util;
 
 use pretty_assertions::assert_eq;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 
 use rust_rocksdb::{
     CuckooTableOptions, DB, DBAccess, Direction, Error, ErrorKind, FlushOptions, IteratorMode,
@@ -23,6 +27,25 @@ use rust_rocksdb::{
     WriteBatchWithTransaction, WriteOptions,
 };
 use util::DBPath;
+
+struct CountedAsRef {
+    calls: Arc<AtomicUsize>,
+}
+
+impl CountedAsRef {
+    fn new(calls: &Arc<AtomicUsize>) -> Self {
+        Self {
+            calls: Arc::clone(calls),
+        }
+    }
+}
+
+impl AsRef<[u8]> for CountedAsRef {
+    fn as_ref(&self) -> &[u8] {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        b"missing"
+    }
+}
 
 #[test]
 fn open_default() {
@@ -75,6 +98,45 @@ fn open_cf() {
         assert!(db.get_cf(&cf2, b"k1").unwrap().is_none());
         assert_eq!(db.get_cf(&cf2, b"k2").unwrap().unwrap(), b"v2");
     }
+}
+
+#[test]
+fn multi_get_calls_as_ref_once_per_key() {
+    let path = DBPath::new("_rust_rocksdb_transaction_db_multi_get_as_ref_once");
+    let db: TransactionDB = TransactionDB::open_default(&path).unwrap();
+
+    let db_calls = Arc::new(AtomicUsize::new(0));
+    let db_result = &db.multi_get([CountedAsRef::new(&db_calls)])[0];
+    assert!(db_result.as_ref().unwrap().is_none());
+    assert_eq!(db_calls.load(Ordering::Relaxed), 1);
+
+    let txn = db.transaction();
+    let txn_calls = Arc::new(AtomicUsize::new(0));
+    let txn_result = &txn.multi_get([CountedAsRef::new(&txn_calls)])[0];
+    assert!(txn_result.as_ref().unwrap().is_none());
+    assert_eq!(txn_calls.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn multi_get_cf_calls_as_ref_once_per_key() {
+    let path = DBPath::new("_rust_rocksdb_transaction_db_multi_get_cf_as_ref_once");
+    let mut opts = Options::default();
+    opts.create_if_missing(true);
+    opts.create_missing_column_families(true);
+    let db: TransactionDB =
+        TransactionDB::open_cf(&opts, &TransactionDBOptions::default(), &path, ["cf"]).unwrap();
+    let cf = db.cf_handle("cf").unwrap();
+
+    let db_calls = Arc::new(AtomicUsize::new(0));
+    let db_result = &db.multi_get_cf(vec![(&cf, CountedAsRef::new(&db_calls))])[0];
+    assert!(db_result.as_ref().unwrap().is_none());
+    assert_eq!(db_calls.load(Ordering::Relaxed), 1);
+
+    let txn = db.transaction();
+    let txn_calls = Arc::new(AtomicUsize::new(0));
+    let txn_result = &txn.multi_get_cf(vec![(&cf, CountedAsRef::new(&txn_calls))])[0];
+    assert!(txn_result.as_ref().unwrap().is_none());
+    assert_eq!(txn_calls.load(Ordering::Relaxed), 1);
 }
 
 #[test]

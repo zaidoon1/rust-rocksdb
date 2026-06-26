@@ -1614,6 +1614,25 @@ impl AsRef<[u8]> for EvilAsRef {
     }
 }
 
+struct CountedAsRef {
+    calls: Arc<AtomicUsize>,
+}
+
+impl CountedAsRef {
+    fn new(calls: &Arc<AtomicUsize>) -> Self {
+        Self {
+            calls: Arc::clone(calls),
+        }
+    }
+}
+
+impl AsRef<[u8]> for CountedAsRef {
+    fn as_ref(&self) -> &[u8] {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        b"missing"
+    }
+}
+
 #[test]
 fn evil_as_ref() {
     let path = DBPath::new("_rust_rocksdb_evil_as_ref");
@@ -1625,6 +1644,34 @@ fn evil_as_ref() {
 
     let result = &db.multi_get([evil])[0];
     assert!(result.as_ref().unwrap().is_none());
+}
+
+#[test]
+fn multi_get_calls_as_ref_once_per_key() {
+    let path = DBPath::new("_rust_rocksdb_multi_get_as_ref_once");
+    let db = DB::open_default(&path).unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+
+    let result = &db.multi_get([CountedAsRef::new(&calls)])[0];
+
+    assert!(result.as_ref().unwrap().is_none());
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn multi_get_cf_calls_as_ref_once_per_key() {
+    let path = DBPath::new("_rust_rocksdb_multi_get_cf_as_ref_once");
+    let mut opts = Options::default();
+    opts.create_if_missing(true);
+    opts.create_missing_column_families(true);
+    let db = DB::open_cf(&opts, &path, ["cf"]).unwrap();
+    let cf = db.cf_handle("cf").unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+
+    let result = &db.multi_get_cf(vec![(&cf, CountedAsRef::new(&calls))])[0];
+
+    assert!(result.as_ref().unwrap().is_none());
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
 }
 
 #[test]

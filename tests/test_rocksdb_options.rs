@@ -546,6 +546,25 @@ fn test_set_avoid_unnecessary_blocking_io() {
 }
 
 #[test]
+fn test_set_experimental_mempurge_threshold() {
+    let path = DBPath::new("_set_experimental_mempurge_threshold");
+    {
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        opts.set_experimental_mempurge_threshold(1.0);
+        let _db = DB::open(&opts, &path).unwrap();
+    }
+
+    let mut rocksdb_log =
+        fs::File::open((&path).as_ref().join("LOG")).expect("rocksdb creates a LOG file");
+    let mut settings = String::new();
+    rocksdb_log
+        .read_to_string(&mut settings)
+        .expect("can read the LOG file");
+    assert!(settings.contains("experimental_mempurge_threshold: 1.000000"));
+}
+
+#[test]
 fn test_set_track_and_verify_wals_in_manifest() {
     let path = DBPath::new("_set_track_and_verify_wals_in_manifest");
 

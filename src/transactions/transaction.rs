@@ -541,11 +541,13 @@ impl<DB> Transaction<'_, DB> {
         I: IntoIterator<Item = K>,
     {
         let owned_keys: Vec<K> = keys.into_iter().collect();
-        let keys_sizes: Vec<usize> = owned_keys.iter().map(|k| k.as_ref().len()).collect();
-        let ptr_keys: Vec<*const c_char> = owned_keys
+        let (ptr_keys, keys_sizes): (Vec<*const c_char>, Vec<usize>) = owned_keys
             .iter()
-            .map(|k| k.as_ref().as_ptr() as *const c_char)
-            .collect();
+            .map(|k| {
+                let key = k.as_ref();
+                (key.as_ptr() as *const c_char, key.len())
+            })
+            .unzip();
 
         let mut values: Vec<*mut c_char> = Vec::with_capacity(ptr_keys.len());
         let mut values_sizes: Vec<usize> = Vec::with_capacity(ptr_keys.len());
@@ -597,14 +599,13 @@ impl<DB> Transaction<'_, DB> {
         W: 'b + AsColumnFamilyRef,
     {
         let cfs_and_owned_keys: Vec<(&'b W, K)> = keys.into_iter().collect();
-        let keys_sizes: Vec<usize> = cfs_and_owned_keys
+        let (ptr_keys, keys_sizes): (Vec<*const c_char>, Vec<usize>) = cfs_and_owned_keys
             .iter()
-            .map(|(_, k)| k.as_ref().len())
-            .collect();
-        let ptr_keys: Vec<*const c_char> = cfs_and_owned_keys
-            .iter()
-            .map(|(_, k)| k.as_ref().as_ptr() as *const c_char)
-            .collect();
+            .map(|(_, k)| {
+                let key = k.as_ref();
+                (key.as_ptr() as *const c_char, key.len())
+            })
+            .unzip();
         let ptr_cfs: Vec<*const ffi::rocksdb_column_family_handle_t> = cfs_and_owned_keys
             .iter()
             .map(|(c, _)| c.inner().cast_const())

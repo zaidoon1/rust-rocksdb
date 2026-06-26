@@ -223,34 +223,27 @@ fn test_iterator_timestamp() {
     iter.seek_to_first();
     assert!(iter.valid());
     assert_eq!(iter.key(), Some(b"k1".as_ref()));
-    unsafe {
-        assert_eq!(iter.timestamp(), ts1.as_ref());
-    }
+    assert_eq!(iter.timestamp(), Some(ts1.as_ref()));
 
     iter.next();
     assert!(iter.valid());
     assert_eq!(iter.key(), Some(b"k2".as_ref()));
-    unsafe {
-        assert_eq!(iter.timestamp(), ts2.as_ref());
-    }
+    assert_eq!(iter.timestamp(), Some(ts2.as_ref()));
 
     iter.next();
     assert!(iter.valid());
     assert_eq!(iter.key(), Some(b"k3".as_ref()));
-    unsafe {
-        assert_eq!(iter.timestamp(), ts3.as_ref());
-    }
+    assert_eq!(iter.timestamp(), Some(ts3.as_ref()));
 
     // Past last entry, iterator is invalid
     iter.next();
     assert!(!iter.valid());
+    assert_eq!(iter.timestamp(), None);
 
     // Seek to specific key
     iter.seek(b"k2");
     assert!(iter.valid());
-    unsafe {
-        assert_eq!(iter.timestamp(), ts2.as_ref());
-    }
+    assert_eq!(iter.timestamp(), Some(ts2.as_ref()));
 
     // Read at ts1, only k1 visible
     let mut read_opts = ReadOptions::default();
@@ -259,7 +252,20 @@ fn test_iterator_timestamp() {
     iter.seek_to_first();
     assert!(iter.valid());
     assert_eq!(iter.key(), Some(b"k1".as_ref()));
-    unsafe {
-        assert_eq!(iter.timestamp(), ts1.as_ref());
-    }
+    assert_eq!(iter.timestamp(), Some(ts1.as_ref()));
+}
+
+#[test]
+fn test_iterator_timestamp_without_user_defined_timestamp() {
+    let n = DBPath::new("_rust_rocksdb_iterator_timestamp_no_udt_test");
+
+    let db = DB::open_default(&n).unwrap();
+    db.put(b"k1", b"v1").unwrap();
+
+    let mut iter = db.raw_iterator();
+    assert_eq!(iter.timestamp(), None);
+
+    iter.seek_to_first();
+    assert!(iter.valid());
+    assert_eq!(iter.timestamp(), Some([].as_slice()));
 }

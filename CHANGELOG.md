@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- feat: add `SstFileWriter::delete_range` and expose
+  `Options::set_experimental_mempurge_threshold`, matching upstream
+  rust-rocksdb APIs. (cooronx, Vladimir Petrzhikovskii)
+- feat: add `TransactionDBCheckpoint::create_checkpoint_with_log_size`
+  for upstream source compatibility. TransactionDB checkpoints may
+  still flush memtables regardless of the threshold. (gdorsi, zaidoon1)
+- fix: make `DBRawIteratorWithThreadMode::timestamp()` safe and
+  upstream-compatible by returning `Option<&[u8]>`; the prior zero-copy
+  unchecked behavior is available as `timestamp_unchecked()`. (ali2992,
+  zaidoon1)
+- fix: derive multi-get key pointers and lengths from a single
+  `AsRef<[u8]>` call per key across DB, Transaction, and TransactionDB
+  paths. (Niklas Fiekas)
+- fix(librocksdb-sys): disable `zstd-sys` default features while
+  preserving local `experimental` support, avoiding an unnecessary
+  transitive bindgen path. (Congyu WANG, zaidoon1)
+
 ## 0.50.0 (2026-05-23)
 
 - breaking: bump MSRV to 1.91.0 per the rolling 6-month policy. 1.91.0

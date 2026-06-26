@@ -258,7 +258,7 @@ impl FlushJobInfo {
             }
 
             // SAFETY: We're copying `length` bytes from a valid, non-null pointer.
-            let cf_name_vec = std::slice::from_raw_parts(cf_name_ptr as *const u8, length).to_vec();
+            let cf_name_vec = std::slice::from_raw_parts(cf_name_ptr.cast::<u8>(), length).to_vec();
 
             Some(cf_name_vec)
         }
@@ -307,7 +307,7 @@ impl CompactionJobInfo {
             }
 
             // SAFETY: We're copying `length` bytes from a valid, non-null pointer.
-            let cf_name_vec = std::slice::from_raw_parts(cf_name_ptr as *const u8, length).to_vec();
+            let cf_name_vec = std::slice::from_raw_parts(cf_name_ptr.cast::<u8>(), length).to_vec();
 
             Some(cf_name_vec)
         }
@@ -385,7 +385,7 @@ impl SubcompactionJobInfo {
             }
 
             // SAFETY: We're copying `length` bytes from a valid, non-null pointer.
-            let cf_name_vec = std::slice::from_raw_parts(cf_name_ptr as *const u8, length).to_vec();
+            let cf_name_vec = std::slice::from_raw_parts(cf_name_ptr.cast::<u8>(), length).to_vec();
 
             Some(cf_name_vec)
         }
@@ -428,7 +428,7 @@ impl IngestionInfo {
             }
 
             // SAFETY: We're copying `length` bytes from a valid, non-null pointer.
-            let cf_name_vec = std::slice::from_raw_parts(cf_name_ptr as *const u8, length).to_vec();
+            let cf_name_vec = std::slice::from_raw_parts(cf_name_ptr.cast::<u8>(), length).to_vec();
 
             Some(cf_name_vec)
         }
@@ -450,7 +450,7 @@ impl WriteStallInfo {
             }
 
             // SAFETY: We're copying `length` bytes from a valid, non-null pointer.
-            let cf_name_vec = std::slice::from_raw_parts(cf_name_ptr as *const u8, length).to_vec();
+            let cf_name_vec = std::slice::from_raw_parts(cf_name_ptr.cast::<u8>(), length).to_vec();
 
             Some(cf_name_vec)
         }
@@ -485,7 +485,7 @@ impl MemTableInfo {
             }
 
             // SAFETY: We're copying `length` bytes from a valid, non-null pointer.
-            let cf_name_vec = std::slice::from_raw_parts(cf_name_ptr as *const u8, length).to_vec();
+            let cf_name_vec = std::slice::from_raw_parts(cf_name_ptr.cast::<u8>(), length).to_vec();
 
             Some(cf_name_vec)
         }

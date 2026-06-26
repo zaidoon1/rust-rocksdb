@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- fix(librocksdb-sys): upgrade the bundled RocksDB submodule to
+  11.1.2. (zaidoon1)
 - feat: add `SstFileWriter::delete_range` and expose
   `Options::set_experimental_mempurge_threshold`, matching upstream
   rust-rocksdb APIs. (cooronx, Vladimir Petrzhikovskii)

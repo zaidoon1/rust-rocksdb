@@ -219,19 +219,8 @@ impl Drop for Checkpoint<'_> {
 /// };
 /// ```
 ///
-/// `TransactionDBCheckpoint` does not expose `create_checkpoint_with_log_size`
-/// because RocksDB TransactionDB checkpoints are expected to flush regardless
-/// of that setting:
-///
-/// ```compile_fail,E0599
-/// use rust_rocksdb::{checkpoint::TransactionDBCheckpoint, TransactionDB};
-///
-/// let db: TransactionDB = TransactionDB::open_default("foo").unwrap();
-/// let checkpoint = TransactionDBCheckpoint::new(&db).unwrap();
-/// checkpoint
-///     .create_checkpoint_with_log_size("foo-checkpoint", u64::MAX)
-///     .unwrap();
-/// ```
+/// RocksDB TransactionDB checkpoints are expected to flush memtables regardless
+/// of the `log_size_for_flush` setting.
 pub struct TransactionDBCheckpoint<'db> {
     inner: *mut ffi::rocksdb_checkpoint_t,
     _db: PhantomData<&'db ()>,
@@ -266,12 +255,25 @@ impl<'db> TransactionDBCheckpoint<'db> {
     /// This method uses the default `log_size_for_flush` value (`0`), which instructs
     /// RocksDB to flush memtables as needed before creating the checkpoint.
     pub fn create_checkpoint<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
+        self.create_checkpoint_with_log_size(path, DEFAULT_LOG_SIZE_FOR_FLUSH)
+    }
+
+    /// Creates a new physical RocksDB checkpoint in `path`, allowing the caller to
+    /// control `log_size_for_flush`.
+    ///
+    /// The value is forwarded to RocksDB's Checkpoint API. TransactionDB
+    /// checkpoints may still flush memtables regardless of this threshold.
+    pub fn create_checkpoint_with_log_size<P: AsRef<Path>>(
+        &self,
+        path: P,
+        log_size_for_flush: u64,
+    ) -> Result<(), Error> {
         let c_path = to_cpath(path)?;
         unsafe {
             ffi_try!(ffi::rocksdb_checkpoint_create(
                 self.inner,
                 c_path.as_ptr(),
-                DEFAULT_LOG_SIZE_FOR_FLUSH,
+                log_size_for_flush,
             ));
         }
         Ok(())

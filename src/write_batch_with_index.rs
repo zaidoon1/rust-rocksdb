@@ -66,7 +66,7 @@ impl WriteBatchWithIndex {
                 Ok(None)
             } else {
                 Ok(Some(Vec::from_raw_parts(
-                    value_data as *mut u8,
+                    value_data.cast::<u8>(),
                     value_size,
                     value_size,
                 )))
@@ -99,7 +99,7 @@ impl WriteBatchWithIndex {
                 Ok(None)
             } else {
                 Ok(Some(Vec::from_raw_parts(
-                    value_data as *mut u8,
+                    value_data.cast::<u8>(),
                     value_size,
                     value_size,
                 )))
@@ -142,7 +142,7 @@ impl WriteBatchWithIndex {
                 Ok(None)
             } else {
                 Ok(Some(Vec::from_raw_parts(
-                    value_data as *mut u8,
+                    value_data.cast::<u8>(),
                     value_size,
                     value_size,
                 )))
@@ -224,7 +224,7 @@ impl WriteBatchWithIndex {
                 Ok(None)
             } else {
                 Ok(Some(Vec::from_raw_parts(
-                    value_data as *mut u8,
+                    value_data.cast::<u8>(),
                     value_size,
                     value_size,
                 )))

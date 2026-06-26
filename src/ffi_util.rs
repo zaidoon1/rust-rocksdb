@@ -42,7 +42,7 @@ pub(crate) unsafe fn raw_data(ptr: *const c_char, size: usize) -> Option<Vec<u8>
         None
     } else {
         // SAFETY: Caller guarantees `ptr` points to `size` bytes; we immediately copy them.
-        Some(unsafe { std::slice::from_raw_parts(ptr as *const u8, size) }.to_vec())
+        Some(unsafe { std::slice::from_raw_parts(ptr.cast::<u8>(), size) }.to_vec())
     }
 }
 
@@ -243,7 +243,7 @@ impl CSlice {
 
 impl AsRef<[u8]> for CSlice {
     fn as_ref(&self) -> &[u8] {
-        unsafe { std::slice::from_raw_parts(self.data as *const u8, self.len) }
+        unsafe { std::slice::from_raw_parts(self.data.cast::<u8>(), self.len) }
     }
 }
 

@@ -2128,7 +2128,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
             if ffi::rocksdb_iter_valid(iter) != 0 {
                 let mut key_len: size_t = 0;
                 let key_ptr = ffi::rocksdb_iter_key(iter, &raw mut key_len);
-                let key = slice::from_raw_parts(key_ptr as *const u8, key_len as usize);
+                let key = slice::from_raw_parts(key_ptr.cast::<u8>(), key_len as usize);
                 Ok(key.starts_with(prefix))
             } else if let Err(e) = (|| {
                 // Check status to differentiate end-of-range vs error
@@ -2232,7 +2232,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
             if ffi::rocksdb_iter_valid(iter) != 0 {
                 let mut key_len: size_t = 0;
                 let key_ptr = ffi::rocksdb_iter_key(iter, &raw mut key_len);
-                let key = slice::from_raw_parts(key_ptr as *const u8, key_len as usize);
+                let key = slice::from_raw_parts(key_ptr.cast::<u8>(), key_len as usize);
                 Ok(key.starts_with(prefix))
             } else if let Err(e) = (|| {
                 ffi_try!(ffi::rocksdb_iter_get_error(iter));
@@ -3431,7 +3431,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
                 Err(Error::new("Could not get full_history_ts_low".to_owned()))
             } else {
                 let mut vec = vec![0; ts_lowlen];
-                ptr::copy_nonoverlapping(ts as *mut u8, vec.as_mut_ptr(), ts_lowlen);
+                ptr::copy_nonoverlapping(ts.cast::<u8>(), vec.as_mut_ptr(), ts_lowlen);
                 ffi::rocksdb_free(ts as *mut c_void);
                 Ok(vec)
             }

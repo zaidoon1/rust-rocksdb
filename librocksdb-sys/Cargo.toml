@@ -1,6 +1,6 @@
 [package]
 name = "rust-librocksdb-sys"
-version = "0.47.0+11.1.2"
+version = "0.47.1+11.1.2"
 edition = "2024"
 rust-version = "1.91.0"
 authors = [
@@ -58,7 +58,7 @@ lto = []
 
 [dependencies]
 libc = "0.2"
-tikv-jemalloc-sys = { version = "0.6", features = [
+tikv-jemalloc-sys = { version = "0.7", features = [
     "unprefixed_malloc_on_supported_platforms",
 ], optional = true }
 lz4-sys = { version = "1.11", optional = true }

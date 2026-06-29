@@ -27,7 +27,9 @@ use std::path::{Path, PathBuf};
 /// On these platforms `jemalloc-sys` uses a prefixed jemalloc that cannot be
 /// linked together with RocksDB's own usage of jemalloc symbols.
 /// See <https://github.com/tikv/jemallocator/blob/f7adfca5aff272b43fd3ad896252b57fbbd9c72a/jemalloc-sys/src/env.rs#L24>.
-const NO_JEMALLOC_TARGETS: &[&str] = &["android", "dragonfly", "darwin"];
+/// Additionally, FreeBSD comes with jemalloc out of the box, so we don't
+/// need to recompile it.
+const NO_JEMALLOC_TARGETS: &[&str] = &["android", "dragonfly", "darwin", "freebsd"];
 
 /// Default C++ standard used to build RocksDB. Can be overridden with
 /// `ROCKSDB_CXX_STD`.
@@ -125,20 +127,8 @@ impl Backend {
     /// Decide the backend and emit any needed link directives for the
     /// system path. Vendored compilation is deferred to [`vendor::build`].
     fn resolve(target: &Target) -> Self {
-        // Highest priority: explicit "force compile" override. FreeBSD
-        // can't build RocksDB from these submodule sources, so the
-        // combination is rejected up front rather than failing midway
-        // through a long C++ compile.
+        // Highest priority: explicit "force compile" override.
         if env_truthy("ROCKSDB_COMPILE") {
-            if target.os == "freebsd" {
-                panic!(
-                    "ROCKSDB_COMPILE=1 is not supported on FreeBSD: the \
-                     bundled RocksDB sources don't build on FreeBSD. \
-                     Unset ROCKSDB_COMPILE and let the build script link \
-                     against the system RocksDB (install via `pkg install \
-                     rocksdb`)."
-                );
-            }
             return Backend::Vendored {
                 include: vendored_include(),
             };
@@ -154,8 +144,7 @@ impl Backend {
             return system::from_lib_dir_env();
         }
 
-        // FreeBSD historically can't build RocksDB from these submodule
-        // sources (see PR #908). Fall through to the system library at the
+        // Fall through to the system library at the
         // platform's conventional location.
         if target.os == "freebsd" {
             return system::from_freebsd_defaults();
@@ -784,8 +773,7 @@ mod vendor {
     ///   - Android: bionic only added `<execinfo.h>` in API 33; older API
     ///     levels would fail to compile.
     ///   - Windows / MSVC: no equivalent; would need DbgHelp instead.
-    ///   - BSDs: would need libexecinfo from ports. We don't build the
-    ///     vendored sources on FreeBSD anyway.
+    ///   - BSDs: would need libexecinfo from ports.
     fn apply_backtrace(cfg: &mut cc::Build, target: &Target) {
         let supported = match target.os.as_str() {
             "linux" => target.env_abi != "musl",

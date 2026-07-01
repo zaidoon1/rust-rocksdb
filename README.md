@@ -395,7 +395,6 @@ When you opt in via any of these:
 - No version pin is enforced &mdash; you're the power user. The bundled RocksDB version is the trailing component of `librocksdb-sys`'s `version = "X.Y.Z+RR.S.T"` in `Cargo.toml`; make sure your system rocksdb is API-compatible.
 - The `snappy` Cargo feature becomes a no-op: the system librocksdb is expected to provide snappy support itself, so building and linking a second copy would risk duplicate symbols. The build script emits a `cargo::warning=` so the silent skip isn't surprising.
 - The `coroutines` Cargo feature still emits folly link directives, but the build script emits a `cargo::warning=` reminding you that your prebuilt librocksdb must have been built with `USE_COROUTINES=1` and `USE_FOLLY=1` &mdash; otherwise you'll get unresolved-symbol link errors against folly.
-- On FreeBSD the system rocksdb is used unconditionally (the bundled sources don't currently build on FreeBSD). `ROCKSDB_COMPILE=1` is rejected up front with a clear error on FreeBSD targets to avoid a long, doomed C++ compile.
 
 Same set of variables exists for snappy (`SNAPPY_LIB_DIR`, `SNAPPY_STATIC`, `SNAPPY_COMPILE`) if you'd like to swap in a system libsnappy while keeping the bundled rocksdb.
 

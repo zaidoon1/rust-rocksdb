@@ -65,11 +65,17 @@ impl WriteBatchWithIndex {
             if value_data.is_null() {
                 Ok(None)
             } else {
-                Ok(Some(Vec::from_raw_parts(
-                    value_data as *mut u8,
+                // SAFETY: The memory is allocated by RocksDB C API and must be freed with ffi::rocksdb_free.
+                // We must copy the data into a Rust-managed Box/Vec because Rust's allocator is not
+                // guaranteed to match the allocator used by RocksDB (which could lead to allocator mismatch UB,
+                // heap corruption, or crashes if we used `Vec::from_raw_parts` directly).
+                let vec = Box::<[u8]>::from(std::slice::from_raw_parts(
+                    value_data.cast::<u8>(),
                     value_size,
-                    value_size,
-                )))
+                ))
+                .into();
+                ffi::rocksdb_free(value_data as *mut _);
+                Ok(Some(vec))
             }
         }
     }
@@ -98,11 +104,17 @@ impl WriteBatchWithIndex {
             if value_data.is_null() {
                 Ok(None)
             } else {
-                Ok(Some(Vec::from_raw_parts(
-                    value_data as *mut u8,
+                // SAFETY: The memory is allocated by RocksDB C API and must be freed with ffi::rocksdb_free.
+                // We must copy the data into a Rust-managed Box/Vec because Rust's allocator is not
+                // guaranteed to match the allocator used by RocksDB (which could lead to allocator mismatch UB,
+                // heap corruption, or crashes if we used `Vec::from_raw_parts` directly).
+                let vec = Box::<[u8]>::from(std::slice::from_raw_parts(
+                    value_data.cast::<u8>(),
                     value_size,
-                    value_size,
-                )))
+                ))
+                .into();
+                ffi::rocksdb_free(value_data as *mut _);
+                Ok(Some(vec))
             }
         }
     }
@@ -141,11 +153,17 @@ impl WriteBatchWithIndex {
             if value_data.is_null() {
                 Ok(None)
             } else {
-                Ok(Some(Vec::from_raw_parts(
-                    value_data as *mut u8,
+                // SAFETY: The memory is allocated by RocksDB C API and must be freed with ffi::rocksdb_free.
+                // We must copy the data into a Rust-managed Box/Vec because Rust's allocator is not
+                // guaranteed to match the allocator used by RocksDB (which could lead to allocator mismatch UB,
+                // heap corruption, or crashes if we used `Vec::from_raw_parts` directly).
+                let vec = Box::<[u8]>::from(std::slice::from_raw_parts(
+                    value_data.cast::<u8>(),
                     value_size,
-                    value_size,
-                )))
+                ))
+                .into();
+                ffi::rocksdb_free(value_data as *mut _);
+                Ok(Some(vec))
             }
         }
     }
@@ -223,11 +241,17 @@ impl WriteBatchWithIndex {
             if value_data.is_null() {
                 Ok(None)
             } else {
-                Ok(Some(Vec::from_raw_parts(
-                    value_data as *mut u8,
+                // SAFETY: The memory is allocated by RocksDB C API and must be freed with ffi::rocksdb_free.
+                // We must copy the data into a Rust-managed Box/Vec because Rust's allocator is not
+                // guaranteed to match the allocator used by RocksDB (which could lead to allocator mismatch UB,
+                // heap corruption, or crashes if we used `Vec::from_raw_parts` directly).
+                let vec = Box::<[u8]>::from(std::slice::from_raw_parts(
+                    value_data.cast::<u8>(),
                     value_size,
-                    value_size,
-                )))
+                ))
+                .into();
+                ffi::rocksdb_free(value_data as *mut _);
+                Ok(Some(vec))
             }
         }
     }

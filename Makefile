@@ -1,7 +1,13 @@
 SHELL=/bin/bash
 .DEFAULT_GOAL=_help
 
-PREFIX ?= $(HOME)/.local
+# Dynamically extract crate and RocksDB/FB versions from Cargo manifests
+CRATE_VER := $(shell grep '^version' Cargo.toml | head -n1 | cut -d '"' -f2)
+SYS_VER := $(shell grep '^version' librocksdb-sys/Cargo.toml | head -n1 | cut -d '"' -f2)
+ROCKSDB_VER := $(word 2,$(subst +, ,$(SYS_VER)))
+
+BUILD_TAG ?= $(ROCKSDB_VER)-$(CRATE_VER)~1
+PREFIX ?= $(HOME)/.local/rocksdb-$(BUILD_TAG)
 # Disable jemalloc by default for RocksDB build, but can be overridden from command line or env
 DISABLE_JEMALLOC ?= 1
 NPROC_CMD := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)

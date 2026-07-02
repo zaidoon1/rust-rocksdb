@@ -6,24 +6,6 @@ use crate::{
 };
 use libc::{c_char, c_uchar, size_t};
 
-/// Helper to convert a raw C-allocated pointer from RocksDB into an owned Rust `Vec<u8>`.
-/// This routes the pointer through the `CSlice` RAII wrapper to ensure that deallocation
-/// is consistently handled in one place (`ffi::rocksdb_free` inside `CSlice`'s `Drop` implementation).
-///
-/// # Safety
-/// `value_data` must be either null or point to `value_size` bytes allocated by RocksDB that must
-/// be freed with `rocksdb_free` (and must not be freed by any other allocator).
-unsafe fn c_slice_to_vec(value_data: *mut c_char, value_size: size_t) -> Option<Vec<u8>> {
-    if value_data.is_null() {
-        None
-    } else {
-        // SAFETY: CSlice takes ownership of the memory and frees it on drop via rocksdb_free.
-        // We copy the data out to a Rust-managed Vec before CSlice is dropped.
-        let c_slice = unsafe { CSlice::from_raw_parts(value_data.cast_const(), value_size) };
-        Some(c_slice.as_ref().to_vec())
-    }
-}
-
 pub struct WriteBatchWithIndex {
     pub(crate) inner: *mut ffi::rocksdb_writebatch_wi_t,
 }
@@ -66,25 +48,21 @@ impl WriteBatchWithIndex {
         self.len() == 0
     }
 
+    /// Retrieves a value from the batch, allocating a new `Vec<u8>` to hold the data.
+    ///
+    /// For a zero-allocation alternative, see [`WriteBatchWithIndex::get_from_batch_with`].
+    #[inline]
     pub fn get_from_batch<K>(&self, key: K, options: &Options) -> Result<Option<Vec<u8>>, Error>
     where
         K: AsRef<[u8]>,
     {
-        let key = key.as_ref();
-        unsafe {
-            let mut value_size: size_t = 0;
-            let value_data = ffi_try!(ffi::rocksdb_writebatch_wi_get_from_batch(
-                self.inner,
-                options.inner,
-                key.as_ptr() as *const c_char,
-                key.len() as size_t,
-                &raw mut value_size
-            ));
-
-            Ok(c_slice_to_vec(value_data, value_size))
-        }
+        self.get_from_batch_with(key, options, <[u8]>::to_vec)
     }
 
+    /// Retrieves a value from the batch and passes it to a closure.
+    ///
+    /// This provides a zero-copy and zero-allocation way to read data. The `&[u8]` slice
+    /// is directly mapped to RocksDB's C-allocated memory and is safely freed after the closure returns.
     pub fn get_from_batch_with<K, F, R>(
         &self,
         key: K,
@@ -96,25 +74,30 @@ impl WriteBatchWithIndex {
         F: FnOnce(&[u8]) -> R,
     {
         let key = key.as_ref();
-        unsafe {
-            let mut value_size: size_t = 0;
-            let value_data = ffi_try!(ffi::rocksdb_writebatch_wi_get_from_batch(
+        let mut value_size: size_t = 0;
+        let value_data = unsafe {
+            ffi_try!(ffi::rocksdb_writebatch_wi_get_from_batch(
                 self.inner,
                 options.inner,
                 key.as_ptr() as *const c_char,
                 key.len() as size_t,
                 &raw mut value_size
-            ));
+            ))
+        };
 
-            if value_data.is_null() {
-                Ok(None)
-            } else {
-                let c_slice = CSlice::from_raw_parts(value_data.cast_const(), value_size);
-                Ok(Some(f(c_slice.as_ref())))
-            }
+        if value_data.is_null() {
+            Ok(None)
+        } else {
+            // SAFETY: CSlice takes ownership and frees the memory on drop.
+            let c_slice = unsafe { CSlice::from_raw_parts(value_data.cast_const(), value_size) };
+            Ok(Some(f(c_slice.as_ref())))
         }
     }
 
+    /// Retrieves a value from a column family in the batch, allocating a new `Vec<u8>` to hold the data.
+    ///
+    /// For a zero-allocation alternative, see [`WriteBatchWithIndex::get_from_batch_cf_with`].
+    #[inline]
     pub fn get_from_batch_cf<K>(
         &self,
         cf: &impl AsColumnFamilyRef,
@@ -124,22 +107,13 @@ impl WriteBatchWithIndex {
     where
         K: AsRef<[u8]>,
     {
-        let key = key.as_ref();
-        unsafe {
-            let mut value_size: size_t = 0;
-            let value_data = ffi_try!(ffi::rocksdb_writebatch_wi_get_from_batch_cf(
-                self.inner,
-                options.inner,
-                cf.inner(),
-                key.as_ptr() as *const c_char,
-                key.len() as size_t,
-                &raw mut value_size
-            ));
-
-            Ok(c_slice_to_vec(value_data, value_size))
-        }
+        self.get_from_batch_cf_with(cf, key, options, <[u8]>::to_vec)
     }
 
+    /// Retrieves a value from a column family in the batch and passes it to a closure.
+    ///
+    /// This provides a zero-copy and zero-allocation way to read data. The `&[u8]` slice
+    /// is directly mapped to RocksDB's C-allocated memory and is safely freed after the closure returns.
     pub fn get_from_batch_cf_with<K, F, R>(
         &self,
         cf: &impl AsColumnFamilyRef,
@@ -152,26 +126,31 @@ impl WriteBatchWithIndex {
         F: FnOnce(&[u8]) -> R,
     {
         let key = key.as_ref();
-        unsafe {
-            let mut value_size: size_t = 0;
-            let value_data = ffi_try!(ffi::rocksdb_writebatch_wi_get_from_batch_cf(
+        let mut value_size: size_t = 0;
+        let value_data = unsafe {
+            ffi_try!(ffi::rocksdb_writebatch_wi_get_from_batch_cf(
                 self.inner,
                 options.inner,
                 cf.inner(),
                 key.as_ptr() as *const c_char,
                 key.len() as size_t,
                 &raw mut value_size
-            ));
+            ))
+        };
 
-            if value_data.is_null() {
-                Ok(None)
-            } else {
-                let c_slice = CSlice::from_raw_parts(value_data.cast_const(), value_size);
-                Ok(Some(f(c_slice.as_ref())))
-            }
+        if value_data.is_null() {
+            Ok(None)
+        } else {
+            // SAFETY: CSlice takes ownership and frees the memory on drop.
+            let c_slice = unsafe { CSlice::from_raw_parts(value_data.cast_const(), value_size) };
+            Ok(Some(f(c_slice.as_ref())))
         }
     }
 
+    /// Retrieves a value from the batch or the database, allocating a new `Vec<u8>` to hold the data.
+    ///
+    /// For a zero-allocation alternative, see [`WriteBatchWithIndex::get_from_batch_and_db_with`].
+    #[inline]
     pub fn get_from_batch_and_db<T, I, K>(
         &self,
         db: &DBCommon<T, I>,
@@ -183,30 +162,13 @@ impl WriteBatchWithIndex {
         I: DBInner,
         K: AsRef<[u8]>,
     {
-        if readopts.inner.is_null() {
-            return Err(Error::new(
-                "Unable to create RocksDB read options. This is a fairly trivial call, and its \
-                 failure may be indicative of a mis-compiled or mis-loaded RocksDB library."
-                    .to_owned(),
-            ));
-        }
-
-        let key = key.as_ref();
-        unsafe {
-            let mut value_size: size_t = 0;
-            let value_data = ffi_try!(ffi::rocksdb_writebatch_wi_get_from_batch_and_db(
-                self.inner,
-                db.inner.inner(),
-                readopts.inner,
-                key.as_ptr() as *const c_char,
-                key.len() as size_t,
-                &raw mut value_size
-            ));
-
-            Ok(c_slice_to_vec(value_data, value_size))
-        }
+        self.get_from_batch_and_db_with(db, key, readopts, <[u8]>::to_vec)
     }
 
+    /// Retrieves a value from the batch or the database and passes it to a closure.
+    ///
+    /// This provides a zero-copy and zero-allocation way to read data. The `&[u8]` slice
+    /// is directly mapped to RocksDB's C-allocated memory and is safely freed after the closure returns.
     pub fn get_from_batch_and_db_with<T, I, K, F, R>(
         &self,
         db: &DBCommon<T, I>,
@@ -229,23 +191,24 @@ impl WriteBatchWithIndex {
         }
 
         let key = key.as_ref();
-        unsafe {
-            let mut value_size: size_t = 0;
-            let value_data = ffi_try!(ffi::rocksdb_writebatch_wi_get_from_batch_and_db(
+        let mut value_size: size_t = 0;
+        let value_data = unsafe {
+            ffi_try!(ffi::rocksdb_writebatch_wi_get_from_batch_and_db(
                 self.inner,
                 db.inner.inner(),
                 readopts.inner,
                 key.as_ptr() as *const c_char,
                 key.len() as size_t,
                 &raw mut value_size
-            ));
+            ))
+        };
 
-            if value_data.is_null() {
-                Ok(None)
-            } else {
-                let c_slice = CSlice::from_raw_parts(value_data.cast_const(), value_size);
-                Ok(Some(f(c_slice.as_ref())))
-            }
+        if value_data.is_null() {
+            Ok(None)
+        } else {
+            // SAFETY: CSlice takes ownership and frees the memory on drop.
+            let c_slice = unsafe { CSlice::from_raw_parts(value_data.cast_const(), value_size) };
+            Ok(Some(f(c_slice.as_ref())))
         }
     }
 
@@ -286,6 +249,10 @@ impl WriteBatchWithIndex {
         }
     }
 
+    /// Retrieves a value from a column family in the batch or the database, allocating a new `Vec<u8>` to hold the data.
+    ///
+    /// For a zero-allocation alternative, see [`WriteBatchWithIndex::get_from_batch_and_db_cf_with`].
+    #[inline]
     pub fn get_from_batch_and_db_cf<T, I, K>(
         &self,
         db: &DBCommon<T, I>,
@@ -298,31 +265,13 @@ impl WriteBatchWithIndex {
         I: DBInner,
         K: AsRef<[u8]>,
     {
-        if readopts.inner.is_null() {
-            return Err(Error::new(
-                "Unable to create RocksDB read options. This is a fairly trivial call, and its \
-                 failure may be indicative of a mis-compiled or mis-loaded RocksDB library."
-                    .to_owned(),
-            ));
-        }
-
-        let key = key.as_ref();
-        unsafe {
-            let mut value_size: size_t = 0;
-            let value_data = ffi_try!(ffi::rocksdb_writebatch_wi_get_from_batch_and_db_cf(
-                self.inner,
-                db.inner.inner(),
-                readopts.inner,
-                cf.inner(),
-                key.as_ptr() as *const c_char,
-                key.len() as size_t,
-                &raw mut value_size
-            ));
-
-            Ok(c_slice_to_vec(value_data, value_size))
-        }
+        self.get_from_batch_and_db_cf_with(db, cf, key, readopts, <[u8]>::to_vec)
     }
 
+    /// Retrieves a value from a column family in the batch or the database and passes it to a closure.
+    ///
+    /// This provides a zero-copy and zero-allocation way to read data. The `&[u8]` slice
+    /// is directly mapped to RocksDB's C-allocated memory and is safely freed after the closure returns.
     pub fn get_from_batch_and_db_cf_with<T, I, K, F, R>(
         &self,
         db: &DBCommon<T, I>,
@@ -346,9 +295,9 @@ impl WriteBatchWithIndex {
         }
 
         let key = key.as_ref();
-        unsafe {
-            let mut value_size: size_t = 0;
-            let value_data = ffi_try!(ffi::rocksdb_writebatch_wi_get_from_batch_and_db_cf(
+        let mut value_size: size_t = 0;
+        let value_data = unsafe {
+            ffi_try!(ffi::rocksdb_writebatch_wi_get_from_batch_and_db_cf(
                 self.inner,
                 db.inner.inner(),
                 readopts.inner,
@@ -356,14 +305,15 @@ impl WriteBatchWithIndex {
                 key.as_ptr() as *const c_char,
                 key.len() as size_t,
                 &raw mut value_size
-            ));
+            ))
+        };
 
-            if value_data.is_null() {
-                Ok(None)
-            } else {
-                let c_slice = CSlice::from_raw_parts(value_data.cast_const(), value_size);
-                Ok(Some(f(c_slice.as_ref())))
-            }
+        if value_data.is_null() {
+            Ok(None)
+        } else {
+            // SAFETY: CSlice takes ownership and frees the memory on drop.
+            let c_slice = unsafe { CSlice::from_raw_parts(value_data.cast_const(), value_size) };
+            Ok(Some(f(c_slice.as_ref())))
         }
     }
 

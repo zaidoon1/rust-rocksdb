@@ -81,6 +81,36 @@ impl WriteBatchWithIndex {
         }
     }
 
+    pub fn get_from_batch_with<K, F, R>(
+        &self,
+        key: K,
+        options: &Options,
+        f: F,
+    ) -> Result<Option<R>, Error>
+    where
+        K: AsRef<[u8]>,
+        F: FnOnce(&[u8]) -> R,
+    {
+        let key = key.as_ref();
+        unsafe {
+            let mut value_size: size_t = 0;
+            let value_data = ffi_try!(ffi::rocksdb_writebatch_wi_get_from_batch(
+                self.inner,
+                options.inner,
+                key.as_ptr() as *const c_char,
+                key.len() as size_t,
+                &raw mut value_size
+            ));
+
+            if value_data.is_null() {
+                Ok(None)
+            } else {
+                let c_slice = CSlice::from_raw_parts(value_data.cast_const(), value_size);
+                Ok(Some(f(c_slice.as_ref())))
+            }
+        }
+    }
+
     pub fn get_from_batch_cf<K>(
         &self,
         cf: &impl AsColumnFamilyRef,
@@ -103,6 +133,38 @@ impl WriteBatchWithIndex {
             ));
 
             Ok(c_slice_to_vec(value_data, value_size))
+        }
+    }
+
+    pub fn get_from_batch_cf_with<K, F, R>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        key: K,
+        options: &Options,
+        f: F,
+    ) -> Result<Option<R>, Error>
+    where
+        K: AsRef<[u8]>,
+        F: FnOnce(&[u8]) -> R,
+    {
+        let key = key.as_ref();
+        unsafe {
+            let mut value_size: size_t = 0;
+            let value_data = ffi_try!(ffi::rocksdb_writebatch_wi_get_from_batch_cf(
+                self.inner,
+                options.inner,
+                cf.inner(),
+                key.as_ptr() as *const c_char,
+                key.len() as size_t,
+                &raw mut value_size
+            ));
+
+            if value_data.is_null() {
+                Ok(None)
+            } else {
+                let c_slice = CSlice::from_raw_parts(value_data.cast_const(), value_size);
+                Ok(Some(f(c_slice.as_ref())))
+            }
         }
     }
 
@@ -138,6 +200,48 @@ impl WriteBatchWithIndex {
             ));
 
             Ok(c_slice_to_vec(value_data, value_size))
+        }
+    }
+
+    pub fn get_from_batch_and_db_with<T, I, K, F, R>(
+        &self,
+        db: &DBCommon<T, I>,
+        key: K,
+        readopts: &ReadOptions,
+        f: F,
+    ) -> Result<Option<R>, Error>
+    where
+        T: ThreadMode,
+        I: DBInner,
+        K: AsRef<[u8]>,
+        F: FnOnce(&[u8]) -> R,
+    {
+        if readopts.inner.is_null() {
+            return Err(Error::new(
+                "Unable to create RocksDB read options. This is a fairly trivial call, and its \
+                 failure may be indicative of a mis-compiled or mis-loaded RocksDB library."
+                    .to_owned(),
+            ));
+        }
+
+        let key = key.as_ref();
+        unsafe {
+            let mut value_size: size_t = 0;
+            let value_data = ffi_try!(ffi::rocksdb_writebatch_wi_get_from_batch_and_db(
+                self.inner,
+                db.inner.inner(),
+                readopts.inner,
+                key.as_ptr() as *const c_char,
+                key.len() as size_t,
+                &raw mut value_size
+            ));
+
+            if value_data.is_null() {
+                Ok(None)
+            } else {
+                let c_slice = CSlice::from_raw_parts(value_data.cast_const(), value_size);
+                Ok(Some(f(c_slice.as_ref())))
+            }
         }
     }
 
@@ -212,6 +316,50 @@ impl WriteBatchWithIndex {
             ));
 
             Ok(c_slice_to_vec(value_data, value_size))
+        }
+    }
+
+    pub fn get_from_batch_and_db_cf_with<T, I, K, F, R>(
+        &self,
+        db: &DBCommon<T, I>,
+        cf: &impl AsColumnFamilyRef,
+        key: K,
+        readopts: &ReadOptions,
+        f: F,
+    ) -> Result<Option<R>, Error>
+    where
+        T: ThreadMode,
+        I: DBInner,
+        K: AsRef<[u8]>,
+        F: FnOnce(&[u8]) -> R,
+    {
+        if readopts.inner.is_null() {
+            return Err(Error::new(
+                "Unable to create RocksDB read options. This is a fairly trivial call, and its \
+                 failure may be indicative of a mis-compiled or mis-loaded RocksDB library."
+                    .to_owned(),
+            ));
+        }
+
+        let key = key.as_ref();
+        unsafe {
+            let mut value_size: size_t = 0;
+            let value_data = ffi_try!(ffi::rocksdb_writebatch_wi_get_from_batch_and_db_cf(
+                self.inner,
+                db.inner.inner(),
+                readopts.inner,
+                cf.inner(),
+                key.as_ptr() as *const c_char,
+                key.len() as size_t,
+                &raw mut value_size
+            ));
+
+            if value_data.is_null() {
+                Ok(None)
+            } else {
+                let c_slice = CSlice::from_raw_parts(value_data.cast_const(), value_size);
+                Ok(Some(f(c_slice.as_ref())))
+            }
         }
     }
 

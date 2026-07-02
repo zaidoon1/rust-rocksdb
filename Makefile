@@ -162,6 +162,15 @@ install: ## Install built RocksDB to the configured PREFIX
 clean: ## Clean upstream RocksDB build artifacts
 	cd librocksdb-sys/rocksdb && make clean
 
+.PHONY: test
+test: ## Run the full Rust test suite
+	cargo test --workspace --all-targets
+
+.PHONY: cov
+cov: ## Run tests and generate an interactive HTML coverage report via llvm-cov
+	cargo llvm-cov clean --workspace
+	cargo llvm-cov --workspace --all-targets --html --open
+
 # [ENUM] Styling / Colors
 STYLE_CYAN := $(shell tput setaf 6 2>/dev/null || echo '\033[36m')
 STYLE_RESET := $(shell tput sgr0 2>/dev/null || echo '\033[0m')

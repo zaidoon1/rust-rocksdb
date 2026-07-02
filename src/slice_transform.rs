@@ -101,10 +101,10 @@ pub unsafe extern "C" fn transform_callback(
 ) -> *mut c_char {
     unsafe {
         let cb = &mut *(raw_cb as *mut TransformCallback);
-        let key = slice::from_raw_parts(raw_key as *const u8, key_len);
+        let key = slice::from_raw_parts(raw_key.cast::<u8>(), key_len);
         let prefix = (cb.transform_fn)(key);
         *dst_length = prefix.len() as size_t;
-        prefix.as_ptr() as *mut c_char
+        prefix.as_ptr().cast_mut().cast::<c_char>()
     }
 }
 
@@ -115,7 +115,7 @@ pub unsafe extern "C" fn in_domain_callback(
 ) -> c_uchar {
     unsafe {
         let cb = &mut *(raw_cb as *mut TransformCallback);
-        let key = slice::from_raw_parts(raw_key as *const u8, key_len);
+        let key = slice::from_raw_parts(raw_key.cast::<u8>(), key_len);
         c_uchar::from(cb.in_domain_fn.is_none_or(|in_domain| in_domain(key)))
     }
 }

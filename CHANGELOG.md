@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.51.0 (2026-06-26)
+
+- fix(librocksdb-sys): upgrade the bundled RocksDB submodule to
+  11.1.2. (zaidoon1)
+- feat: add `CompactOptions::set_blob_garbage_collection_age_cutoff`,
+  exposing the matching RocksDB option through the safe Rust API.
+  (kmorkos)
+- feat: expose RocksDB's non-deprecated error recovery end callback
+  through `EventListener::on_error_recovery_end`. The callback receives
+  `BackgroundErrorRecoveryInfo`, including old/new background error
+  statuses and severities. (zaidoon1)
+- fix: make raw pointer casts clippy-clean on Linux aarch64. No
+  behavior change is intended. (evanj)
+- fix(librocksdb-sys): parse `CARGO_ENCODED_RUSTFLAGS` with the
+  `rustflags` crate so both `-Ctarget-cpu=...` and
+  `-C target-cpu=...` forms are handled correctly. (evanj)
+- feat: add `SstFileWriter::delete_range` and expose
+  `Options::set_experimental_mempurge_threshold`, matching upstream
+  rust-rocksdb APIs. (cooronx, 0xdeafbeef)
+- feat: add `TransactionDBCheckpoint::create_checkpoint_with_log_size`
+  for upstream source compatibility. TransactionDB checkpoints may
+  still flush memtables regardless of the threshold. (calavera, gdorsi,
+  zaidoon1)
+- fix: make `DBRawIteratorWithThreadMode::timestamp()` safe and
+  upstream-compatible by returning `Option<&[u8]>`; the prior zero-copy
+  unchecked behavior is available as `timestamp_unchecked()`.
+  (dillonhicks, ali2992, zaidoon1)
+- fix: derive multi-get key pointers and lengths from a single
+  `AsRef<[u8]>` call per key across DB, Transaction, and TransactionDB
+  paths. (niklasf)
+- fix(librocksdb-sys): disable `zstd-sys` default features while
+  preserving local `experimental` support, avoiding an unnecessary
+  transitive bindgen path. (Congyuwang, zaidoon1)
+
 ## 0.50.0 (2026-05-23)
 
 - breaking: bump MSRV to 1.91.0 per the rolling 6-month policy. 1.91.0

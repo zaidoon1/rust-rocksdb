@@ -3904,6 +3904,29 @@ impl Options {
         }
     }
 
+    /// Activates the experimental Mempurge memtable garbage collection feature.
+    ///
+    /// See the upstream RocksDB option documentation:
+    /// <https://github.com/facebook/rocksdb/blob/v10.7.5/include/rocksdb/advanced_options.h#L259-L274>
+    ///
+    /// At every flush, RocksDB estimates the useful payload ratio of the memtable
+    /// and compares it with this threshold. If the ratio is below the threshold,
+    /// RocksDB replaces the regular flush with a mempurge operation.
+    ///
+    /// Threshold values:
+    ///
+    /// * `0.0`: mempurge deactivated.
+    /// * `1.0`: recommended threshold value.
+    /// * `> 1.0`: aggressive mempurge.
+    /// * `0.0 < threshold < 1.0`: mempurge only for very low useful payload ratios.
+    ///
+    /// Default: 0.0
+    pub fn set_experimental_mempurge_threshold(&mut self, threshold: f64) {
+        unsafe {
+            ffi::rocksdb_options_set_experimental_mempurge_threshold(self.inner, threshold);
+        }
+    }
+
     /// Sets the compaction priority.
     ///
     /// If level compaction_style =
@@ -5056,7 +5079,7 @@ impl CompactOptions {
 
     fn set_full_history_ts_low_impl(&mut self, ts: Option<Vec<u8>>) {
         let (ptr, len) = if let Some(ref ts) = ts {
-            (ts.as_ptr() as *mut c_char, ts.len())
+            (ts.as_ptr().cast_mut().cast::<c_char>(), ts.len())
         } else if self.full_history_ts_low.is_some() {
             (std::ptr::null::<Vec<u8>>() as *mut c_char, 0)
         } else {
@@ -5281,7 +5304,7 @@ unsafe extern "C" fn logger_callback(
     len: size_t,
 ) {
     let rust_callback: &LoggerCallback = unsafe { &*(raw_cb as LoggerCallbackPtr) };
-    let raw_msg = unsafe { std::slice::from_raw_parts(msg as *const u8, len) };
+    let raw_msg = unsafe { std::slice::from_raw_parts(msg.cast_const().cast::<u8>(), len) };
     let msg = String::from_utf8_lossy(raw_msg);
     let level =
         LogLevel::try_from_raw(level as i32).expect("rocksdb generated an invalid log level");

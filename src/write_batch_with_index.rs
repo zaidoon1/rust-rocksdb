@@ -9,6 +9,10 @@ use libc::{c_char, c_uchar, size_t};
 /// Helper to convert a raw C-allocated pointer from RocksDB into an owned Rust `Vec<u8>`.
 /// This routes the pointer through the `CSlice` RAII wrapper to ensure that deallocation
 /// is consistently handled in one place (`ffi::rocksdb_free` inside `CSlice`'s `Drop` implementation).
+///
+/// # Safety
+/// `value_data` must be either null or point to `value_size` bytes allocated by RocksDB that must
+/// be freed with `rocksdb_free` (and must not be freed by any other allocator).
 unsafe fn c_slice_to_vec(value_data: *mut c_char, value_size: size_t) -> Option<Vec<u8>> {
     if value_data.is_null() {
         None

@@ -15,7 +15,7 @@ unsafe fn c_slice_to_vec(value_data: *mut c_char, value_size: size_t) -> Option<
     } else {
         // SAFETY: CSlice takes ownership of the memory and frees it on drop via rocksdb_free.
         // We copy the data out to a Rust-managed Vec before CSlice is dropped.
-        let c_slice = CSlice::from_raw_parts(value_data as *const c_char, value_size);
+        let c_slice = unsafe { CSlice::from_raw_parts(value_data.cast_const(), value_size) };
         Some(c_slice.as_ref().to_vec())
     }
 }

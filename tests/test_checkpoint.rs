@@ -343,6 +343,26 @@ pub fn test_transaction_db_checkpoint_create_checkpoint_forces_flush() {
     );
 }
 
+#[test]
+pub fn test_transaction_db_checkpoint_with_log_size() {
+    const PATH_PREFIX: &str = "_rust_rocksdb_txn_cp_log_size_";
+
+    let db_path = DBPath::new(&format!("{PATH_PREFIX}db"));
+    let db: TransactionDB = TransactionDB::open_default(&db_path).unwrap();
+
+    db.put(b"k1", b"v1").unwrap();
+    db.put(b"k2", b"v2").unwrap();
+
+    let cp = TransactionDBCheckpoint::new(&db).unwrap();
+    let cp_path = DBPath::new(&format!("{PATH_PREFIX}cp"));
+    cp.create_checkpoint_with_log_size(&cp_path, u64::MAX)
+        .unwrap();
+
+    let cp_db: TransactionDB = TransactionDB::open_default(&cp_path).unwrap();
+    assert_eq!(cp_db.get(b"k1").unwrap().unwrap(), b"v1");
+    assert_eq!(cp_db.get(b"k2").unwrap().unwrap(), b"v2");
+}
+
 /// Test `create_checkpoint_with_log_size` on OptimisticTransactionDB with a large log_size_for_flush value.
 /// A non-zero value means RocksDB skips flushing memtables if the WAL is smaller
 /// than the threshold. However, the checkpoint still includes WAL files, so when

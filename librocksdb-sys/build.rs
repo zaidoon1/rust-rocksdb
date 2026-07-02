@@ -93,13 +93,15 @@ impl Target {
     }
 }
 
-/// Parse the argument to `-Ctarget-cpu=` from `CARGO_ENCODED_RUSTFLAGS`,
-/// if present. Encoded RUSTFLAGS are separated by `0x1f` (US).
+/// Parse the `target-cpu` option from `CARGO_ENCODED_RUSTFLAGS`, if present.
 fn parse_rust_target_cpu() -> Option<String> {
-    const PREFIX: &str = "-Ctarget-cpu=";
-    let raw = env::var("CARGO_ENCODED_RUSTFLAGS").unwrap_or_default();
-    raw.split('\x1f')
-        .find_map(|f| f.strip_prefix(PREFIX).map(str::to_owned))
+    const TARGET_CPU: &str = "target-cpu";
+    // use rustflags since parsing is annoying
+    // e.g. "-Ctarget-cpu=native" and "-C target-cpu=native" are equivalent
+    rustflags::from_env().find_map(|flag| match flag {
+        rustflags::Flag::Codegen { opt, value } if opt == TARGET_CPU => value,
+        _ => None,
+    })
 }
 
 // =========================================================================

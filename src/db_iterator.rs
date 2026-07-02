@@ -414,7 +414,17 @@ impl<'a, D: DBAccess> DBRawIteratorWithThreadMode<'a, D> {
         }
     }
 
-    /// Returns the timestamp of the current entry.
+    /// Returns a slice of the current entry's timestamp.
+    pub fn timestamp(&self) -> Option<&[u8]> {
+        if self.valid() {
+            // SAFETY: We just checked that the iterator is valid.
+            Some(unsafe { self.timestamp_unchecked() })
+        } else {
+            None
+        }
+    }
+
+    /// Returns the timestamp of the current entry without checking iterator validity.
     ///
     /// # Safety
     ///
@@ -422,15 +432,14 @@ impl<'a, D: DBAccess> DBRawIteratorWithThreadMode<'a, D> {
     /// method when the iterator is invalid is undefined behavior, as RocksDB
     /// may return an invalid pointer.
     ///
-    /// Additionally, the column family must have been configured with user defined timestamps.
-    /// Calling this method on iteration of a column family without user defined timestamps configured
-    /// will result in assertion failures in debug builds and undefined behaviour in release builds.
-    ///
     /// Uses `rocksdb_iter_timestamp_slice` which returns a `rocksdb_slice_t` by value,
     /// avoiding the overhead of output parameters compared to `rocksdb_iter_timestamp`.
-    pub unsafe fn timestamp(&self) -> &[u8] {
+    pub unsafe fn timestamp_unchecked(&self) -> &[u8] {
         unsafe {
             let slice = ffi::rocksdb_iter_timestamp_slice(self.inner.as_ptr());
+            if slice.size == 0 {
+                return &[];
+            }
             slice::from_raw_parts(slice.data as *const c_uchar, slice.size)
         }
     }

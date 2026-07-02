@@ -150,7 +150,7 @@ impl Backend {
         }
 
         // Explicit lib-dir override.
-        if env::var_os("ROCKSDB_LIB_DIR").is_some() {
+        if env::var_os("ROCKSDB_LIB_DIR").is_some() && system::is_valid_lib_dir_env() {
             return system::from_lib_dir_env();
         }
 
@@ -869,13 +869,90 @@ mod system {
     /// Build a `Backend::System` from `ROCKSDB_LIB_DIR`. Emits the
     /// corresponding `cargo::rustc-link-*` directives.
     pub(super) fn from_lib_dir_env() -> Backend {
-        let lib_dir =
+        let lib_dir_str =
             env::var_os("ROCKSDB_LIB_DIR").expect("checked by caller in Backend::resolve");
-        emit_link_directives(Path::new(&lib_dir));
+        let lib_dir = Path::new(&lib_dir_str);
+        emit_link_directives(lib_dir);
 
-        Backend::System {
-            includes: env_includes_override(),
+        let mut includes = env_includes_override();
+        if includes.is_empty() {
+            let prefix_opt = lib_dir.parent();
+            if let Some(prefix) = prefix_opt {
+                let candidate = prefix.join("include");
+                if candidate.join("rocksdb/c.h").exists() {
+                    includes.push(candidate);
+                }
+            }
         }
+
+        Backend::System { includes }
+    }
+
+    pub(super) fn is_valid_lib_dir_env() -> bool {
+        if let Some(lib_dir_str) = env::var_os("ROCKSDB_LIB_DIR") {
+            let lib_dir = Path::new(&lib_dir_str);
+            if !lib_dir.exists() {
+                println!(
+                    "cargo::warning=ROCKSDB_LIB_DIR is set to a path that does not exist ({}). Falling back to vendored build.",
+                    lib_dir.display()
+                );
+                return false;
+            }
+
+            let mut include_dir = None;
+            if let Some(val) = env::var_os("ROCKSDB_INCLUDE_DIR") {
+                include_dir = Some(PathBuf::from(val));
+            } else {
+                let prefix_opt = lib_dir.parent();
+                if let Some(prefix) = prefix_opt {
+                    let candidate = prefix.join("include");
+                    if candidate.join("rocksdb/c.h").exists() {
+                        include_dir = Some(candidate);
+                    }
+                }
+            }
+
+            if let Some(inc) = include_dir {
+                if let Some(major) = get_rocksdb_major_version(&inc) {
+                    if major >= 11 {
+                        return true;
+                    } else {
+                        println!(
+                            "cargo::warning=ROCKSDB_LIB_DIR points to an older RocksDB major version ({major} < 11). \
+                             Falling back to vendored build to avoid compilation errors."
+                        );
+                    }
+                } else {
+                    println!(
+                        "cargo::warning=ROCKSDB_LIB_DIR points to a path where the RocksDB version could not be parsed. \
+                         Falling back to vendored build."
+                    );
+                }
+            } else {
+                println!(
+                    "cargo::warning=ROCKSDB_LIB_DIR is set but no matching RocksDB headers (rocksdb/c.h) \
+                     were found at the expected location. Falling back to vendored build."
+                );
+            }
+        }
+        false
+    }
+
+    fn get_rocksdb_major_version(include_dir: &Path) -> Option<u32> {
+        let version_h = include_dir.join("rocksdb/version.h");
+        let content = std::fs::read_to_string(version_h).ok()?;
+        for line in content.lines() {
+            if line.contains("#define ROCKSDB_MAJOR") {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 3 {
+                    let major_opt = parts[2].parse::<u32>();
+                    if let Ok(major) = major_opt {
+                        return Some(major);
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// FreeBSD default: link `/usr/local/lib/librocksdb.{so,a}` and read
@@ -984,13 +1061,17 @@ mod snappy {
     /// silently surprised that the feature is ignored.
     pub(super) fn ensure(target: &Target, backend: &Backend) {
         if matches!(backend, Backend::System { .. }) {
-            println!(
-                "cargo::warning=`snappy` feature is enabled but rocksdb \
-                 is being linked from the system; skipping vendored \
-                 snappy build (the system library is expected to provide \
-                 snappy support itself)."
-            );
-            return;
+            // When linking statically (ROCKSDB_STATIC is set), we still need to build and
+            // link snappy to resolve static symbols in librocksdb.a
+            if env::var_os("ROCKSDB_STATIC").is_none() {
+                println!(
+                    "cargo::warning=`snappy` feature is enabled but rocksdb \
+                     is being linked from the system; skipping vendored \
+                     snappy build (the system library is expected to provide \
+                     snappy support itself)."
+                );
+                return;
+            }
         }
         if try_system() {
             return;
@@ -1186,6 +1267,8 @@ mod coroutines {
             "-Wno-redundant-move",
             "-Wno-maybe-uninitialized",
             "-Wno-invalid-memory-model",
+            "-Wno-shadow",
+            "-Wno-sign-compare",
         ] {
             cfg.flag_if_supported(f);
         }

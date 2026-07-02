@@ -8,14 +8,14 @@ use std::{
 
 use rust_rocksdb::{DB, DBAccess, DBRawIteratorWithThreadMode, Error, Options};
 
-/// Temporary database path which calls DB::Destroy when DBPath is dropped.
+/// Temporary database path which calls `DB::Destroy` when `DBPath` is dropped.
 pub struct DBPath {
     dir: tempfile::TempDir, // kept for cleaning up during drop
     path: PathBuf,
 }
 
 impl DBPath {
-    /// Produces a fresh (non-existent) temporary path which will be DB::destroy'ed automatically.
+    /// Produces a fresh (non-existent) temporary path which will be `DB::destroy`'ed automatically.
     pub fn new(prefix: &str) -> DBPath {
         let dir = tempfile::Builder::new()
             .prefix(prefix)
@@ -34,8 +34,8 @@ impl Drop for DBPath {
     }
 }
 
-/// Convert a DBPath ref to a Path ref.
-/// We don't implement this for DBPath values because we want them to
+/// Convert a `DBPath` ref to a Path ref.
+/// We don't implement this for `DBPath` values because we want them to
 /// exist until the end of their scope, not get passed into functions and
 /// dropped early.
 impl AsRef<Path> for &DBPath {
@@ -117,7 +117,7 @@ impl Ord for U64Timestamp {
 
 /// A comparator for use in column families with [user-defined timestamp](https://github.com/facebook/rocksdb/wiki/User-defined-Timestamp)
 /// enabled. This comparator assumes `u64` timestamp in little endian encoding.
-/// This is the same behavior as RocksDB's built-in comparator.
+/// This is the same behavior as `RocksDB`'s built-in comparator.
 ///
 /// Adapted from C++ and Golang implementations from:
 /// - [rocksdb](https://github.com/facebook/rocksdb/blob/v9.4.0/test_util/testutil.cc#L112)

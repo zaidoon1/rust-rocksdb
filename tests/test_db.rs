@@ -1041,7 +1041,8 @@ fn get_with_cache_and_bulkload_test() {
         opts.set_writable_file_max_buffer_size(512 << 10); // 512KB
         opts.set_enable_write_thread_adaptive_yield(true);
         opts.set_unordered_write(true);
-        opts.set_max_subcompactions(2);
+        opts.set_max_subcompactions(1);
+        opts.set_target_file_size_base(10 * 1024 * 1024); // 10MB
         opts.set_max_background_jobs(4);
         opts.set_use_adaptive_mutex(true);
         opts.set_db_log_dir(&log_path);

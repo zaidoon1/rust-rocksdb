@@ -1,30 +1,32 @@
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::cell::Cell;
 
 mod util;
 
 use crate::util::DBPath;
 use rust_rocksdb::{DB, Options, ReadOptions, WriteBatchWithIndex};
 
-struct TrackingAllocator {
-    allocations: AtomicUsize,
+thread_local! {
+    static ALLOCATION_COUNT: Cell<usize> = const { Cell::new(0) };
 }
+
+struct TrackingAllocator;
 
 impl TrackingAllocator {
     const fn new() -> Self {
-        Self {
-            allocations: AtomicUsize::new(0),
-        }
+        Self
     }
 
     fn get_count(&self) -> usize {
-        self.allocations.load(Ordering::SeqCst)
+        ALLOCATION_COUNT.with(|cell| cell.get())
     }
 }
 
 unsafe impl GlobalAlloc for TrackingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        self.allocations.fetch_add(1, Ordering::SeqCst);
+        let _ = ALLOCATION_COUNT.try_with(|cell| {
+            cell.set(cell.get() + 1);
+        });
         unsafe { System.alloc(layout) }
     }
 

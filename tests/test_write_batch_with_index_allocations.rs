@@ -80,11 +80,15 @@ fn test_write_batch_with_index_allocations_comparison() {
             "Rust allocations occurred during get_from_batch_with"
         );
 
+        let db_key = b"db_only_key";
+        let db_val = b"db_only_value_data";
+        db.put(db_key, db_val).expect("DB put should succeed");
+
         // Benchmark and verify the Zero-Copy closure with DB fallback API (get_from_batch_and_db_with)
         let readopts = ReadOptions::default();
         let before_zero_copy_db = ALLOCATOR.get_count();
         let found_zero_copy_db = wbwi
-            .get_from_batch_and_db_with(&db, key, &readopts, |slice| {
+            .get_from_batch_and_db_with(&db, db_key, &readopts, |slice| {
                 let inside_zero_copy_db = ALLOCATOR.get_count();
                 // Ensure zero Rust allocations have happened up to this point in the closure
                 assert_eq!(
@@ -97,7 +101,7 @@ fn test_write_batch_with_index_allocations_comparison() {
             .unwrap();
         let after_zero_copy_db = ALLOCATOR.get_count();
 
-        assert_eq!(found_zero_copy_db, Some(b'l'));
+        assert_eq!(found_zero_copy_db, Some(b'b'));
         assert_eq!(
             after_zero_copy_db - before_zero_copy_db,
             0,

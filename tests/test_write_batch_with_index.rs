@@ -65,10 +65,14 @@ fn test_write_batch_with_index_zero_copy() {
         assert_eq!(found, Some(true));
 
         // Test get_from_batch_and_db_with (the new zero-copy closure with DB fallback API)
+        let db_key = b"db_key";
+        let db_val = b"db_val";
+        db.put(db_key, db_val).unwrap();
+
         let readopts = ReadOptions::default();
         let found_and_db = wbwi
-            .get_from_batch_and_db_with(&db, key, &readopts, |slice| {
-                assert_eq!(slice, val);
+            .get_from_batch_and_db_with(&db, db_key, &readopts, |slice| {
+                assert_eq!(slice, db_val);
                 42
             })
             .unwrap();

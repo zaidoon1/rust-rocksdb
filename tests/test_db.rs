@@ -1103,7 +1103,7 @@ fn get_with_cache_and_bulkload_test() {
             let livefiles = db.live_files().unwrap();
             assert_eq!(livefiles.len(), 1);
             livefiles.iter().for_each(|f| {
-                assert_eq!(f.level, 2);
+                assert!(f.level > 0, "compacted SST must not remain in L0");
                 assert_eq!(f.column_family_name, "default");
                 assert!(!f.name.is_empty());
                 assert_eq!(

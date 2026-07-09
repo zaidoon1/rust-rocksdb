@@ -1,5 +1,5 @@
 use crate::util::{DBPath, assert_item, assert_no_item};
-use rust_rocksdb::{DB, ReadOptions, WriteBatchWithIndex};
+use rust_rocksdb::{ColumnFamilyDescriptor, DB, Options, ReadOptions, WriteBatchWithIndex};
 
 mod util;
 
@@ -38,24 +38,35 @@ fn test_write_batch_with_index_with_base_iterator() {
 }
 
 #[test]
-fn test_write_batch_with_index_zero_copy() {
-    let path = DBPath::new("_rust_rocksdb_wbwi_zero_copy");
+fn test_write_batch_with_index_borrowed_reads() {
+    let path = DBPath::new("_rust_rocksdb_wbwi_borrowed_reads");
     {
-        let db = DB::open_default(&path).expect("DB should open");
+        let mut db_opts = Options::default();
+        db_opts.create_if_missing(true);
+        db_opts.create_missing_column_families(true);
+
+        let cf_desc = ColumnFamilyDescriptor::new("cf1", Options::default());
+        let db = DB::open_cf_descriptors(&db_opts, &path, vec![cf_desc]).expect("DB should open");
+        let cf = db.cf_handle("cf1").expect("cf1 handle should exist");
+
         let mut wbwi = WriteBatchWithIndex::new(0, true);
 
-        let key = b"zero_copy_key";
-        let val = b"zero_copy_value";
+        let key = b"borrowed_key";
+        let val = b"borrowed_value";
+        let cf_key = b"borrowed_cf_key";
+        let cf_val = b"borrowed_cf_value";
 
         wbwi.put(key, val);
+        wbwi.put_cf(&cf, cf_key, cf_val);
 
-        let options = rust_rocksdb::Options::default();
+        let options = Options::default();
 
-        // Test get_from_batch (the safe/fixed traditional API)
         let get_val = wbwi.get_from_batch(key, &options).unwrap();
         assert_eq!(get_val.as_deref(), Some(val.as_slice()));
 
-        // Test get_from_batch_with (the new zero-copy closure API)
+        let get_cf_val = wbwi.get_from_batch_cf(&cf, cf_key, &options).unwrap();
+        assert_eq!(get_cf_val.as_deref(), Some(cf_val.as_slice()));
+
         let found = wbwi
             .get_from_batch_with(key, &options, |slice| {
                 assert_eq!(slice, val);
@@ -64,10 +75,20 @@ fn test_write_batch_with_index_zero_copy() {
             .unwrap();
         assert_eq!(found, Some(true));
 
-        // Test get_from_batch_and_db_with (the new zero-copy closure with DB fallback API)
+        let found_cf = wbwi
+            .get_from_batch_cf_with(&cf, cf_key, &options, |slice| {
+                assert_eq!(slice, cf_val);
+                7
+            })
+            .unwrap();
+        assert_eq!(found_cf, Some(7));
+
         let db_key = b"db_key";
         let db_val = b"db_val";
+        let db_cf_key = b"db_cf_key";
+        let db_cf_val = b"db_cf_val";
         db.put(db_key, db_val).unwrap();
+        db.put_cf(&cf, db_cf_key, db_cf_val).unwrap();
 
         let readopts = ReadOptions::default();
         let found_and_db = wbwi
@@ -77,5 +98,13 @@ fn test_write_batch_with_index_zero_copy() {
             })
             .unwrap();
         assert_eq!(found_and_db, Some(42));
+
+        let found_and_db_cf = wbwi
+            .get_from_batch_and_db_cf_with(&db, &cf, db_cf_key, &readopts, |slice| {
+                assert_eq!(slice, db_cf_val);
+                99
+            })
+            .unwrap();
+        assert_eq!(found_and_db_cf, Some(99));
     }
 }

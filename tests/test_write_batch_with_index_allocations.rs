@@ -39,7 +39,7 @@ unsafe impl GlobalAlloc for TrackingAllocator {
 static ALLOCATOR: TrackingAllocator = TrackingAllocator::new();
 
 #[test]
-fn test_write_batch_with_index_allocations_comparison() {
+fn test_write_batch_with_index_borrowed_reads_avoid_rust_vec_allocation() {
     let path = DBPath::new("_rust_rocksdb_wbwi_allocations_test");
     {
         let db = DB::open_default(&path).expect("DB should open");
@@ -52,78 +52,69 @@ fn test_write_batch_with_index_allocations_comparison() {
 
         let options = Options::default();
 
-        // Warm up any lazy static initialization/loading if any
+        // Warm up any lazy initialization so the measured section focuses on
+        // Rust allocation in the wrapper, not one-time setup. The allocator
+        // counter is thread-local, so RocksDB background-thread allocations do
+        // not affect these assertions.
         let _ = wbwi
             .get_from_batch_with(key, &options, |slice| slice[0])
             .unwrap();
 
-        // Benchmark and verify the Zero-Copy closure API (get_from_batch_with)
-        let before_zero_copy = ALLOCATOR.get_count();
-        let found_zero_copy = wbwi
+        let before_borrowed = ALLOCATOR.get_count();
+        let found_borrowed = wbwi
             .get_from_batch_with(key, &options, |slice| {
-                let inside_zero_copy = ALLOCATOR.get_count();
-                // Ensure zero Rust allocations have happened up to this point in the closure
+                let inside_borrowed = ALLOCATOR.get_count();
                 assert_eq!(
-                    inside_zero_copy - before_zero_copy,
+                    inside_borrowed - before_borrowed,
                     0,
-                    "Rust allocations occurred inside get_from_batch_with closure"
+                    "borrowed read allocated Rust memory before invoking the closure"
                 );
                 slice[0]
             })
             .unwrap();
-        let after_zero_copy = ALLOCATOR.get_count();
+        let after_borrowed = ALLOCATOR.get_count();
 
-        assert_eq!(found_zero_copy, Some(b'a'));
+        assert_eq!(found_borrowed, Some(b'a'));
         assert_eq!(
-            after_zero_copy - before_zero_copy,
+            after_borrowed - before_borrowed,
             0,
-            "Rust allocations occurred during get_from_batch_with"
+            "borrowed read allocated Rust memory"
         );
 
         let db_key = b"db_only_key";
         let db_val = b"db_only_value_data";
         db.put(db_key, db_val).expect("DB put should succeed");
 
-        // Benchmark and verify the Zero-Copy closure with DB fallback API (get_from_batch_and_db_with)
         let readopts = ReadOptions::default();
-        let before_zero_copy_db = ALLOCATOR.get_count();
-        let found_zero_copy_db = wbwi
+        let before_borrowed_db = ALLOCATOR.get_count();
+        let found_borrowed_db = wbwi
             .get_from_batch_and_db_with(&db, db_key, &readopts, |slice| {
-                let inside_zero_copy_db = ALLOCATOR.get_count();
-                // Ensure zero Rust allocations have happened up to this point in the closure
+                let inside_borrowed_db = ALLOCATOR.get_count();
                 assert_eq!(
-                    inside_zero_copy_db - before_zero_copy_db,
+                    inside_borrowed_db - before_borrowed_db,
                     0,
-                    "Rust allocations occurred inside get_from_batch_and_db_with closure"
+                    "borrowed DB read allocated Rust memory before invoking the closure"
                 );
                 slice[1]
             })
             .unwrap();
-        let after_zero_copy_db = ALLOCATOR.get_count();
+        let after_borrowed_db = ALLOCATOR.get_count();
 
-        assert_eq!(found_zero_copy_db, Some(b'b'));
+        assert_eq!(found_borrowed_db, Some(b'b'));
         assert_eq!(
-            after_zero_copy_db - before_zero_copy_db,
+            after_borrowed_db - before_borrowed_db,
             0,
-            "Rust allocations occurred during get_from_batch_and_db_with"
+            "borrowed DB read allocated Rust memory"
         );
 
-        // Compare with the traditional cloning API (get_from_batch)
-        let before_cloning = ALLOCATOR.get_count();
-        let found_cloning = wbwi.get_from_batch(key, &options).unwrap();
-        let after_cloning = ALLOCATOR.get_count();
+        let before_owned = ALLOCATOR.get_count();
+        let found_owned = wbwi.get_from_batch(key, &options).unwrap();
+        let after_owned = ALLOCATOR.get_count();
 
-        assert_eq!(found_cloning.as_deref(), Some(val.as_slice()));
-        // Ensure that at least 1 Rust allocation (the returned Vec) occurs
+        assert_eq!(found_owned.as_deref(), Some(val.as_slice()));
         assert!(
-            after_cloning - before_cloning >= 1,
-            "Traditional get_from_batch failed to allocate memory on the Rust heap"
-        );
-
-        println!(
-            "SUCCESS: get_from_batch_with allocations: {}, get_from_batch allocations: {}",
-            after_zero_copy - before_zero_copy,
-            after_cloning - before_cloning
+            after_owned - before_owned >= 1,
+            "owned read should allocate Rust memory for the returned Vec"
         );
     }
 }

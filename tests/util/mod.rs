@@ -8,7 +8,7 @@ use std::{
 
 use rust_rocksdb::{DB, DBAccess, DBRawIteratorWithThreadMode, Error, Options};
 
-/// Temporary database path which calls `DB::Destroy` when `DBPath` is dropped.
+/// Temporary database path which calls `DB::destroy` when `DBPath` is dropped.
 pub struct DBPath {
     dir: tempfile::TempDir, // kept for cleaning up during drop
     path: PathBuf,

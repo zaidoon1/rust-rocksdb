@@ -55,9 +55,13 @@ fn test_write_batch_with_index_borrowed_reads() {
         let val = b"borrowed_value";
         let cf_key = b"borrowed_cf_key";
         let cf_val = b"borrowed_cf_value";
+        let empty_key = b"empty_key";
+        let empty_cf_key = b"empty_cf_key";
 
         wbwi.put(key, val);
         wbwi.put_cf(&cf, cf_key, cf_val);
+        wbwi.put(empty_key, []);
+        wbwi.put_cf(&cf, empty_cf_key, []);
 
         let options = Options::default();
 
@@ -66,6 +70,12 @@ fn test_write_batch_with_index_borrowed_reads() {
 
         let get_cf_val = wbwi.get_from_batch_cf(&cf, cf_key, &options).unwrap();
         assert_eq!(get_cf_val.as_deref(), Some(cf_val.as_slice()));
+
+        let empty_val = wbwi.get_from_batch(empty_key, &options).unwrap();
+        assert_eq!(empty_val.as_deref(), Some([].as_slice()));
+
+        let empty_cf_val = wbwi.get_from_batch_cf(&cf, empty_cf_key, &options).unwrap();
+        assert_eq!(empty_cf_val.as_deref(), Some([].as_slice()));
 
         let found = wbwi
             .get_from_batch_with(key, &options, |slice| {
@@ -83,12 +93,32 @@ fn test_write_batch_with_index_borrowed_reads() {
             .unwrap();
         assert_eq!(found_cf, Some(7));
 
+        let found_empty = wbwi
+            .get_from_batch_with(empty_key, &options, |slice| {
+                assert!(slice.is_empty());
+                true
+            })
+            .unwrap();
+        assert_eq!(found_empty, Some(true));
+
+        let found_empty_cf = wbwi
+            .get_from_batch_cf_with(&cf, empty_cf_key, &options, |slice| {
+                assert!(slice.is_empty());
+                11
+            })
+            .unwrap();
+        assert_eq!(found_empty_cf, Some(11));
+
         let db_key = b"db_key";
         let db_val = b"db_val";
         let db_cf_key = b"db_cf_key";
         let db_cf_val = b"db_cf_val";
+        let db_empty_key = b"db_empty_key";
+        let db_empty_cf_key = b"db_empty_cf_key";
         db.put(db_key, db_val).unwrap();
         db.put_cf(&cf, db_cf_key, db_cf_val).unwrap();
+        db.put(db_empty_key, []).unwrap();
+        db.put_cf(&cf, db_empty_cf_key, []).unwrap();
 
         let readopts = ReadOptions::default();
         let found_and_db = wbwi
@@ -106,5 +136,21 @@ fn test_write_batch_with_index_borrowed_reads() {
             })
             .unwrap();
         assert_eq!(found_and_db_cf, Some(99));
+
+        let found_empty_and_db = wbwi
+            .get_from_batch_and_db_with(&db, db_empty_key, &readopts, |slice| {
+                assert!(slice.is_empty());
+                13
+            })
+            .unwrap();
+        assert_eq!(found_empty_and_db, Some(13));
+
+        let found_empty_and_db_cf = wbwi
+            .get_from_batch_and_db_cf_with(&db, &cf, db_empty_cf_key, &readopts, |slice| {
+                assert!(slice.is_empty());
+                17
+            })
+            .unwrap();
+        assert_eq!(found_empty_and_db_cf, Some(17));
     }
 }

@@ -1,6 +1,7 @@
 //! Validation and link setup for reusable RocksDB bundles.
 
-use super::prebuilt_hash::{sha256_file, sha256_files, sha256_tree};
+use super::prebuilt_copy::materialize_bundle;
+use super::prebuilt_hash::{sha256_file, sha256_files, sha256_tree, validate_bundle_tree};
 use super::prebuilt_manifest::Manifest;
 use super::*;
 
@@ -22,13 +23,23 @@ const SUPPORTED_FEATURES: &[&str] = &[
 
 /// Validate the configured bundle before emitting any native link directives.
 pub(super) fn resolve(target: &Target) -> Backend {
-    let root = prebuilt_root();
-    let manifest_path = root.join(MANIFEST_NAME);
+    validate_prebuilt_platform(target);
+    let source_root = prebuilt_root();
+    validate_bundle_tree(&source_root, &manifest_dir());
+
+    let manifest_path = source_root.join(MANIFEST_NAME);
     println!("cargo::rerun-if-changed={}", manifest_path.display());
 
     let manifest = Manifest::load(&manifest_path);
     validate_manifest(&manifest, target);
 
+    let source_include = source_root.join("include");
+    let source_bindings = source_root.join("bindings.rs");
+    validate_files(&source_root, &source_include, &source_bindings, &manifest);
+
+    let root = materialize_bundle(&source_root, &out_dir().join("prebuilt"));
+    let manifest = Manifest::load(&root.join(MANIFEST_NAME));
+    validate_manifest(&manifest, target);
     let include = root.join("include");
     let bindings = root.join("bindings.rs");
     validate_files(&root, &include, &bindings, &manifest);
@@ -38,18 +49,43 @@ pub(super) fn resolve(target: &Target) -> Backend {
 }
 
 fn prebuilt_root() -> PathBuf {
-    PathBuf::from(
+    let root = PathBuf::from(
         env::var_os("ROCKSDB_PREBUILT_DIR")
             .expect("checked by Backend::resolve before prebuilt::resolve"),
-    )
+    );
+    let metadata = fs::symlink_metadata(&root).unwrap_or_else(|e| {
+        panic!(
+            "cannot inspect prebuilt RocksDB bundle root `{}`: {e}",
+            root.display()
+        )
+    });
+    if metadata.file_type().is_symlink() {
+        panic!(
+            "prebuilt RocksDB bundle path `{}` is a symbolic link",
+            root.display()
+        );
+    }
+    fs::canonicalize(&root).unwrap_or_else(|e| {
+        panic!(
+            "cannot canonicalize prebuilt RocksDB bundle root `{}`: {e}",
+            root.display()
+        )
+    })
 }
 
-fn validate_manifest(manifest: &Manifest, target: &Target) {
+fn validate_prebuilt_platform(target: &Target) {
     if target.os == "windows" {
         panic!("ROCKSDB_PREBUILT_DIR does not support Windows yet; use ROCKSDB_COMPILE=1");
     }
+
+    #[cfg(not(unix))]
+    panic!("ROCKSDB_PREBUILT_DIR requires a Unix build host; use ROCKSDB_COMPILE=1");
+}
+
+fn validate_manifest(manifest: &Manifest, target: &Target) {
     validate_manifest_identity(manifest, target);
     validate_manifest_build(manifest, target);
+    validate_manifest_provenance(manifest);
     validate_feature_set(manifest.get("features"));
 }
 
@@ -87,8 +123,16 @@ fn validate_manifest_build(manifest: &Manifest, target: &Target) {
     );
     require_equal("target_cpu", manifest.get("target_cpu"), "baseline");
     require_equal("link", manifest.get("link"), "static");
+}
+
+fn validate_manifest_provenance(manifest: &Manifest) {
     require_nonempty("compiler", manifest.get("compiler"));
     require_nonempty("compiler_version", manifest.get("compiler_version"));
+    require_nonempty("libclang_identity", manifest.get("libclang_identity"));
+    require_nonempty(
+        "native_dependency_versions",
+        manifest.get("native_dependency_versions"),
+    );
 }
 
 fn require_equal(field: &str, actual: &str, expected: &str) {
@@ -98,7 +142,7 @@ fn require_equal(field: &str, actual: &str, expected: &str) {
 }
 
 fn require_nonempty(field: &str, value: &str) {
-    if value.is_empty() {
+    if value.trim().is_empty() {
         panic!("prebuilt RocksDB manifest field `{field}` must not be empty");
     }
 }

@@ -978,6 +978,8 @@ mod system {
 
 #[path = "build/prebuilt.rs"]
 mod prebuilt;
+#[path = "build/prebuilt_copy.rs"]
+mod prebuilt_copy;
 #[path = "build/prebuilt_hash.rs"]
 mod prebuilt_hash;
 #[path = "build/prebuilt_manifest.rs"]

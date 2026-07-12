@@ -2,10 +2,15 @@
 set -euo pipefail
 umask 077
 
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+readonly REPO_ROOT
 readonly MANIFEST_NAME="rust-rocksdb-prebuilt.env"
 readonly DEFAULT_FEATURES="bzip2,lz4,snappy,static,zlib,zstd"
+
+# shellcheck source=scripts/lib/rocksdb-prebuilt-metadata.sh
+source "$SCRIPT_DIR/lib/rocksdb-prebuilt-metadata.sh"
 
 PREFIX=""
 FEATURES="$DEFAULT_FEATURES"
@@ -85,7 +90,7 @@ validate_features() {
             *) fail "prebuilt bundles do not support feature: $feature" ;;
         esac
     done
-    feature_enabled static || fail "prebuilt bundles require the `static` feature"
+    feature_enabled static || fail "prebuilt bundles require the 'static' feature"
 }
 
 feature_enabled() {
@@ -188,6 +193,7 @@ default_prefix() {
     identity+="|$(expected_submodule_revision)|$(sha256_file "$REPO_ROOT/Cargo.lock")"
     identity+="|$(sha256_file "$REPO_ROOT/scripts/build-rocksdb-prebuilt.sh")"
     identity+="|$(sha256_tree "$REPO_ROOT/librocksdb-sys/build")"
+    identity+="|$(libclang_identity)|$(native_dependency_versions)"
     identity+="|$(sha256_extensions)|$(sha256_source_list)"
     key="$(printf '%s' "$identity" | sha256_stream | cut -c1-16)"
     printf '%s/rust-rocksdb/%s/%s/%s\n' \
@@ -248,9 +254,10 @@ find_single_artifact() {
 
 build_sys_crate() {
     local -a command
-    local target normalized_target
+    local target normalized_target libclang_path
     target="$(host_target)"
     normalized_target="${target//-/_}"
+    libclang_path="$(resolved_libclang_path)"
     case "${CC:-} ${CXX:-}" in
         *-march*|*-mcpu*|*target-cpu*) fail "CC/CXX must not inject CPU-specific flags" ;;
     esac
@@ -268,6 +275,7 @@ build_sys_crate() {
         unset "CC_$normalized_target" "CXX_$normalized_target"
         unset "CFLAGS_$normalized_target" "CXXFLAGS_$normalized_target"
         export CARGO_TARGET_DIR="$BUILD_TARGET"
+        export LIBCLANG_PATH="$libclang_path"
         export ROCKSDB_COMPILE=1
         export ROCKSDB_CXX_STD=c++20
         export RUSTFLAGS=
@@ -345,6 +353,8 @@ target_cpu=baseline
 link=static
 compiler=$(compiler_command)
 compiler_version=$(compiler_version)
+libclang_identity=$(libclang_identity)
+native_dependency_versions=$(native_dependency_versions)
 deployment_target=$(deployment_target)
 extensions_sha256=$(sha256_extensions)
 build_script_sha256=$(sha256_file "$REPO_ROOT/librocksdb-sys/build.rs")
@@ -400,6 +410,7 @@ acquire_lock() {
 
 build_bundle() {
     if [[ -f "$PREFIX/$MANIFEST_NAME" ]]; then
+        validate_existing_bundle "$PREFIX"
         print_config "$PREFIX"
         return
     fi
@@ -437,6 +448,8 @@ main() {
     FEATURES="$(normalize_features "$FEATURES")"
     validate_features
     SYS_CRATE_VERSION="$(metadata_field rust-librocksdb-sys version)"
+    # Used by the sourced self-test helper.
+    # shellcheck disable=SC2034
     ROCKSDB_VERSION="$(rocksdb_version "$SYS_CRATE_VERSION")"
     [[ "$(host_target)" != *-windows-* ]] ||
         fail "prebuilt bundle generation supports Linux and macOS only"
@@ -444,7 +457,10 @@ main() {
     trap cleanup EXIT
     case "$MODE" in
         build) build_bundle ;;
-        print) print_config "$PREFIX" ;;
+        print)
+            validate_existing_bundle "$PREFIX"
+            print_config "$PREFIX"
+            ;;
     esac
 }
 

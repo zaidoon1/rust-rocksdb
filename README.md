@@ -421,23 +421,33 @@ the `.cargo/config.toml` entry to add to the consuming project:
 ROCKSDB_PREBUILT_DIR = "/absolute/path/printed/by/the/script"
 ```
 
-The bundle manifest records the compiler identity and validates the crate
-version, exact RocksDB source revision, target triple, native Cargo features,
-C++ standard library, RocksDB and compression header trees, local C API
-extensions, and artifact hashes. A mismatch stops with the offending value. It
-never falls back to a long vendored build. Set `ROCKSDB_COMPILE=1` to bypass a
-configured bundle explicitly.
+The bundle manifest records compiler, libclang, and native dependency versions.
+It validates the crate version, exact RocksDB source revision, target triple,
+native Cargo features, C++ standard library, RocksDB and compression header
+trees, local C API extensions, and artifact hashes. A mismatch stops with the
+offending value. It never falls back to a long vendored build. Set
+`ROCKSDB_COMPILE=1` to bypass a configured bundle explicitly.
 
 Bundles are local trusted build artifacts and are created with user-only
 permissions. Do not use a bundle from an untrusted or shared writable location.
 Rebuild after changing the consuming project's native dependency resolution;
 the default cache path includes the generating workspace's `Cargo.lock` hash,
-and validation checks the resolved compression header trees.
+and validation checks the resolved compression header trees. The consumer also
+rejects symlinks, hard links, special files, ownership mismatches, and writable
+bundle paths or parent directories.
+
+These bundles are not release artifacts. Publishing or sharing them requires an
+external signature or artifact attestation because hashes stored inside the
+same bundle prove consistency, not who produced it.
 
 The helper supports Linux and macOS with the standard compression features plus
 `jemalloc`, `rtti`, and `malloc-usable-size`. Coroutine, io-uring, LTO, and
 Windows bundles have additional external ABI requirements and continue to use
 the vendored or system-library paths.
+
+The `Prebuilt RocksDB` workflow continuously builds and consumes cold bundles
+on Linux x64, Linux ARM64, and macOS, verifies Windows fails closed, and runs
+scheduled extended-feature and reproducibility checks.
 
 ### Linking Against a Prebuilt RocksDB
 

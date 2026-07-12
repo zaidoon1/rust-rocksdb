@@ -3608,7 +3608,7 @@ impl Options {
         let holder = Arc::new(LogCallback {
             callback: Box::new(callback),
         });
-        let holder_ptr = holder.as_ref() as *const LogCallback;
+        let holder_ptr = std::ptr::from_ref::<LogCallback>(holder.as_ref());
         let holder_cvoid = holder_ptr.cast::<c_void>().cast_mut();
 
         unsafe {

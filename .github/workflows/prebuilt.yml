@@ -1,0 +1,343 @@
+name: Prebuilt RocksDB
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  self-test:
+    name: Self-test (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            id: linux-x64
+            os: ubuntu-24.04
+          - name: Linux ARM64
+            id: linux-arm64
+            os: ubuntu-24.04-arm
+          - name: macOS
+            id: macos
+            os: macos-15
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: "1.91.0"
+          components: clippy
+          cache: false
+          rustflags: ""
+
+      - name: Run prebuilt validator self-tests
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p "$RUNNER_TEMP/prebuilt-ci"
+          ./scripts/build-rocksdb-prebuilt.sh --self-test 2>&1 |
+            tee "$RUNNER_TEMP/prebuilt-ci/self-test.log"
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: prebuilt-self-test-${{ matrix.id }}
+          path: ${{ runner.temp }}/prebuilt-ci/*.log
+          if-no-files-found: warn
+          retention-days: 7
+
+  default-bundle:
+    name: Default bundle (${{ matrix.name }})
+    needs: self-test
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            id: linux-x64
+            os: ubuntu-24.04
+          - name: Linux ARM64
+            id: linux-arm64
+            os: ubuntu-24.04-arm
+          - name: macOS
+            id: macos
+            os: macos-15
+    env:
+      BUNDLE_NAME: rocksdb-prebuilt-default
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: "1.91.0"
+          components: clippy
+          cache: false
+          rustflags: ""
+
+      - name: Build a cold default bundle
+        shell: bash
+        run: |
+          set -o pipefail
+          bundle_dir="$RUNNER_TEMP/$BUNDLE_NAME"
+          log_dir="$RUNNER_TEMP/prebuilt-ci"
+          mkdir -p "$log_dir"
+          ./scripts/build-rocksdb-prebuilt.sh --prefix "$bundle_dir" 2>&1 |
+            tee "$log_dir/build.log"
+
+      - name: Verify bundle artifacts
+        shell: bash
+        run: |
+          set -o pipefail
+          bundle_dir="$RUNNER_TEMP/$BUNDLE_NAME"
+          log_dir="$RUNNER_TEMP/prebuilt-ci"
+          .github/scripts/prebuilt-ci.sh verify "$bundle_dir" 2>&1 |
+            tee "$log_dir/artifacts.log"
+
+      - name: Test a fresh consumer without RocksDB sources
+        shell: bash
+        run: |
+          set -o pipefail
+          source_dir="$GITHUB_WORKSPACE/librocksdb-sys/rocksdb"
+          source_backup="$RUNNER_TEMP/rocksdb-source"
+          cxx_sentinel="$RUNNER_TEMP/fail-cxx"
+          cxx_marker="$RUNNER_TEMP/cxx-was-invoked"
+          bundle_dir="$RUNNER_TEMP/$BUNDLE_NAME"
+          log_dir="$RUNNER_TEMP/prebuilt-ci"
+
+          restore_source() {
+            if [[ -d "$source_backup" && ! -e "$source_dir" ]]; then
+              mv "$source_backup" "$source_dir"
+            fi
+          }
+          trap restore_source EXIT
+
+          [[ ! -e "$source_backup" ]]
+          mv "$source_dir" "$source_backup"
+          cat >"$cxx_sentinel" <<EOF
+          #!/usr/bin/env bash
+          touch "$cxx_marker"
+          exit 97
+          EOF
+          chmod 700 "$cxx_sentinel"
+
+          export ROCKSDB_PREBUILT_DIR="$bundle_dir"
+          export CXX="$cxx_sentinel"
+          export LIBCLANG_PATH="$RUNNER_TEMP/invalid-libclang"
+          export PREBUILT_CXX_MARKER="$cxx_marker"
+          [[ ! -e "$LIBCLANG_PATH" ]]
+          .github/scripts/prebuilt-ci.sh consume "$bundle_dir" 2>&1 |
+            tee "$log_dir/consumer.log"
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: prebuilt-default-${{ matrix.id }}
+          path: |
+            ${{ runner.temp }}/prebuilt-ci/*.log
+            ${{ runner.temp }}/rocksdb-prebuilt-default/rust-rocksdb-prebuilt.env
+          if-no-files-found: warn
+          retention-days: 7
+
+  windows-fail-closed:
+    name: Windows fails closed
+    needs: self-test
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: "1.91.0"
+          cache: false
+          rustflags: ""
+
+      - name: Reject bundle production and consumption
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $false
+          $logDir = Join-Path $env:RUNNER_TEMP "prebuilt-ci"
+          New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+
+          $prefix = ($env:RUNNER_TEMP -replace "\\", "/") + "/windows-bundle"
+          & bash scripts/build-rocksdb-prebuilt.sh --prefix $prefix *>&1 |
+            Tee-Object -FilePath (Join-Path $logDir "producer.log")
+          if ($LASTEXITCODE -eq 0) {
+            throw "Windows bundle production unexpectedly succeeded"
+          }
+          if (-not (Select-String -Quiet -SimpleMatch `
+              "prebuilt bundle generation supports Linux and macOS only" `
+              (Join-Path $logDir "producer.log"))) {
+            throw "Windows producer did not fail with the expected error"
+          }
+
+          $marker = Join-Path $env:RUNNER_TEMP "cxx-was-invoked"
+          $sentinel = Join-Path $env:RUNNER_TEMP "fail-cxx.cmd"
+          "@echo off`r`necho invoked > `"$marker`"`r`nexit /b 97" |
+            Set-Content -NoNewline $sentinel
+          $env:CXX = $sentinel
+          $env:LIBCLANG_PATH = Join-Path $env:RUNNER_TEMP "invalid-libclang"
+          $env:ROCKSDB_PREBUILT_DIR = Join-Path $env:RUNNER_TEMP "missing-bundle"
+          $env:CARGO_TARGET_DIR = Join-Path $env:RUNNER_TEMP "windows-target"
+          if (Test-Path $env:LIBCLANG_PATH) {
+            throw "Windows LIBCLANG_PATH sentinel unexpectedly exists"
+          }
+
+          & cargo check --locked -p rust-librocksdb-sys --no-default-features `
+            --features static *>&1 |
+            Tee-Object -FilePath (Join-Path $logDir "consumer.log")
+          if ($LASTEXITCODE -eq 0) {
+            throw "Windows bundle consumption unexpectedly succeeded"
+          }
+          if (-not (Select-String -Quiet -SimpleMatch `
+              "ROCKSDB_PREBUILT_DIR does not support Windows yet" `
+              (Join-Path $logDir "consumer.log"))) {
+            throw "Windows consumer did not fail with the expected error"
+          }
+          if (Test-Path $marker) {
+            throw "Windows fail-closed check invoked CXX"
+          }
+          if (Get-ChildItem $env:CARGO_TARGET_DIR -Recurse -Filter librocksdb.a `
+              -ErrorAction SilentlyContinue) {
+            throw "Windows fail-closed check compiled librocksdb.a"
+          }
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: prebuilt-windows-fail-closed
+          path: ${{ runner.temp }}/prebuilt-ci/*.log
+          if-no-files-found: warn
+          retention-days: 7
+
+  prebuilt-gate:
+    name: Prebuilt RocksDB gate
+    if: always()
+    needs:
+      - self-test
+      - default-bundle
+      - windows-fail-closed
+      - weekly-extended
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require every prebuilt check
+        env:
+          SELF_TEST_RESULT: ${{ needs.self-test.result }}
+          DEFAULT_BUNDLE_RESULT: ${{ needs.default-bundle.result }}
+          WINDOWS_RESULT: ${{ needs.windows-fail-closed.result }}
+          WEEKLY_RESULT: ${{ needs.weekly-extended.result }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          test "$SELF_TEST_RESULT" = success
+          test "$DEFAULT_BUNDLE_RESULT" = success
+          test "$WINDOWS_RESULT" = success
+          case "$EVENT_NAME" in
+            schedule|workflow_dispatch)
+              test "$WEEKLY_RESULT" = success
+              ;;
+            *)
+              test "$WEEKLY_RESULT" = skipped
+              ;;
+          esac
+
+  weekly-extended:
+    name: Weekly extended determinism
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: self-test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    env:
+      EXTENDED_FEATURES: bzip2,jemalloc,lz4,malloc-usable-size,rtti,snappy,static,zlib,zstd,zstd-static-linking-only
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: "1.91.0"
+          cache: false
+          rustflags: ""
+
+      - name: Build two cold extended bundles
+        shell: bash
+        run: |
+          set -o pipefail
+          first_bundle="$RUNNER_TEMP/rocksdb-prebuilt-extended-1"
+          second_bundle="$RUNNER_TEMP/rocksdb-prebuilt-extended-2"
+          log_dir="$RUNNER_TEMP/prebuilt-ci"
+          mkdir -p "$log_dir"
+          ./scripts/build-rocksdb-prebuilt.sh \
+            --prefix "$first_bundle" \
+            --features "$EXTENDED_FEATURES" 2>&1 |
+            tee "$log_dir/extended-1.log"
+          ./scripts/build-rocksdb-prebuilt.sh \
+            --prefix "$second_bundle" \
+            --features "$EXTENDED_FEATURES" 2>&1 |
+            tee "$log_dir/extended-2.log"
+
+      - name: Verify deterministic artifacts
+        shell: bash
+        run: |
+          set -o pipefail
+          first_bundle="$RUNNER_TEMP/rocksdb-prebuilt-extended-1"
+          second_bundle="$RUNNER_TEMP/rocksdb-prebuilt-extended-2"
+          log_dir="$RUNNER_TEMP/prebuilt-ci"
+          {
+            .github/scripts/prebuilt-ci.sh verify "$first_bundle"
+            .github/scripts/prebuilt-ci.sh verify "$second_bundle"
+            .github/scripts/prebuilt-ci.sh compare \
+              "$first_bundle" "$second_bundle"
+          } 2>&1 | tee "$log_dir/determinism.log"
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: prebuilt-weekly-extended
+          path: |
+            ${{ runner.temp }}/prebuilt-ci/*.log
+            ${{ runner.temp }}/rocksdb-prebuilt-extended-1/rust-rocksdb-prebuilt.env
+            ${{ runner.temp }}/rocksdb-prebuilt-extended-2/rust-rocksdb-prebuilt.env
+          if-no-files-found: warn
+          retention-days: 7

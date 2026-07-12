@@ -1,0 +1,90 @@
+name: Workflow security
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/**"
+      - "scripts/**/*.sh"
+  pull_request:
+    paths:
+      - ".github/**"
+      - "scripts/**/*.sh"
+  schedule:
+    - cron: "41 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install actionlint 1.7.12
+        run: |
+          archive=actionlint_1.7.12_linux_amd64.tar.gz
+          curl --fail --location --silent --show-error \
+            --output "$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v1.7.12/$archive"
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $archive" |
+            sha256sum --check
+          tar -xzf "$archive" actionlint
+          ./actionlint
+
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install ShellCheck 0.11.0
+        run: |
+          archive=shellcheck-v0.11.0.linux.x86_64.tar.xz
+          curl --fail --location --silent --show-error \
+            --output "$archive" \
+            "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/$archive"
+          echo "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198  $archive" |
+            sha256sum --check
+          tar -xJf "$archive"
+          shellcheck-v0.11.0/shellcheck -x \
+            scripts/*.sh \
+            scripts/lib/*.sh \
+            .github/scripts/*.sh
+
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Audit workflows
+        uses: zizmorcore/zizmor-action@192e21d79ab29983730a13d1382995c2307fbcaa # v0.5.7
+        with:
+          inputs: .github
+          version: 1.26.1
+          persona: auditor
+          min-severity: medium
+          min-confidence: high
+          online-audits: false
+          advanced-security: false
+          annotations: true

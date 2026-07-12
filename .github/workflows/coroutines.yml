@@ -5,6 +5,9 @@ on:
     branches: [master]
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -39,7 +42,7 @@ jobs:
       # about `io_uring_zcrx_*` being incomplete types. Ubuntu 25.10 ships
       # liburing 2.11, which is sufficient. The cache key below encodes the
       # image so changing this invalidates the folly cache.
-      image: ubuntu:25.10
+      image: ubuntu:25.10@sha256:7cc5e35f6567ee8c66d2abb4aab0fd866669e6207c237c3a8f0947a5c7f17092
     # Folly's getdeps build can take 30-60+ minutes on a cold cache on
     # standard GHA runners (small core count, no parallelism flags). 90
     # minutes is a comfortable upper bound. With a warm cache the whole
@@ -57,9 +60,10 @@ jobs:
             ca-certificates curl git sudo
 
       - name: Checkout sources
-        uses: actions/checkout@v5
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           submodules: recursive
+          persist-credentials: false
 
       - name: Install build dependencies
         run: |
@@ -92,7 +96,7 @@ jobs:
           g++ --version
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           cache-key: "v1-rust-coroutines"
           # The correct input name on this action is `cache-save-if`. We only
@@ -116,7 +120,7 @@ jobs:
 
       - name: Cache folly install
         id: cache-folly
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           # `build_folly.sh` uses --scratch-path so install artifacts live
           # inside the workspace at a predictable location. Cache both that
@@ -171,7 +175,7 @@ jobs:
           GFLAGS_LIBDIR=$(locate_libdir gflags)
           echo "LD_LIBRARY_PATH=$GLOG_LIBDIR:$GFLAGS_LIBDIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
 
-      - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@b130398174e289fa97fdcad73cb088b5338441aa # nextest
 
       - name: cargo build --features coroutines,io-uring
         run: cargo build --release --features coroutines,io-uring

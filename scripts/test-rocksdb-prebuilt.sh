@@ -197,6 +197,11 @@ test_bundle_corruption() {
 }
 
 test_crate_hash_mismatches() {
+    fresh_bundle build-script-hash
+    set_manifest_field "$CASE_BUNDLE" build_script_sha256 wrong-hash
+    expect_check_failure "$CASE_BUNDLE" static \
+        "prebuilt RocksDB \`build.rs\` hash mismatch" build-script-hash
+
     fresh_bundle validator-hash
     set_manifest_field "$CASE_BUNDLE" validator_sha256 wrong-hash
     expect_check_failure "$CASE_BUNDLE" static \
@@ -211,6 +216,27 @@ test_crate_hash_mismatches() {
     set_manifest_field "$CASE_BUNDLE" extensions_sha256 wrong-hash
     expect_check_failure "$CASE_BUNDLE" static \
         'prebuilt RocksDB local C-API extension hash mismatch' extensions-hash
+}
+
+test_native_dependency_hashes() {
+    local field
+    for field in bzip2_headers_sha256 lz4_headers_sha256 \
+        zlib_headers_sha256 zstd_headers_sha256 jemalloc_headers_sha256; do
+        fresh_bundle "$field-mismatch"
+        set_manifest_field "$CASE_BUNDLE" "$field" wrong-hash
+        expect_check_failure "$CASE_BUNDLE" static \
+            "prebuilt RocksDB \`$field\` mismatch" "$field-mismatch"
+    done
+
+    fresh_bundle snappy-hash
+    printf 'snappy archive\n' >"$CASE_BUNDLE/lib/libsnappy.a"
+    set_manifest_field "$CASE_BUNDLE" features "snappy,static"
+    set_manifest_field "$CASE_BUNDLE" snappy_sha256 \
+        "$(sha256_file "$CASE_BUNDLE/lib/libsnappy.a")"
+    run_bundle_cargo "$CASE_BUNDLE" "snappy,static" check
+    printf 'corrupt\n' >>"$CASE_BUNDLE/lib/libsnappy.a"
+    expect_check_failure "$CASE_BUNDLE" "snappy,static" \
+        "prebuilt RocksDB \`libsnappy.a\` hash mismatch" snappy-hash
 }
 
 test_cached_corruption() {
@@ -302,6 +328,7 @@ self_test() {
     test_manifest_mismatches
     test_bundle_corruption
     test_crate_hash_mismatches
+    test_native_dependency_hashes
     test_cached_corruption
     test_stale_prefix
     test_filesystem_trust

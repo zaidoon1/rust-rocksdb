@@ -173,6 +173,9 @@ jobs:
           export ROCKSDB_PREBUILT_DIR="$bundle_dir"
           export CXX="$cxx_sentinel"
           export PREBUILT_CXX_MARKER="$cxx_marker"
+          export LIBCLANG_PATH="$RUNNER_TEMP/missing-libclang"
+          export LLVM_CONFIG_PATH="$LIBCLANG_PATH/llvm-config"
+          [[ ! -e "$LIBCLANG_PATH" ]]
           .github/scripts/prebuilt-ci.sh consume "$bundle_dir" 2>&1 |
             tee "$log_dir/consumer.log"
 
@@ -237,15 +240,29 @@ jobs:
             throw "Windows LIBCLANG_PATH sentinel unexpectedly exists"
           }
 
-          & cargo check -p rust-librocksdb-sys --no-default-features `
-            --features bindgen-runtime,static *>&1 |
-            Tee-Object -FilePath (Join-Path $logDir "consumer.log")
-          if ($LASTEXITCODE -eq 0) {
+          $consumerLog = Join-Path $logDir "consumer.log"
+          $consumerStdout = Join-Path $logDir "consumer.stdout.log"
+          $consumerStderr = Join-Path $logDir "consumer.stderr.log"
+          $consumer = Start-Process -FilePath (Get-Command cargo).Source `
+            -ArgumentList @(
+              "check",
+              "-p", "rust-librocksdb-sys",
+              "--no-default-features",
+              "--features", "bindgen-runtime,static"
+            ) `
+            -NoNewWindow `
+            -Wait `
+            -PassThru `
+            -RedirectStandardOutput $consumerStdout `
+            -RedirectStandardError $consumerStderr
+          Get-Content $consumerStdout, $consumerStderr |
+            Tee-Object -FilePath $consumerLog
+          if ($consumer.ExitCode -eq 0) {
             throw "Windows bundle consumption unexpectedly succeeded"
           }
           if (-not (Select-String -Quiet -SimpleMatch `
               "ROCKSDB_PREBUILT_DIR does not support Windows yet" `
-              (Join-Path $logDir "consumer.log"))) {
+              $consumerLog)) {
             throw "Windows consumer did not fail with the expected error"
           }
           if (Test-Path $marker) {
@@ -255,6 +272,7 @@ jobs:
               -ErrorAction SilentlyContinue) {
             throw "Windows fail-closed check compiled librocksdb.a"
           }
+          exit 0
 
       - name: Upload failure diagnostics
         if: failure()

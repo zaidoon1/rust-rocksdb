@@ -80,3 +80,4 @@ bindgen = { version = "0.72", default-features = false }
 glob = "0.3"
 pkg-config = "0.3"
 rustflags = "0.1"
+sha2 = "0.11"

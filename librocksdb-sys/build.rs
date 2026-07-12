@@ -3,14 +3,14 @@
 //! High-level flow:
 //!
 //! 1. Read target info from `CARGO_CFG_*` env vars (typed in [`Target`]).
-//! 2. Pick a [`Backend`] (vendored sources or prebuilt system library)
-//!    based on env vars; see [`Backend::resolve`] for the precedence rules.
-//! 3. Build vendored, or emit the system link directives.
+//! 2. Pick a [`Backend`] (vendored sources, validated bundle, or system
+//!    library) based on env vars; see [`Backend::resolve`] for precedence.
+//! 3. Build vendored, or emit the selected library's link directives.
 //! 4. Link the platform runtime libs RocksDB needs regardless of backend
 //!    (Windows rpcrt4/shlwapi, riscv64 libatomic, the C++ stdlib).
 //! 5. Resolve `snappy` the same way if the `snappy` feature is on.
-//! 6. Run `bindgen` against the *chosen* backend's headers so the
-//!    generated FFI cannot drift from the linked library.
+//! 6. Generate bindings against the selected headers, or copy the bindings
+//!    stored in a validated bundle.
 //! 7. Emit `cargo::metadata=` entries for downstream crates.
 //!
 //! See the project README for the full list of environment variables.
@@ -18,6 +18,7 @@
 //! `cargo::rerun-if-env-changed=` at the top of [`main`].
 
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 // =========================================================================
@@ -115,10 +116,12 @@ fn parse_rust_target_cpu() -> Option<String> {
 enum Backend {
     /// Build RocksDB from the bundled `rocksdb/` submodule sources.
     Vendored { include: PathBuf },
+    /// Link a bundle produced by `scripts/build-rocksdb-prebuilt.sh`.
+    Prebuilt { include: PathBuf, bindings: PathBuf },
     /// Link against an already-built RocksDB. The build script has already
     /// emitted the `cargo::rustc-link-*` directives; `includes` is the set
     /// of header directories for bindgen to scan. Empty means we couldn't
-    /// determine one — [`bindings::generate`] panics with a helpful error
+    /// determine one — [`bindings::prepare`] panics with a helpful error
     /// in that case rather than silently misbinding.
     System { includes: Vec<PathBuf> },
 }
@@ -132,6 +135,10 @@ impl Backend {
             return Backend::Vendored {
                 include: vendored_include(),
             };
+        }
+
+        if env::var_os("ROCKSDB_PREBUILT_DIR").is_some() {
+            return prebuilt::resolve(target);
         }
 
         // Opt-in pkg-config probe.
@@ -163,13 +170,25 @@ impl Backend {
     /// `DEP_ROCKSDB_INCLUDE` path.
     ///
     /// Empty slice means the backend couldn't determine a header location;
-    /// `bindings::generate` is responsible for panicking with an
+    /// `bindings::prepare` is responsible for panicking with an
     /// actionable error in that case.
     fn all_includes(&self) -> &[PathBuf] {
         match self {
             Backend::Vendored { include } => std::slice::from_ref(include),
+            Backend::Prebuilt { include, .. } => std::slice::from_ref(include),
             Backend::System { includes } => includes,
         }
+    }
+
+    fn prebuilt_bindings(&self) -> Option<&Path> {
+        match self {
+            Backend::Prebuilt { bindings, .. } => Some(bindings),
+            Backend::Vendored { .. } | Backend::System { .. } => None,
+        }
+    }
+
+    fn is_prebuilt(&self) -> bool {
+        matches!(self, Backend::Prebuilt { .. })
     }
 }
 
@@ -181,6 +200,7 @@ fn main() {
     rerun_if_env_changed(&[
         // RocksDB
         "ROCKSDB_COMPILE",
+        "ROCKSDB_PREBUILT_DIR",
         "ROCKSDB_LIB_DIR",
         "ROCKSDB_STATIC",
         "ROCKSDB_INCLUDE_DIR",
@@ -225,11 +245,8 @@ fn main() {
 
     let backend = Backend::resolve(&target);
 
-    // Re-run build.rs if the local C-API extensions change. The
-    // extensions are a small handful of files outside the submodule
-    // (see librocksdb-sys/c-api-extensions/) compiled and linked into
-    // every build, vendored or system. There's no patch application
-    // step: the extensions just add new symbols additively.
+    // Vendored and system builds compile the local C-API extensions here.
+    // Validated bundles already contain them and verify their source hash.
     println!("cargo::rerun-if-changed=c-api-extensions/");
 
     match &backend {
@@ -237,6 +254,9 @@ fn main() {
             println!("cargo::rerun-if-changed=rocksdb/");
             ensure_submodule_present("rocksdb");
             vendor::build(&target);
+        }
+        Backend::Prebuilt { .. } => {
+            cpp_link_stdlib(&target);
         }
         Backend::System { .. } => {
             // Link directives already emitted by `Backend::resolve`.
@@ -264,7 +284,7 @@ fn main() {
         snappy::ensure(&target, &backend);
     }
 
-    bindings::generate(&backend);
+    bindings::prepare(&backend);
 
     emit_metadata(&backend);
 }
@@ -953,6 +973,17 @@ mod system {
 }
 
 // =========================================================================
+// Validated prebuilt backend
+// =========================================================================
+
+#[path = "build/prebuilt.rs"]
+mod prebuilt;
+#[path = "build/prebuilt_hash.rs"]
+mod prebuilt_hash;
+#[path = "build/prebuilt_manifest.rs"]
+mod prebuilt_manifest;
+
+// =========================================================================
 // Snappy
 // =========================================================================
 
@@ -971,6 +1002,9 @@ mod snappy {
     /// enabled the `snappy` feature alongside a system rocksdb aren't
     /// silently surprised that the feature is ignored.
     pub(super) fn ensure(target: &Target, backend: &Backend) {
+        if backend.is_prebuilt() {
+            return;
+        }
         if matches!(backend, Backend::System { .. }) {
             println!(
                 "cargo::warning=`snappy` feature is enabled but rocksdb \
@@ -1058,7 +1092,19 @@ mod bindings {
     /// the system path was chosen and neither `ROCKSDB_INCLUDE_DIR` nor
     /// pkg-config provided one), this panics with an actionable message
     /// rather than guessing `/usr/include` and silently misbinding.
-    pub(super) fn generate(backend: &Backend) {
+    pub(super) fn prepare(backend: &Backend) {
+        if let Some(prebuilt) = backend.prebuilt_bindings() {
+            let out = out_dir().join("bindings.rs");
+            fs::copy(prebuilt, &out).unwrap_or_else(|e| {
+                panic!(
+                    "failed to copy prebuilt RocksDB bindings from `{}` to `{}`: {e}",
+                    prebuilt.display(),
+                    out.display()
+                )
+            });
+            return;
+        }
+
         let includes = backend.all_includes();
         // The first include path is only used as a sanity check (it has to
         // exist or the build will fail downstream); the actual primary

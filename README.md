@@ -375,12 +375,77 @@ cd rust-rocksdb
 git submodule update --init --recursive
 ```
 
+### Faster Local Builds
+
+Cargo stores native build-script output under a profile and feature-specific
+`OUT_DIR`. RocksDB is large enough that changing profiles or native features can
+create another full archive, and `cargo clean` removes every copy.
+
+For normal development, compile the native dependency with less debug
+information:
+
+```toml
+[profile.dev.package.rust-librocksdb-sys]
+opt-level = 1
+debug = false
+```
+
+Use `sccache` or `ccache` when you still build the bundled source. Configure both
+Rust and the C/C++ compiler so native objects remain reusable across Cargo output
+directories:
+
+```toml
+# .cargo/config.toml
+[build]
+rustc-wrapper = "sccache"
+
+[env]
+CC = "sccache cc"
+CXX = "sccache c++"
+```
+
+For local workflows that must survive profile changes and `cargo clean`, build a
+validated bundle once:
+
+```bash
+./scripts/build-rocksdb-prebuilt.sh
+```
+
+The script builds `rust-librocksdb-sys` through its normal release build, then
+stores the optimized static archives, exact headers, and generated bindings
+under `$XDG_CACHE_HOME/rust-rocksdb` (or `$HOME/.cache/rust-rocksdb`). It prints
+the `.cargo/config.toml` entry to add to the consuming project:
+
+```toml
+[env]
+ROCKSDB_PREBUILT_DIR = "/absolute/path/printed/by/the/script"
+```
+
+The bundle manifest records the compiler identity and validates the crate
+version, exact RocksDB source revision, target triple, native Cargo features,
+C++ standard library, RocksDB and compression header trees, local C API
+extensions, and artifact hashes. A mismatch stops with the offending value. It
+never falls back to a long vendored build. Set `ROCKSDB_COMPILE=1` to bypass a
+configured bundle explicitly.
+
+Bundles are local trusted build artifacts and are created with user-only
+permissions. Do not use a bundle from an untrusted or shared writable location.
+Rebuild after changing the consuming project's native dependency resolution;
+the default cache path includes the generating workspace's `Cargo.lock` hash,
+and validation checks the resolved compression header trees.
+
+The helper supports Linux and macOS with the standard compression features plus
+`jemalloc`, `rtti`, and `malloc-usable-size`. Coroutine, io-uring, LTO, and
+Windows bundles have additional external ABI requirements and continue to use
+the vendored or system-library paths.
+
 ### Linking Against a Prebuilt RocksDB
 
 By default, `rust-rocksdb` builds RocksDB from the bundled submodule. To link against a system-installed `librocksdb` instead (e.g. to share a single library across multiple Rust projects, cut compile time, or use a distro's package), the build script honors these opt-in environment variables:
 
 | Variable                   | Effect                                                                                                       |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `ROCKSDB_PREBUILT_DIR=<p>`  | Use an exact bundle from `scripts/build-rocksdb-prebuilt.sh`. Validated before linking; mismatches are errors. |
 | `ROCKSDB_USE_PKG_CONFIG=1` | Probe `pkg-config rocksdb` to discover lib + include paths automatically. Accepts `1` or `true`.             |
 | `ROCKSDB_LIB_DIR=<path>`   | Look for `librocksdb.{a,so,dylib,dll}` in `<path>`. **Requires `ROCKSDB_INCLUDE_DIR` to be set too.**        |
 | `ROCKSDB_STATIC`           | Static-link the system rocksdb (default is dynamic). Any non-empty value enables it (legacy semantics).      |
@@ -389,7 +454,11 @@ By default, `rust-rocksdb` builds RocksDB from the bundled submodule. To link ag
 | `ROCKSDB_CXX_STD=c++23`    | Override the C++ standard used to compile RocksDB (default `c++20`). Only used for vendored builds.          |
 | `CXXSTDLIB=stdc++`         | Override the C++ stdlib linked (e.g. `c++` for libc++, `stdc++` for libstdc++).                              |
 
-When you opt in via any of these:
+Backend precedence is `ROCKSDB_COMPILE`, `ROCKSDB_PREBUILT_DIR`,
+`ROCKSDB_USE_PKG_CONFIG`, `ROCKSDB_LIB_DIR`, platform defaults, then the
+vendored build.
+
+When you opt in via the generic system-library variables:
 
 - `bindgen` runs against the **chosen backend's headers** (system rocksdb when linked from the system, bundled otherwise), so the generated FFI cannot silently drift from the linked library. If no include directory can be determined, the build script panics with an actionable error rather than guessing `/usr/include`.
 - No version pin is enforced &mdash; you're the power user. The bundled RocksDB version is the trailing component of `librocksdb-sys`'s `version = "X.Y.Z+RR.S.T"` in `Cargo.toml`; make sure your system rocksdb is API-compatible.

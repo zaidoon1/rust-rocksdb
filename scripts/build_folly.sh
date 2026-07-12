@@ -156,10 +156,10 @@ python3 build/fbcode_builder/getdeps.py \
 # libgflags when loading libglog at runtime, even if the user's binary has
 # an rpath to libglog.
 INSTALLED_DIR="$SCRATCH_DIR/installed"
-GFLAGS_DIR="$(ls -d "$INSTALLED_DIR/gflags-"* 2>/dev/null | head -1)"
-GLOG_DIR="$(ls -d "$INSTALLED_DIR/glog-"* 2>/dev/null | head -1)"
+GFLAGS_DIR="$(find "$INSTALLED_DIR" -maxdepth 1 -type d -name 'gflags-*' -print | sort | head -1)"
+GLOG_DIR="$(find "$INSTALLED_DIR" -maxdepth 1 -type d -name 'glog-*' -print | sort | head -1)"
 if [ -n "$GLOG_DIR" ] && [ -n "$GFLAGS_DIR" ]; then
-    GLOG_SO="$(ls "$GLOG_DIR"/lib*/libglog.so.*.*.* 2>/dev/null | head -1 || true)"
+    GLOG_SO="$(find "$GLOG_DIR" -mindepth 2 -maxdepth 2 -type f -path "$GLOG_DIR/lib*/libglog.so.*.*.*" -print | sort | head -1)"
     if [ -n "$GLOG_SO" ]; then
         echo ">>> Patching $GLOG_SO to find libgflags via rpath..."
         patchelf --add-rpath "$GFLAGS_DIR/lib" "$GLOG_SO"

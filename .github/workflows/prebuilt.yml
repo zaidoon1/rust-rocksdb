@@ -251,10 +251,10 @@ jobs:
               "--features", "bindgen-runtime,static"
             ) `
             -NoNewWindow `
-            -Wait `
             -PassThru `
             -RedirectStandardOutput $consumerStdout `
             -RedirectStandardError $consumerStderr
+          $consumer.WaitForExit()
           Get-Content $consumerStdout, $consumerStderr |
             Tee-Object -FilePath $consumerLog
           if ($consumer.ExitCode -eq 0) {

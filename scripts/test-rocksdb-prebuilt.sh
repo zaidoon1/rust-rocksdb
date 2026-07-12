@@ -89,7 +89,7 @@ run_bundle_cargo() {
     local -a command
     command=(cargo "$@" --target "$(host_target)")
     command+=(-p rust-librocksdb-sys --no-default-features)
-    [[ -z "$features" ]] || command+=(--features "$features")
+    command+=(--features "bindgen-runtime${features:+,$features}")
     (
         cd "$REPO_ROOT"
         unset CARGO_BUILD_TARGET ROCKSDB_COMPILE ROCKSDB_LIB_DIR ROCKSDB_USE_PKG_CONFIG

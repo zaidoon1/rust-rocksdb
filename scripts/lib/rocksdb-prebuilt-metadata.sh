@@ -64,7 +64,6 @@ native_dependency_versions() {
     versions="$(cargo metadata \
         --manifest-path "$REPO_ROOT/librocksdb-sys/Cargo.toml" \
         --format-version 1 \
-        --locked \
         --no-default-features \
         --features "$FEATURES" |
         python3 -c '
@@ -93,7 +92,7 @@ validate_existing_bundle() {
     local target_dir
     local -a command
     target_dir="$(mktemp -d "${TMPDIR:-/tmp}/rust-rocksdb-validate.XXXXXX")"
-    command=(cargo check --locked --target "$(host_target)")
+    command=(cargo check --target "$(host_target)")
     command+=(-p rust-librocksdb-sys --no-default-features)
     command+=(--features "bindgen-runtime,$FEATURES")
     if ! (

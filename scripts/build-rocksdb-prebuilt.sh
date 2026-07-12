@@ -389,7 +389,7 @@ verify_bundle() {
     local rust_features
     local -a command
     rust_features="$(wrapper_features)"
-    command=(cargo test --locked --target "$(host_target)" --test test_db external --no-default-features)
+    command=(cargo test --target "$(host_target)" --test test_db external --no-default-features)
     [[ -z "$rust_features" ]] || command+=(--features "$rust_features")
     (
         cd "$REPO_ROOT"

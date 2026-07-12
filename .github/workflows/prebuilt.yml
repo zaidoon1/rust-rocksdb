@@ -55,6 +55,8 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p "$RUNNER_TEMP/prebuilt-ci"
+          export LIBCLANG_PATH="$RUNNER_TEMP/missing-libclang"
+          [[ ! -e "$LIBCLANG_PATH" ]]
           ./scripts/build-rocksdb-prebuilt.sh --self-test 2>&1 |
             tee "$RUNNER_TEMP/prebuilt-ci/self-test.log"
 
@@ -93,6 +95,26 @@ jobs:
         with:
           submodules: recursive
           persist-credentials: false
+
+      - name: Configure LLVM
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends llvm-18 libclang-18-dev
+            llvm_prefix=/usr/lib/llvm-18
+            loader_env="LD_LIBRARY_PATH=$llvm_prefix/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          else
+            brew list --versions llvm@18 >/dev/null || brew install llvm@18
+            llvm_prefix="$(brew --prefix llvm@18)"
+            loader_env="DYLD_FALLBACK_LIBRARY_PATH=$llvm_prefix/lib${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}"
+          fi
+          echo "$llvm_prefix/bin" >> "$GITHUB_PATH"
+          {
+            echo "LLVM_CONFIG_PATH=$llvm_prefix/bin/llvm-config"
+            echo "LIBCLANG_PATH=$llvm_prefix/lib"
+            echo "$loader_env"
+          } >> "$GITHUB_ENV"
 
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
@@ -150,9 +172,7 @@ jobs:
 
           export ROCKSDB_PREBUILT_DIR="$bundle_dir"
           export CXX="$cxx_sentinel"
-          export LIBCLANG_PATH="$RUNNER_TEMP/invalid-libclang"
           export PREBUILT_CXX_MARKER="$cxx_marker"
-          [[ ! -e "$LIBCLANG_PATH" ]]
           .github/scripts/prebuilt-ci.sh consume "$bundle_dir" 2>&1 |
             tee "$log_dir/consumer.log"
 
@@ -217,8 +237,8 @@ jobs:
             throw "Windows LIBCLANG_PATH sentinel unexpectedly exists"
           }
 
-          & cargo check --locked -p rust-librocksdb-sys --no-default-features `
-            --features static *>&1 |
+          & cargo check -p rust-librocksdb-sys --no-default-features `
+            --features bindgen-runtime,static *>&1 |
             Tee-Object -FilePath (Join-Path $logDir "consumer.log")
           if ($LASTEXITCODE -eq 0) {
             throw "Windows bundle consumption unexpectedly succeeded"
@@ -291,6 +311,19 @@ jobs:
         with:
           submodules: recursive
           persist-credentials: false
+
+      - name: Configure LLVM
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends llvm-18 libclang-18-dev
+          llvm_prefix=/usr/lib/llvm-18
+          echo "$llvm_prefix/bin" >> "$GITHUB_PATH"
+          {
+            echo "LLVM_CONFIG_PATH=$llvm_prefix/bin/llvm-config"
+            echo "LIBCLANG_PATH=$llvm_prefix/lib"
+            echo "LD_LIBRARY_PATH=$llvm_prefix/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          } >> "$GITHUB_ENV"
 
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0

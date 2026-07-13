@@ -244,6 +244,7 @@ fn main() {
     coroutines::validate_target(&target);
 
     let backend = Backend::resolve(&target);
+    maybe_warn_about_prebuilt_bundles(&backend, &target);
 
     // Vendored and system builds compile the local C-API extensions here.
     // Validated bundles already contain them and verify their source hash.
@@ -1500,6 +1501,28 @@ fn env_truthy(name: &str) -> bool {
         }
         Err(_) => false,
     }
+}
+
+fn maybe_warn_about_prebuilt_bundles(backend: &Backend, target: &Target) {
+    if !matches!(backend, Backend::Vendored { .. }) {
+        return;
+    }
+    if env_truthy("ROCKSDB_COMPILE")
+        || env_truthy("ROCKSDB_USE_PKG_CONFIG")
+        || env::var_os("ROCKSDB_PREBUILT_DIR").is_some()
+        || env::var_os("ROCKSDB_LIB_DIR").is_some()
+        || env::var_os("CI").is_some()
+        || env::var("PROFILE").ok().as_deref() != Some("dev")
+        || target.os == "windows"
+    {
+        return;
+    }
+
+    println!(
+        "cargo::warning=using vendored RocksDB build; for faster iterative \
+         local builds, run `./scripts/build-rocksdb-prebuilt.sh` and set \
+         `ROCKSDB_PREBUILT_DIR` to the emitted bundle path"
+    );
 }
 
 fn apply_extension_feature_defines(cfg: &mut cc::Build, includes: &[PathBuf]) {

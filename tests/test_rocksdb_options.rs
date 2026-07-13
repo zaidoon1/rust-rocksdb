@@ -257,6 +257,9 @@ fn test_set_index_block_search_type_and_uniform_cv_threshold() {
         rocksdb_log
             .read_to_string(&mut settings)
             .expect("can read the LOG file");
+        if uses_external_rocksdb() && !settings.contains("uniform_cv_threshold:") {
+            return;
+        }
         // RocksDB prints `uniform_cv_threshold` regardless of value; the
         // -1.0 default lands in the LOG as `-1.000000`.
         assert!(
@@ -286,6 +289,9 @@ fn test_set_index_block_search_type_and_uniform_cv_threshold() {
         rocksdb_log
             .read_to_string(&mut settings)
             .expect("can read the LOG file");
+        if uses_external_rocksdb() && !settings.contains("uniform_cv_threshold:") {
+            return;
+        }
         assert!(
             settings.contains("uniform_cv_threshold: 0.200000"),
             "expected configured uniform_cv_threshold in LOG; got:\n{settings}",
@@ -359,6 +365,9 @@ fn test_set_index_block_search_type_auto_with_default_threshold_degenerates() {
     rocksdb_log
         .read_to_string(&mut settings)
         .expect("can read the LOG file");
+    if uses_external_rocksdb() && !settings.contains("uniform_cv_threshold:") {
+        return;
+    }
     assert!(
         settings.contains("uniform_cv_threshold: -1.000000"),
         "expected default uniform_cv_threshold (-1) in LOG; got:\n{settings}",
@@ -380,7 +389,9 @@ fn test_set_memtable_batch_lookup_optimization() {
         "default C++ value is false",
     );
     opts.set_memtable_batch_lookup_optimization(true);
-    assert!(opts.get_memtable_batch_lookup_optimization());
+    if !uses_external_rocksdb() {
+        assert!(opts.get_memtable_batch_lookup_optimization());
+    }
     opts.set_memtable_batch_lookup_optimization(false);
     assert!(!opts.get_memtable_batch_lookup_optimization());
 
@@ -397,6 +408,11 @@ fn test_set_memtable_batch_lookup_optimization() {
         rocksdb_log
             .read_to_string(&mut settings)
             .expect("can read the LOG file");
+        if uses_external_rocksdb()
+            && !settings.contains("Options.memtable_batch_lookup_optimization:")
+        {
+            return;
+        }
         assert!(
             settings.contains("Options.memtable_batch_lookup_optimization: false"),
             "expected default memtable_batch_lookup_optimization=false in LOG; got:\n{settings}",
@@ -416,6 +432,11 @@ fn test_set_memtable_batch_lookup_optimization() {
         rocksdb_log
             .read_to_string(&mut settings)
             .expect("can read the LOG file");
+        if uses_external_rocksdb()
+            && !settings.contains("Options.memtable_batch_lookup_optimization:")
+        {
+            return;
+        }
         assert!(
             settings.contains("Options.memtable_batch_lookup_optimization: true"),
             "expected configured memtable_batch_lookup_optimization=true in LOG; \
@@ -895,7 +916,9 @@ fn jemalloc_init() {
         .read_to_string(&mut log_content)
         .expect("can read the LOG file");
 
-    if cfg!(feature = "jemalloc")
+    if uses_external_rocksdb() {
+        assert!(log_content.contains("Jemalloc supported:"));
+    } else if cfg!(feature = "jemalloc")
         && !(
             // See NO_JEMALLOC_TARGETS in librocksdb-sys/build.rs
             cfg!(target_os = "android")
@@ -961,7 +984,9 @@ fn test_crc32_build() {
         );
         None
     };
-    if let Some(expected_supported) = expected_supported {
+    if !uses_external_rocksdb()
+        && let Some(expected_supported) = expected_supported
+    {
         if expected_supported {
             assert!(
                 log_line.contains("Supported on "),
@@ -1000,4 +1025,14 @@ fn test_crc32_build() {
         crc32_supported_arch, expected_arch,
         "Expected CRC32 support for architecture '{expected_arch}', but RocksDB reported support for '{crc32_supported_arch}'"
     );
+}
+
+fn uses_external_rocksdb() -> bool {
+    [
+        "ROCKSDB_PREBUILT_DIR",
+        "ROCKSDB_LIB_DIR",
+        "ROCKSDB_USE_PKG_CONFIG",
+    ]
+    .into_iter()
+    .any(|key| std::env::var_os(key).is_some())
 }

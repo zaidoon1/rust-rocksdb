@@ -277,7 +277,9 @@ fn main() {
     #[cfg(feature = "coroutines")]
     {
         coroutines::warn_if_system_backend(&backend);
-        coroutines::link();
+        if coroutines::should_emit_link_directives(&backend) {
+            coroutines::link();
+        }
     }
 
     if cfg!(feature = "snappy") {
@@ -1246,9 +1248,7 @@ mod coroutines {
     /// emit a `cargo::warning=` so a missing-symbol link error has a
     /// breadcrumb back to this combination. This crate cannot tell
     /// whether the prebuilt librocksdb was actually compiled with
-    /// `USE_COROUTINES=1`; we still emit the folly link directives (the
-    /// user accepted responsibility by opting into both), but surface
-    /// the risk loudly.
+    /// `USE_COROUTINES=1`.
     pub(super) fn warn_if_system_backend(backend: &Backend) {
         if matches!(backend, Backend::System { .. }) {
             println!(
@@ -1258,6 +1258,26 @@ mod coroutines {
                  USE_FOLLY=1, otherwise you will get unresolved-symbol \
                  link errors against folly's coroutine helpers."
             );
+        }
+    }
+
+    /// System-linked RocksDB owns its own coroutine dependency story. If the
+    /// user provides a folly install we still emit the matching link directives;
+    /// otherwise we allow metadata-only commands such as `cargo clippy
+    /// --all-features` to proceed and leave final link compatibility to the
+    /// system librocksdb.
+    pub(super) fn should_emit_link_directives(backend: &Backend) -> bool {
+        if matches!(backend, Backend::System { .. })
+            && env::var_os("ROCKSDB_FOLLY_INSTALL_PATH").is_none()
+        {
+            println!(
+                "cargo::warning=`coroutines` feature is enabled with system \
+                 RocksDB but ROCKSDB_FOLLY_INSTALL_PATH is not set; skipping \
+                 local folly link directives."
+            );
+            false
+        } else {
+            true
         }
     }
 

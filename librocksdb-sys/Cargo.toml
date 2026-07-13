@@ -31,11 +31,15 @@ exclude = [
 ]
 
 [features]
-default = ["static", "bindgen/runtime"]
+default = ["static", "bindgen-runtime"]
 jemalloc = ["tikv-jemalloc-sys"]
 static = ["libz-sys?/static", "bzip2-sys?/static"]
-bindgen-runtime = ["bindgen/runtime"]
-bindgen-static = ["bindgen/static"]
+# Compatibility feature names. bindgen/clang-sys cannot enable `runtime` and
+# `static` together, and Cargo's `--all-features` has no way to choose only
+# one. The actual libclang loading mode is selected below with target-specific
+# build dependencies.
+bindgen-runtime = []
+bindgen-static = []
 mt_static = []
 io-uring = []
 # Build RocksDB with `USE_COROUTINES=1 USE_FOLLY=1` and link against a folly
@@ -76,8 +80,13 @@ uuid = { version = "1", features = ["v4"] }
 
 [build-dependencies]
 cc = { version = "1.2", features = ["parallel"] }
-bindgen = { version = "0.72", default-features = false }
 glob = "0.3"
 pkg-config = "0.3"
 rustflags = "0.1"
 sha2 = "0.11"
+
+[target.'cfg(target_env = "musl")'.build-dependencies]
+bindgen = { version = "0.72", default-features = false, features = ["static"] }
+
+[target.'cfg(not(target_env = "musl"))'.build-dependencies]
+bindgen = { version = "0.72", default-features = false, features = ["runtime"] }

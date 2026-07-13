@@ -885,6 +885,7 @@ mod system {
         let lib_dir =
             env::var_os("ROCKSDB_LIB_DIR").expect("checked by caller in Backend::resolve");
         emit_link_directives(Path::new(&lib_dir));
+        emit_transitive_link_directives();
 
         Backend::System {
             includes: env_includes_override(),
@@ -897,6 +898,7 @@ mod system {
     /// does not reach this function.
     pub(super) fn from_freebsd_defaults() -> Backend {
         emit_link_directives(Path::new("/usr/local/lib"));
+        emit_transitive_link_directives();
 
         let mut includes = env_includes_override();
         if includes.is_empty() {
@@ -956,6 +958,13 @@ mod system {
         println!("cargo::rustc-link-search=native={}", lib_dir.display());
         let kind = link_kind();
         println!("cargo::rustc-link-lib={kind}=rocksdb");
+    }
+
+    fn emit_transitive_link_directives() {
+        if cfg!(feature = "snappy") {
+            let _ = pkg_config::Config::new().probe("snappy");
+        }
+        let _ = pkg_config::Config::new().probe("liburing");
     }
 
     /// `ROCKSDB_STATIC` set to any non-empty value → static link;

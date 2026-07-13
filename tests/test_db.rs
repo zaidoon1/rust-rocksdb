@@ -410,11 +410,23 @@ fn get_statistics_test() {
         db.put_cf(&cf, b"key3", b"value").unwrap();
         db.flush_cf(&cf).unwrap();
 
-        assert!(opts.get_ticker_count(Ticker::BytesWritten) > 0);
-        // We should see some counters increased
-        assert!(opts.get_ticker_count(Ticker::BytesWritten) > initial_bytes_written);
-
+        let bytes_written = opts.get_ticker_count(Ticker::BytesWritten);
         let histogram_data = opts.get_histogram_data(Histogram::DbWrite);
+        let statistics = opts.get_statistics().unwrap_or_default();
+
+        assert!(
+            bytes_written > 0,
+            "expected bytes written ticker > 0, got {bytes_written}; \
+             initial={initial_bytes_written}; histogram_count={}; statistics:\n{statistics}",
+            histogram_data.count()
+        );
+        // We should see some counters increased
+        assert!(
+            bytes_written > initial_bytes_written,
+            "expected bytes written ticker to increase; initial={initial_bytes_written}, \
+             current={bytes_written}; histogram_count={}; statistics:\n{statistics}",
+            histogram_data.count()
+        );
         assert!(histogram_data.count() > 0);
         assert!(histogram_data.max().is_normal());
     }
@@ -1825,7 +1837,14 @@ fn test_db_version() {
         .expect("can read the LOG file");
 
     // Make sure to update this test when upgrading to a new version!
-    assert!(settings.contains("RocksDB version: 11.1.2"));
+    let observed_version = settings
+        .lines()
+        .find(|line| line.contains("RocksDB version:"))
+        .unwrap_or("<missing RocksDB version line>");
+    assert!(
+        settings.contains("RocksDB version: 11.1.2"),
+        "expected RocksDB version 11.1.2, observed `{observed_version}`"
+    );
 }
 
 #[test]

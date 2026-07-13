@@ -46,7 +46,7 @@ impl SliceTransform {
         }));
 
         let st = unsafe {
-            ffi::rocksdb_slicetransform_create(
+            ffi::rust_rocksdb_slicetransform_create(
                 cb as *mut c_void,
                 Some(slice_transform_destructor_callback),
                 Some(transform_callback),

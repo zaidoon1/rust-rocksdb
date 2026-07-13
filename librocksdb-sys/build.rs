@@ -373,6 +373,8 @@ mod vendor {
     /// Compile RocksDB from the bundled submodule sources.
     pub(super) fn build(target: &Target) {
         let mut cfg = base_cfg(target);
+        let include = vendored_include();
+        apply_extension_feature_defines(&mut cfg, std::slice::from_ref(&include));
 
         apply_compression_features(&mut cfg);
         apply_optional_features(&mut cfg, target);
@@ -1500,6 +1502,36 @@ fn env_truthy(name: &str) -> bool {
     }
 }
 
+fn apply_extension_feature_defines(cfg: &mut cc::Build, includes: &[PathBuf]) {
+    if header_contains(
+        includes,
+        Path::new("rocksdb/table.h"),
+        "index_block_search_type",
+    ) {
+        cfg.define("RUST_ROCKSDB_HAS_INDEX_BLOCK_SEARCH_TYPE", None);
+    }
+    if header_contains(
+        includes,
+        Path::new("rocksdb/table.h"),
+        "uniform_cv_threshold",
+    ) {
+        cfg.define("RUST_ROCKSDB_HAS_UNIFORM_CV_THRESHOLD", None);
+    }
+    if header_contains(
+        includes,
+        Path::new("rocksdb/advanced_options.h"),
+        "memtable_batch_lookup_optimization",
+    ) {
+        cfg.define("RUST_ROCKSDB_HAS_MEMTABLE_BATCH_LOOKUP_OPTIMIZATION", None);
+    }
+}
+
+fn header_contains(includes: &[PathBuf], relative: &Path, needle: &str) -> bool {
+    includes.iter().any(|include| {
+        std::fs::read_to_string(include.join(relative)).is_ok_and(|header| header.contains(needle))
+    })
+}
+
 // =========================================================================
 // Local C-API extensions
 // =========================================================================
@@ -1538,6 +1570,7 @@ mod extensions {
         for inc in backend.all_includes() {
             cfg.include(inc);
         }
+        apply_extension_feature_defines(&mut cfg, backend.all_includes());
 
         cfg.file("c-api-extensions/c_api_extensions.cc");
         cfg.cpp(true);

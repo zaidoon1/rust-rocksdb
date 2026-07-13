@@ -46,6 +46,14 @@ pub(crate) unsafe fn raw_data(ptr: *const c_char, size: usize) -> Option<Vec<u8>
     }
 }
 
+pub(crate) unsafe fn raw_data_and_free(ptr: *const c_char, size: usize) -> Option<Vec<u8>> {
+    let data = unsafe { raw_data(ptr, size) };
+    if !ptr.is_null() {
+        unsafe { ffi::rocksdb_free(ptr as *mut c_void) };
+    }
+    data
+}
+
 /// Convert a RocksDB error message to an Error and frees it. The argument must not be used after
 /// this function is called.
 pub fn convert_rocksdb_error(rocksdb_err: *const c_char) -> Error {
@@ -258,9 +266,7 @@ impl Drop for CSlice {
 #[test]
 fn test_c_str_like_bake() {
     fn test<S: CStrLike>(value: S) -> Result<usize, S::Error> {
-        value
-            .bake()
-            .map(|value| unsafe { libc::strlen(value.as_ptr()) })
+        value.bake().map(|value| value.count_bytes())
     }
 
     assert_eq!(Ok(3), test("foo")); // &str

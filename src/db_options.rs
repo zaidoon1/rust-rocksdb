@@ -617,7 +617,7 @@ impl BlockBasedOptions {
     /// ```
     pub fn set_index_block_search_type(&mut self, search_type: IndexBlockSearchType) {
         unsafe {
-            ffi::rocksdb_block_based_options_set_index_block_search_type(
+            ffi::rust_rocksdb_block_based_options_set_index_block_search_type(
                 self.inner,
                 search_type as c_int,
             );
@@ -3608,7 +3608,7 @@ impl Options {
         let holder = Arc::new(LogCallback {
             callback: Box::new(callback),
         });
-        let holder_ptr = holder.as_ref() as *const LogCallback;
+        let holder_ptr = std::ptr::from_ref::<LogCallback>(holder.as_ref());
         let holder_cvoid = holder_ptr.cast::<c_void>().cast_mut();
 
         unsafe {
@@ -4818,7 +4818,7 @@ pub enum BlockBasedPinningTier {
 #[cfg_attr(feature = "serde1", derive(serde::Serialize, serde::Deserialize))]
 pub enum IndexBlockSearchType {
     /// Standard binary search. The default and safest choice.
-    Binary = ffi::rocksdb_block_based_table_index_block_search_type_binary as isize,
+    Binary = 0,
     /// Interpolation search. Faster than binary search for index blocks whose
     /// keys are uniformly distributed; significantly slower when they are not.
     ///
@@ -4830,12 +4830,12 @@ pub enum IndexBlockSearchType {
     /// because the shortened successor skews end-keys away from the uniform
     /// distribution that interpolation search relies on. Avoid combining the
     /// two.
-    Interpolation = ffi::rocksdb_block_based_table_index_block_search_type_interpolation as isize,
+    Interpolation = 1,
     /// Per-block adaptive selection between binary and interpolation search,
     /// based on the per-block "is_uniform" footer bit. Requires
     /// `uniform_cv_threshold >= 0` on the write path; see
     /// [`BlockBasedOptions::set_uniform_cv_threshold`].
-    Auto = ffi::rocksdb_block_based_table_index_block_search_type_auto as isize,
+    Auto = 2,
 }
 
 pub struct FifoCompactOptions {

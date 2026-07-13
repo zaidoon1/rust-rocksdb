@@ -318,9 +318,25 @@ extern "C" unsigned char rocksdb_readoptions_get_optimize_multiget_for_io(
 // accepts any value the caller passes.
 // -----------------------------------------------------------------------------
 
+extern "C" void rust_rocksdb_block_based_options_set_index_block_search_type(
+    rocksdb_block_based_table_options_t* opt, int v) {
+#ifdef RUST_ROCKSDB_HAS_INDEX_BLOCK_SEARCH_TYPE
+  reinterpret_cast<BlockBasedTableOptions*>(opt)->index_block_search_type =
+      static_cast<BlockBasedTableOptions::BlockSearchType>(v);
+#else
+  (void)opt;
+  (void)v;
+#endif
+}
+
 extern "C" void rocksdb_block_based_options_set_uniform_cv_threshold(
     rocksdb_block_based_table_options_t* opt, double v) {
+#ifdef RUST_ROCKSDB_HAS_UNIFORM_CV_THRESHOLD
   reinterpret_cast<BlockBasedTableOptions*>(opt)->uniform_cv_threshold = v;
+#else
+  (void)opt;
+  (void)v;
+#endif
 }
 
 // -----------------------------------------------------------------------------
@@ -329,12 +345,41 @@ extern "C" void rocksdb_block_based_options_set_uniform_cv_threshold(
 
 extern "C" void rocksdb_options_set_memtable_batch_lookup_optimization(
     rocksdb_options_t* opt, unsigned char v) {
+#ifdef RUST_ROCKSDB_HAS_MEMTABLE_BATCH_LOOKUP_OPTIMIZATION
   reinterpret_cast<Options*>(opt)->memtable_batch_lookup_optimization = v;
+#else
+  (void)opt;
+  (void)v;
+#endif
 }
 
 extern "C" unsigned char rocksdb_options_get_memtable_batch_lookup_optimization(
     rocksdb_options_t* opt) {
+#ifdef RUST_ROCKSDB_HAS_MEMTABLE_BATCH_LOOKUP_OPTIMIZATION
   return reinterpret_cast<Options*>(opt)->memtable_batch_lookup_optimization;
+#else
+  (void)opt;
+  return 0;
+#endif
+}
+
+// -----------------------------------------------------------------------------
+// SliceTransform constructor compatibility
+// -----------------------------------------------------------------------------
+
+extern "C" rocksdb_slicetransform_t* rust_rocksdb_slicetransform_create(
+    void* state, void (*destructor)(void*),
+    char* (*transform)(void*, const char* key, size_t length,
+                       size_t* dst_length),
+    unsigned char (*in_domain)(void*, const char* key, size_t length),
+    const char* (*name)(void*)) {
+#if ROCKSDB_MAJOR >= 11
+  return rocksdb_slicetransform_create(state, destructor, transform, in_domain,
+                                       name);
+#else
+  return rocksdb_slicetransform_create(state, destructor, transform, in_domain,
+                                       nullptr, name);
+#endif
 }
 
 // -----------------------------------------------------------------------------

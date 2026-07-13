@@ -1,7 +1,7 @@
 use crate::db::DBInner;
 use crate::{
     AsColumnFamilyRef, DBAccess, DBCommon, DBPinnableSlice, DBRawIteratorWithThreadMode, Error,
-    Options, ReadOptions, ThreadMode, ffi,
+    Options, ReadOptions, ThreadMode, ffi, ffi_util,
 };
 use libc::{c_char, c_uchar, size_t};
 
@@ -65,11 +65,7 @@ impl WriteBatchWithIndex {
             if value_data.is_null() {
                 Ok(None)
             } else {
-                Ok(Some(Vec::from_raw_parts(
-                    value_data.cast::<u8>(),
-                    value_size,
-                    value_size,
-                )))
+                Ok(ffi_util::raw_data_and_free(value_data, value_size))
             }
         }
     }
@@ -98,11 +94,7 @@ impl WriteBatchWithIndex {
             if value_data.is_null() {
                 Ok(None)
             } else {
-                Ok(Some(Vec::from_raw_parts(
-                    value_data.cast::<u8>(),
-                    value_size,
-                    value_size,
-                )))
+                Ok(ffi_util::raw_data_and_free(value_data, value_size))
             }
         }
     }
@@ -141,11 +133,7 @@ impl WriteBatchWithIndex {
             if value_data.is_null() {
                 Ok(None)
             } else {
-                Ok(Some(Vec::from_raw_parts(
-                    value_data.cast::<u8>(),
-                    value_size,
-                    value_size,
-                )))
+                Ok(ffi_util::raw_data_and_free(value_data, value_size))
             }
         }
     }
@@ -223,11 +211,7 @@ impl WriteBatchWithIndex {
             if value_data.is_null() {
                 Ok(None)
             } else {
-                Ok(Some(Vec::from_raw_parts(
-                    value_data.cast::<u8>(),
-                    value_size,
-                    value_size,
-                )))
+                Ok(ffi_util::raw_data_and_free(value_data, value_size))
             }
         }
     }

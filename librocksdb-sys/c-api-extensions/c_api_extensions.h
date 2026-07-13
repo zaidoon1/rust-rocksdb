@@ -62,8 +62,27 @@ extern ROCKSDB_LIBRARY_API unsigned char rocksdb_readoptions_get_optimize_multig
 enum {
   rocksdb_block_based_table_index_block_search_type_auto = 2,
 };
+extern ROCKSDB_LIBRARY_API void
+rust_rocksdb_block_based_options_set_index_block_search_type(
+    rocksdb_block_based_table_options_t*, int);
 extern ROCKSDB_LIBRARY_API void rocksdb_block_based_options_set_uniform_cv_threshold(
     rocksdb_block_based_table_options_t*, double);
+
+/* -------------------------------------------------------------------------
+ * SliceTransform constructor compatibility
+ *
+ * RocksDB 11 removed the unused `in_range` callback parameter from
+ * rocksdb_slicetransform_create(). Older headers still require it. This
+ * wrapper gives the Rust crate a stable five-callback ABI and adapts to the
+ * selected RocksDB headers in c_api_extensions.cc.
+ * ------------------------------------------------------------------------- */
+extern ROCKSDB_LIBRARY_API rocksdb_slicetransform_t*
+rust_rocksdb_slicetransform_create(
+    void* state, void (*destructor)(void*),
+    char* (*transform)(void*, const char* key, size_t length,
+                       size_t* dst_length),
+    unsigned char (*in_domain)(void*, const char* key, size_t length),
+    const char* (*name)(void*));
 
 /* -------------------------------------------------------------------------
  * AdvancedColumnFamilyOptions::memtable_batch_lookup_optimization

@@ -1028,11 +1028,18 @@ fn test_crc32_build() {
 }
 
 fn uses_external_rocksdb() -> bool {
-    [
-        "ROCKSDB_PREBUILT_DIR",
-        "ROCKSDB_LIB_DIR",
-        "ROCKSDB_USE_PKG_CONFIG",
-    ]
-    .into_iter()
-    .any(|key| std::env::var_os(key).is_some())
+    fn env_truthy(name: &str) -> bool {
+        match std::env::var(name) {
+            Ok(v) => {
+                let v = v.trim();
+                v == "1" || v.eq_ignore_ascii_case("true")
+            }
+            Err(_) => false,
+        }
+    }
+
+    !env_truthy("ROCKSDB_COMPILE")
+        && (std::env::var_os("ROCKSDB_PREBUILT_DIR").is_some()
+            || std::env::var_os("ROCKSDB_LIB_DIR").is_some()
+            || env_truthy("ROCKSDB_USE_PKG_CONFIG"))
 }

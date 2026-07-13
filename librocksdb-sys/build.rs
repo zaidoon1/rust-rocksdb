@@ -970,10 +970,17 @@ mod system {
     }
 
     fn emit_transitive_link_directives() {
+        let probe = |package| {
+            let mut config = pkg_config::Config::new();
+            if env::var_os("ROCKSDB_STATIC").is_some() {
+                config.statik(true);
+            }
+            let _ = config.probe(package);
+        };
         if cfg!(feature = "snappy") {
-            let _ = pkg_config::Config::new().probe("snappy");
+            probe("snappy");
         }
-        let _ = pkg_config::Config::new().probe("liburing");
+        probe("liburing");
     }
 
     /// `ROCKSDB_STATIC` set to any non-empty value → static link;
@@ -1530,7 +1537,7 @@ fn maybe_warn_about_prebuilt_bundles(backend: &Backend, target: &Target) {
         || env::var_os("ROCKSDB_PREBUILT_DIR").is_some()
         || env::var_os("ROCKSDB_LIB_DIR").is_some()
         || env::var_os("CI").is_some()
-        || env::var("PROFILE").ok().as_deref() != Some("dev")
+        || env::var("PROFILE").ok().as_deref() != Some("debug")
         || target.os == "windows"
     {
         return;

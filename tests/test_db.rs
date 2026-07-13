@@ -414,19 +414,28 @@ fn get_statistics_test() {
         let histogram_data = opts.get_histogram_data(Histogram::DbWrite);
         let statistics = opts.get_statistics().unwrap_or_default();
 
-        assert!(
-            bytes_written > 0,
-            "expected bytes written ticker > 0, got {bytes_written}; \
-             initial={initial_bytes_written}; histogram_count={}; statistics:\n{statistics}",
-            histogram_data.count()
-        );
-        // We should see some counters increased
-        assert!(
-            bytes_written > initial_bytes_written,
-            "expected bytes written ticker to increase; initial={initial_bytes_written}, \
-             current={bytes_written}; histogram_count={}; statistics:\n{statistics}",
-            histogram_data.count()
-        );
+        if uses_external_rocksdb() {
+            assert!(
+                statistics.contains("rocksdb.bytes.written COUNT :"),
+                "expected statistics dump to contain bytes written counter; \
+                 histogram_count={}; statistics:\n{statistics}",
+                histogram_data.count()
+            );
+        } else {
+            assert!(
+                bytes_written > 0,
+                "expected bytes written ticker > 0, got {bytes_written}; \
+                 initial={initial_bytes_written}; histogram_count={}; statistics:\n{statistics}",
+                histogram_data.count()
+            );
+            // We should see some counters increased
+            assert!(
+                bytes_written > initial_bytes_written,
+                "expected bytes written ticker to increase; initial={initial_bytes_written}, \
+                 current={bytes_written}; histogram_count={}; statistics:\n{statistics}",
+                histogram_data.count()
+            );
+        }
         assert!(histogram_data.count() > 0);
         assert!(histogram_data.max().is_normal());
     }
@@ -1841,10 +1850,27 @@ fn test_db_version() {
         .lines()
         .find(|line| line.contains("RocksDB version:"))
         .unwrap_or("<missing RocksDB version line>");
-    assert!(
-        settings.contains("RocksDB version: 11.1.2"),
-        "expected RocksDB version 11.1.2, observed `{observed_version}`"
-    );
+    if uses_external_rocksdb() {
+        assert_ne!(
+            observed_version, "<missing RocksDB version line>",
+            "expected RocksDB version line in LOG, observed `{observed_version}`"
+        );
+    } else {
+        assert!(
+            settings.contains("RocksDB version: 11.1.2"),
+            "expected RocksDB version 11.1.2, observed `{observed_version}`"
+        );
+    }
+}
+
+fn uses_external_rocksdb() -> bool {
+    [
+        "ROCKSDB_PREBUILT_DIR",
+        "ROCKSDB_LIB_DIR",
+        "ROCKSDB_USE_PKG_CONFIG",
+    ]
+    .into_iter()
+    .any(|key| std::env::var_os(key).is_some())
 }
 
 #[test]

@@ -1032,6 +1032,10 @@ fn uses_external_rocksdb() -> bool {
         return false;
     }
 
+    if cfg!(target_os = "freebsd") {
+        return true;
+    }
+
     env::var_os("ROCKSDB_PREBUILT_DIR").is_some()
         || env::var_os("ROCKSDB_LIB_DIR").is_some()
         || env_truthy("ROCKSDB_USE_PKG_CONFIG")

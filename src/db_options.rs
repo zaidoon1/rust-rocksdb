@@ -4808,6 +4808,10 @@ pub enum BlockBasedPinningTier {
 /// Index-block search algorithm selected by
 /// [`BlockBasedOptions::set_index_block_search_type`].
 ///
+/// These numeric values are pinned to RocksDB's C/C++ ABI. Older system
+/// headers can be missing the named constants, so the Rust enum keeps the
+/// underlying discriminants explicit.
+///
 /// `Auto` is only meaningful in combination with
 /// [`BlockBasedOptions::set_uniform_cv_threshold`]: the threshold gates whether
 /// the per-block "is_uniform" footer bit is set on the write path, and `Auto`

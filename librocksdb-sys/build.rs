@@ -980,7 +980,9 @@ mod system {
         if cfg!(feature = "snappy") {
             probe("snappy");
         }
-        probe("liburing");
+        if cfg!(feature = "io-uring") {
+            probe("liburing");
+        }
     }
 
     /// `ROCKSDB_STATIC` set to any non-empty value → static link;

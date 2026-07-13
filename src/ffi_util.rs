@@ -47,6 +47,7 @@ pub(crate) unsafe fn raw_data(ptr: *const c_char, size: usize) -> Option<Vec<u8>
 }
 
 pub(crate) unsafe fn raw_data_and_free(ptr: *const c_char, size: usize) -> Option<Vec<u8>> {
+    // Copy into Rust-owned memory first, then release the RocksDB allocation.
     let data = unsafe { raw_data(ptr, size) };
     if !ptr.is_null() {
         unsafe { ffi::rocksdb_free(ptr as *mut c_void) };

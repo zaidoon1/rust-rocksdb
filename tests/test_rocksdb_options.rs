@@ -15,7 +15,7 @@
 mod util;
 
 use std::{
-    fs,
+    env, fs,
     io::Read as _,
     sync::{Arc, LazyLock, atomic::AtomicUsize},
 };
@@ -1028,18 +1028,21 @@ fn test_crc32_build() {
 }
 
 fn uses_external_rocksdb() -> bool {
-    fn env_truthy(name: &str) -> bool {
-        match std::env::var(name) {
-            Ok(v) => {
-                let v = v.trim();
-                v == "1" || v.eq_ignore_ascii_case("true")
-            }
-            Err(_) => false,
-        }
+    if env_truthy("ROCKSDB_COMPILE") {
+        return false;
     }
 
-    !env_truthy("ROCKSDB_COMPILE")
-        && (std::env::var_os("ROCKSDB_PREBUILT_DIR").is_some()
-            || std::env::var_os("ROCKSDB_LIB_DIR").is_some()
-            || env_truthy("ROCKSDB_USE_PKG_CONFIG"))
+    env::var_os("ROCKSDB_PREBUILT_DIR").is_some()
+        || env::var_os("ROCKSDB_LIB_DIR").is_some()
+        || env_truthy("ROCKSDB_USE_PKG_CONFIG")
+}
+
+fn env_truthy(name: &str) -> bool {
+    match env::var(name) {
+        Ok(v) => {
+            let v = v.trim();
+            v == "1" || v.eq_ignore_ascii_case("true")
+        }
+        Err(_) => false,
+    }
 }

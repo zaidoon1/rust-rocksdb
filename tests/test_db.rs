@@ -16,6 +16,7 @@ mod util;
 
 use pretty_assertions::assert_eq;
 use std::convert::TryInto;
+use std::env;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{fs, io::Read as _};
 use std::{sync::Arc, thread, time::Duration};
@@ -1864,20 +1865,23 @@ fn test_db_version() {
 }
 
 fn uses_external_rocksdb() -> bool {
-    fn env_truthy(name: &str) -> bool {
-        match std::env::var(name) {
-            Ok(v) => {
-                let v = v.trim();
-                v == "1" || v.eq_ignore_ascii_case("true")
-            }
-            Err(_) => false,
-        }
+    if env_truthy("ROCKSDB_COMPILE") {
+        return false;
     }
 
-    !env_truthy("ROCKSDB_COMPILE")
-        && (std::env::var_os("ROCKSDB_PREBUILT_DIR").is_some()
-            || std::env::var_os("ROCKSDB_LIB_DIR").is_some()
-            || env_truthy("ROCKSDB_USE_PKG_CONFIG"))
+    env::var_os("ROCKSDB_PREBUILT_DIR").is_some()
+        || env::var_os("ROCKSDB_LIB_DIR").is_some()
+        || env_truthy("ROCKSDB_USE_PKG_CONFIG")
+}
+
+fn env_truthy(name: &str) -> bool {
+    match env::var(name) {
+        Ok(v) => {
+            let v = v.trim();
+            v == "1" || v.eq_ignore_ascii_case("true")
+        }
+        Err(_) => false,
+    }
 }
 
 #[test]

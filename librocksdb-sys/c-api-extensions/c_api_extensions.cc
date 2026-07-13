@@ -318,6 +318,10 @@ extern "C" unsigned char rocksdb_readoptions_get_optimize_multiget_for_io(
 // accepts any value the caller passes.
 // -----------------------------------------------------------------------------
 
+// TODO: Add CI coverage with a RocksDB 10.x prebuilt bundle so these
+// compatibility guards and the ROCKSDB_MAJOR branch below are exercised by an
+// actual older header/library pair.
+
 extern "C" void rust_rocksdb_block_based_options_set_index_block_search_type(
     rocksdb_block_based_table_options_t* opt, int v) {
 #ifdef RUST_ROCKSDB_HAS_INDEX_BLOCK_SEARCH_TYPE

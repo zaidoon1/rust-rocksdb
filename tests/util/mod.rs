@@ -3,6 +3,7 @@
 use std::{
     cmp::Ordering,
     convert::TryInto,
+    env,
     path::{Path, PathBuf},
 };
 
@@ -191,4 +192,14 @@ pub fn assert_no_item<D: DBAccess>(iter: &DBRawIteratorWithThreadMode<'_, D>) {
     pretty_assertions::assert_eq!(iter.key(), None);
     pretty_assertions::assert_eq!(iter.value(), None);
     pretty_assertions::assert_eq!(iter.item(), None);
+}
+
+pub fn env_truthy(name: &str) -> bool {
+    match env::var(name) {
+        Ok(v) => {
+            let v = v.trim();
+            v == "1" || v.eq_ignore_ascii_case("true")
+        }
+        Err(_) => false,
+    }
 }

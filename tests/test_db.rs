@@ -31,7 +31,7 @@ use rust_rocksdb::{
     UniversalCompactOptions, UniversalCompactionStopStyle, WaitForCompactOptions, WriteBatch,
     perf::get_memory_usage_stats,
 };
-use util::{DBPath, U64Comparator, U64Timestamp, assert_iter, pair};
+use util::{DBPath, U64Comparator, U64Timestamp, assert_iter, env_truthy, pair};
 
 #[test]
 fn external() {
@@ -1876,16 +1876,6 @@ fn uses_external_rocksdb() -> bool {
     env::var_os("ROCKSDB_PREBUILT_DIR").is_some()
         || env::var_os("ROCKSDB_LIB_DIR").is_some()
         || env_truthy("ROCKSDB_USE_PKG_CONFIG")
-}
-
-fn env_truthy(name: &str) -> bool {
-    match env::var(name) {
-        Ok(v) => {
-            let v = v.trim();
-            v == "1" || v.eq_ignore_ascii_case("true")
-        }
-        Err(_) => false,
-    }
 }
 
 #[test]

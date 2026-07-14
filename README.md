@@ -474,7 +474,7 @@ vendored build.
 When you opt in via the generic system-library variables:
 
 - `bindgen` runs against the **chosen backend's headers** (system rocksdb when linked from the system, bundled otherwise), so the generated FFI cannot silently drift from the linked library. If no include directory can be determined, the build script panics with an actionable error rather than guessing `/usr/include`.
-- No version pin is enforced &mdash; you're the power user. The bundled RocksDB version is the trailing component of `librocksdb-sys`'s `version = "X.Y.Z+RR.S.T"` in `Cargo.toml`; make sure your system rocksdb is API-compatible.
+- No version pin is enforced &mdash; you're the power user. The bundled RocksDB version is the trailing component of `librocksdb-sys`'s `version = "X.Y.Z+RR.S.T"` in `Cargo.toml`; make sure your system rocksdb is API-compatible. If the system headers' `rocksdb/version.h` reports a different `MAJOR.MINOR.PATCH`, the build script emits a `cargo::warning=` (build still proceeds).
 - The `snappy` Cargo feature becomes a no-op: the system librocksdb is expected to provide snappy support itself, so building and linking a second copy would risk duplicate symbols. The build script emits a `cargo::warning=` so the silent skip isn't surprising.
 - The `coroutines` Cargo feature emits a `cargo::warning=` reminding you that your prebuilt librocksdb must have been built with `USE_COROUTINES=1` and `USE_FOLLY=1` &mdash; otherwise you'll get unresolved-symbol link errors against folly. If `ROCKSDB_FOLLY_INSTALL_PATH` is set, the build script also emits local folly link directives; otherwise system-linked builds assume your librocksdb package supplies the needed dependency metadata.
 

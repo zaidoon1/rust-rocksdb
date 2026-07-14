@@ -25,7 +25,7 @@ use rust_rocksdb::{
     DataBlockIndexType, Env, IndexBlockSearchType, LruCacheOptions, Options, ReadOptions,
     checkpoint::Checkpoint,
 };
-use util::DBPath;
+use util::{DBPath, env_truthy};
 
 #[test]
 fn test_load_latest() {
@@ -1039,14 +1039,4 @@ fn uses_external_rocksdb() -> bool {
     env::var_os("ROCKSDB_PREBUILT_DIR").is_some()
         || env::var_os("ROCKSDB_LIB_DIR").is_some()
         || env_truthy("ROCKSDB_USE_PKG_CONFIG")
-}
-
-fn env_truthy(name: &str) -> bool {
-    match env::var(name) {
-        Ok(v) => {
-            let v = v.trim();
-            v == "1" || v.eq_ignore_ascii_case("true")
-        }
-        Err(_) => false,
-    }
 }

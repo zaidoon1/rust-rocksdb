@@ -375,7 +375,7 @@ mod vendor {
     pub(super) fn build(target: &Target) {
         let mut cfg = base_cfg(target);
         let include = vendored_include();
-        apply_extension_feature_defines(&mut cfg, target, std::slice::from_ref(&include));
+        apply_extension_feature_defines(&mut cfg, std::slice::from_ref(&include));
 
         apply_compression_features(&mut cfg);
         apply_optional_features(&mut cfg, target);
@@ -1552,96 +1552,34 @@ fn maybe_warn_about_prebuilt_bundles(backend: &Backend, target: &Target) {
     );
 }
 
-fn apply_extension_feature_defines(cfg: &mut cc::Build, target: &Target, includes: &[PathBuf]) {
-    if member_exists(
-        target,
+fn apply_extension_feature_defines(cfg: &mut cc::Build, includes: &[PathBuf]) {
+    if header_contains(
         includes,
-        "rocksdb/table.h",
-        "ROCKSDB_NAMESPACE::BlockBasedTableOptions::index_block_search_type",
+        Path::new("rocksdb/table.h"),
+        "index_block_search_type",
     ) {
         cfg.define("RUST_ROCKSDB_HAS_INDEX_BLOCK_SEARCH_TYPE", None);
     }
-    if member_exists(
-        target,
+    if header_contains(
         includes,
-        "rocksdb/table.h",
-        "ROCKSDB_NAMESPACE::BlockBasedTableOptions::uniform_cv_threshold",
+        Path::new("rocksdb/table.h"),
+        "uniform_cv_threshold",
     ) {
         cfg.define("RUST_ROCKSDB_HAS_UNIFORM_CV_THRESHOLD", None);
     }
-    if member_exists(
-        target,
+    if header_contains(
         includes,
-        "rocksdb/advanced_options.h",
-        "ROCKSDB_NAMESPACE::AdvancedColumnFamilyOptions::memtable_batch_lookup_optimization",
+        Path::new("rocksdb/advanced_options.h"),
+        "memtable_batch_lookup_optimization",
     ) {
         cfg.define("RUST_ROCKSDB_HAS_MEMTABLE_BATCH_LOOKUP_OPTIMIZATION", None);
     }
 }
 
-/// Detects a struct/class data member by actually compiling a
-/// pointer-to-member expression against the real header, rather than
-/// substring-matching the header text. A plain text search can be fooled
-/// by a renamed field, reformatted declaration, or a match inside a
-/// comment; taking the address of `Type::member` only compiles if the
-/// member exists with that exact name in that exact type, regardless of
-/// surrounding formatting.
-///
-/// `qualified_member` is a fully qualified `Namespace::Type::member` path.
-fn member_exists(
-    target: &Target,
-    includes: &[PathBuf],
-    header: &str,
-    qualified_member: &str,
-) -> bool {
-    // A header that can't be found at all is a real, actionable problem
-    // (misconfigured `ROCKSDB_INCLUDE_DIR`/`ROCKSDB_LIB_DIR`, or a RocksDB
-    // install that dropped/renamed the file outright) — surface it loudly
-    // instead of silently treating it the same as "this version just
-    // doesn't have the field yet".
-    if !includes.iter().any(|inc| inc.join(header).is_file()) {
-        println!(
-            "cargo::warning=RocksDB header `{header}` was not found in any \
-             resolved include directory ({includes:?}); the \
-             `{qualified_member}` compatibility check is being skipped and \
-             the corresponding extension feature will be disabled. If this \
-             header should exist, check ROCKSDB_INCLUDE_DIR/ROCKSDB_LIB_DIR."
-        );
-        return false;
-    }
-
-    let probe_source = format!(
-        "#include \"{header}\"\nstatic constexpr auto rust_rocksdb_probe = &{qualified_member};\n"
-    );
-
-    let probe_dir = out_dir().join("feature-probes");
-    let _ = std::fs::create_dir_all(&probe_dir);
-    // Distinct file per probed member so concurrent/parallel probes (and
-    // stale artifacts from a previous run) never collide.
-    let file_stem = qualified_member.replace("::", "_");
-    let probe_file = probe_dir.join(format!("{file_stem}.cc"));
-    if std::fs::write(&probe_file, probe_source).is_err() {
-        return false;
-    }
-
-    let mut cfg = cc::Build::new();
-    cfg.cpp(true);
-    cfg.out_dir(&probe_dir);
-    for inc in includes {
-        cfg.include(inc);
-    }
-    let cxx_std = env::var("ROCKSDB_CXX_STD").unwrap_or_else(|_| DEFAULT_CXX_STD.to_string());
-    if target.is_msvc() {
-        cfg.flag(format!("/std:{cxx_std}"));
-    } else {
-        cfg.flag(format!("-std={cxx_std}"));
-    }
-    cfg.file(&probe_file);
-    cfg.cargo_metadata(false);
-    cfg.warnings(false);
-
-    cfg.try_compile(&format!("rust_rocksdb_probe_{file_stem}"))
-        .is_ok()
+fn header_contains(includes: &[PathBuf], relative: &Path, needle: &str) -> bool {
+    includes.iter().any(|include| {
+        std::fs::read_to_string(include.join(relative)).is_ok_and(|header| header.contains(needle))
+    })
 }
 
 // =========================================================================
@@ -1682,7 +1620,7 @@ mod extensions {
         for inc in backend.all_includes() {
             cfg.include(inc);
         }
-        apply_extension_feature_defines(&mut cfg, target, backend.all_includes());
+        apply_extension_feature_defines(&mut cfg, backend.all_includes());
 
         cfg.file("c-api-extensions/c_api_extensions.cc");
         cfg.cpp(true);

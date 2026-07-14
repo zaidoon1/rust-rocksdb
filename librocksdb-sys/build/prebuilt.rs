@@ -296,16 +296,34 @@ fn rocksdb_header_version(path: &Path) -> String {
 }
 
 fn parse_define(path: &Path, content: &str, name: &str) -> String {
+    try_parse_define(content, name).unwrap_or_else(|| {
+        panic!(
+            "`{}` does not define `{name}` (or it has no value)",
+            path.display()
+        )
+    })
+}
+
+fn try_parse_define(content: &str, name: &str) -> Option<String> {
     for line in content.lines() {
         let mut parts = line.split_whitespace();
         if parts.next() == Some("#define") && parts.next() == Some(name) {
-            return parts
-                .next()
-                .map(str::to_owned)
-                .unwrap_or_else(|| panic!("`{}` has no value for `{name}`", path.display()));
+            return parts.next().map(str::to_owned);
         }
     }
-    panic!("`{}` does not define `{name}`", path.display());
+    None
+}
+
+/// Best-effort version read of an arbitrary (non-bundle) RocksDB
+/// `version.h`, e.g. a system-installed header. Unlike
+/// [`rocksdb_header_version`] this never panics — an unreadable or
+/// unparsable header just means "can't compare", not a build failure.
+pub(super) fn try_header_version(path: &Path) -> Option<String> {
+    let content = fs::read_to_string(path).ok()?;
+    let major = try_parse_define(&content, "ROCKSDB_MAJOR")?;
+    let minor = try_parse_define(&content, "ROCKSDB_MINOR")?;
+    let patch = try_parse_define(&content, "ROCKSDB_PATCH")?;
+    Some(format!("{major}.{minor}.{patch}"))
 }
 
 fn validate_hash(label: &str, path: &Path, expected: &str) {
@@ -406,7 +424,7 @@ fn crate_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-fn bundled_rocksdb_version() -> &'static str {
+pub(super) fn bundled_rocksdb_version() -> &'static str {
     crate_version()
         .split_once('+')
         .map(|(_, version)| version)

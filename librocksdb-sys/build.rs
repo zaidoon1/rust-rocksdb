@@ -1589,52 +1589,27 @@ fn header_contains(includes: &[PathBuf], relative: &Path, needle: &str) -> bool 
 /// README's "Linking Against a Prebuilt RocksDB" section) — but a mismatch
 /// silently explains away a lot of confusing symptoms (missing extension
 /// features, option behavior differences), so surface it as a loud
-/// `cargo::warning=` rather than leaving the user to guess.
+/// `cargo::warning=` rather than leaving the user to guess. Reuses the
+/// same header-version parsing the `ROCKSDB_PREBUILT_DIR` path already
+/// relies on for its (strict, panicking) validation.
 fn warn_on_system_header_version_mismatch(includes: &[PathBuf]) {
-    let Some(expected) = parse_rocksdb_version(&vendored_include().join("rocksdb/version.h"))
-    else {
-        return;
-    };
-
+    let expected = prebuilt::bundled_rocksdb_version();
     let Some(actual) = includes
         .iter()
-        .find_map(|inc| parse_rocksdb_version(&inc.join("rocksdb/version.h")))
+        .find_map(|inc| prebuilt::try_header_version(&inc.join("rocksdb/version.h")))
     else {
         return;
     };
 
     if actual != expected {
         println!(
-            "cargo::warning=system RocksDB headers report version {}.{}.{}, but this crate \
-             (rust-librocksdb-sys) is built and tested against RocksDB {}.{}.{}. Missing \
+            "cargo::warning=system RocksDB headers report version {actual}, but this crate \
+             (rust-librocksdb-sys) is built and tested against RocksDB {expected}. Missing \
              options, extension features, or other API/ABI differences are possible; consider \
              matching versions, or drop ROCKSDB_LIB_DIR/ROCKSDB_USE_PKG_CONFIG to use the \
-             vendored build instead.",
-            actual.0, actual.1, actual.2, expected.0, expected.1, expected.2,
+             vendored build instead."
         );
     }
-}
-
-/// Extracts `(MAJOR, MINOR, PATCH)` from a RocksDB `version.h`-style header
-/// by scanning for `#define ROCKSDB_{MAJOR,MINOR,PATCH} N` lines. Returns
-/// `None` if the file can't be read or any of the three defines is
-/// missing — both are the "can't compare, don't warn" case, not an error.
-fn parse_rocksdb_version(path: &Path) -> Option<(u32, u32, u32)> {
-    let contents = fs::read_to_string(path).ok()?;
-    let (mut major, mut minor, mut patch) = (None, None, None);
-    for line in contents.lines() {
-        let mut tokens = line.split_whitespace();
-        if tokens.next() != Some("#define") {
-            continue;
-        }
-        match (tokens.next(), tokens.next()) {
-            (Some("ROCKSDB_MAJOR"), Some(v)) => major = v.parse().ok(),
-            (Some("ROCKSDB_MINOR"), Some(v)) => minor = v.parse().ok(),
-            (Some("ROCKSDB_PATCH"), Some(v)) => patch = v.parse().ok(),
-            _ => {}
-        }
-    }
-    Some((major?, minor?, patch?))
 }
 
 // =========================================================================

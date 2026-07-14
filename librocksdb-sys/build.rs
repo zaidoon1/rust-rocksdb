@@ -980,17 +980,10 @@ mod system {
             }
             let _ = config.probe(package);
         };
-        if cfg!(feature = "snappy") {
-            probe("snappy");
-        }
-        // Unlike the vendored build, we don't control how the *system*
-        // librocksdb was compiled, so this can't be gated behind our own
-        // `io-uring` Cargo feature: a system rocksdb built with
-        // `USE_IO_URING` needs `liburing` at link time regardless of
-        // whether this crate's `io-uring` feature (which only controls
-        // the vendored build) happens to be enabled. The probe failure is
-        // silently ignored — if the library doesn't actually need it,
-        // linking still succeeds without it.
+        // Unconditional: unlike our own vendored build, we don't control
+        // whether the system librocksdb was built with snappy/io_uring
+        // support.
+        probe("snappy");
         probe("liburing");
     }
 

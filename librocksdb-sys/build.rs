@@ -1285,10 +1285,12 @@ mod coroutines {
         if matches!(backend, Backend::System { .. }) {
             println!(
                 "cargo::warning=`coroutines` feature is enabled and \
-                 RocksDB is being linked from the system: ensure that \
-                 librocksdb was built with USE_COROUTINES=1 and \
-                 USE_FOLLY=1, otherwise you will get unresolved-symbol \
-                 link errors against folly's coroutine helpers."
+                 RocksDB is being linked from the system: if librocksdb \
+                 was NOT built with USE_COROUTINES=1/USE_FOLLY=1, this \
+                 feature has no effect against it and is safe to ignore. \
+                 If it WAS, set ROCKSDB_FOLLY_INSTALL_PATH so folly gets \
+                 linked, or you will get unresolved-symbol link errors \
+                 against its coroutine helpers."
             );
         }
     }

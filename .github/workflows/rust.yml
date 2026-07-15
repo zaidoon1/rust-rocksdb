@@ -129,13 +129,14 @@ jobs:
           make -C "$RUNNER_TEMP/rocksdb-10.10.1" -j2 static_lib \
             DISABLE_WARNING_AS_ERROR=1 \
             PORTABLE=1 \
-            USE_BZIP2=0 \
-            USE_GFLAGS=0 \
-            USE_LZ4=0 \
+            ROCKSDB_USE_IO_URING=0 \
             USE_RTTI=1 \
-            USE_SNAPPY=0 \
-            USE_ZLIB=0 \
-            USE_ZSTD=0
+            ROCKSDB_DISABLE_BZIP=1 \
+            ROCKSDB_DISABLE_GFLAGS=1 \
+            ROCKSDB_DISABLE_LZ4=1 \
+            ROCKSDB_DISABLE_SNAPPY=1 \
+            ROCKSDB_DISABLE_ZLIB=1 \
+            ROCKSDB_DISABLE_ZSTD=1
           mkdir -p "$RUNNER_TEMP/rocksdb-10-install/lib" \
             "$RUNNER_TEMP/rocksdb-10-install/include"
           cp "$RUNNER_TEMP/rocksdb-10.10.1/librocksdb.a" \

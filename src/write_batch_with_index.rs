@@ -1,7 +1,8 @@
 use crate::db::DBInner;
+use crate::ffi_util::CSlice;
 use crate::{
     AsColumnFamilyRef, DBAccess, DBCommon, DBPinnableSlice, DBRawIteratorWithThreadMode, Error,
-    Options, ReadOptions, ThreadMode, ffi, ffi_util,
+    Options, ReadOptions, ThreadMode, ffi,
 };
 use libc::{c_char, c_uchar, size_t};
 
@@ -65,7 +66,8 @@ impl WriteBatchWithIndex {
             if value_data.is_null() {
                 Ok(None)
             } else {
-                Ok(ffi_util::raw_data_and_free(value_data, value_size))
+                let c_slice = CSlice::from_raw_parts(value_data.cast_const(), value_size);
+                Ok(Some(c_slice.as_ref().to_vec()))
             }
         }
     }
@@ -94,7 +96,8 @@ impl WriteBatchWithIndex {
             if value_data.is_null() {
                 Ok(None)
             } else {
-                Ok(ffi_util::raw_data_and_free(value_data, value_size))
+                let c_slice = CSlice::from_raw_parts(value_data.cast_const(), value_size);
+                Ok(Some(c_slice.as_ref().to_vec()))
             }
         }
     }
@@ -133,7 +136,8 @@ impl WriteBatchWithIndex {
             if value_data.is_null() {
                 Ok(None)
             } else {
-                Ok(ffi_util::raw_data_and_free(value_data, value_size))
+                let c_slice = CSlice::from_raw_parts(value_data.cast_const(), value_size);
+                Ok(Some(c_slice.as_ref().to_vec()))
             }
         }
     }
@@ -211,7 +215,8 @@ impl WriteBatchWithIndex {
             if value_data.is_null() {
                 Ok(None)
             } else {
-                Ok(ffi_util::raw_data_and_free(value_data, value_size))
+                let c_slice = CSlice::from_raw_parts(value_data.cast_const(), value_size);
+                Ok(Some(c_slice.as_ref().to_vec()))
             }
         }
     }

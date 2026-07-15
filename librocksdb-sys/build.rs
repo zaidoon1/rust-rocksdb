@@ -1581,9 +1581,13 @@ fn apply_extension_feature_defines(cfg: &mut cc::Build, includes: &[PathBuf]) {
 }
 
 fn header_contains(includes: &[PathBuf], relative: &Path, needle: &str) -> bool {
-    includes.iter().any(|include| {
-        std::fs::read_to_string(include.join(relative)).is_ok_and(|header| header.contains(needle))
-    })
+    includes
+        .iter()
+        .find(|include| include.join(relative).is_file())
+        .is_some_and(|include| {
+            std::fs::read_to_string(include.join(relative))
+                .is_ok_and(|header| header.contains(needle))
+        })
 }
 
 /// No version pin is enforced against a system-linked RocksDB (see the

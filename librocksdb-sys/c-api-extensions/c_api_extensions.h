@@ -60,7 +60,7 @@ extern ROCKSDB_LIBRARY_API unsigned char rocksdb_readoptions_get_optimize_multig
  * kAuto's behaviour at write time also has no upstream C wrapper.
  * ------------------------------------------------------------------------- */
 enum {
-#if ROCKSDB_MAJOR < 11
+#ifndef RUST_ROCKSDB_HAS_INDEX_BLOCK_SEARCH_TYPE
   rocksdb_block_based_table_index_block_search_type_binary = 0,
   rocksdb_block_based_table_index_block_search_type_interpolation = 1,
 #endif

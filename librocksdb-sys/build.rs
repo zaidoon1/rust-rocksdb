@@ -1179,6 +1179,13 @@ mod bindings {
         for inc in includes {
             builder = builder.clang_arg(format!("-I{}", inc.display()));
         }
+        if header_contains(
+            includes,
+            Path::new("rocksdb/table.h"),
+            "index_block_search_type",
+        ) {
+            builder = builder.clang_arg("-DRUST_ROCKSDB_HAS_INDEX_BLOCK_SEARCH_TYPE");
+        }
 
         // Escape hatch for exotic system layouts. Whitespace-split — paths
         // with spaces aren't supported; users with such paths should

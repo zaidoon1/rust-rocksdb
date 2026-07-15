@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Tests for zero-copy APIs introduced in RocksDB C API.
+//! Tests for zero-copy APIs introduced in `RocksDB` C API.
 //! These tests verify the new optimized functions:
-//! - get_into_buffer / get_into_buffer_cf
-//! - batched_multi_get_cf_slice / batched_multi_get_cf_slice_opt
-//! - Iterator slice functions (rocksdb_iter_key_slice, etc.)
+//! - `get_into_buffer` / `get_into_buffer_cf`
+//! - `batched_multi_get_cf_slice` / `batched_multi_get_cf_slice_opt`
+//! - Iterator slice functions (`rocksdb_iter_key_slice`, etc.)
 
 mod util;
 

@@ -28,7 +28,7 @@ impl EventListener for EventCounter {
     fn on_flush_begin(&self, info: &FlushJobInfo) {
         assert!(!info.cf_name().unwrap().is_empty());
         // https://github.com/facebook/rocksdb/issues/11568#issuecomment-1614995815
-        assert_eq!(info.smallest_seqno(), 72057594037927935); // default value
+        assert_eq!(info.smallest_seqno(), 72_057_594_037_927_935); // default value
         assert_eq!(info.largest_seqno(), 0); // default value
     }
 
@@ -58,14 +58,22 @@ impl EventListener for EventCounter {
         assert!(info.output_level() >= 0);
 
         self.compaction.fetch_add(1, Ordering::SeqCst);
-        self.input_records
-            .fetch_add(info.input_records() as usize, Ordering::SeqCst);
-        self.output_records
-            .fetch_add(info.output_records() as usize, Ordering::SeqCst);
-        self.input_bytes
-            .fetch_add(info.total_input_bytes() as usize, Ordering::SeqCst);
-        self.output_bytes
-            .fetch_add(info.total_output_bytes() as usize, Ordering::SeqCst);
+        self.input_records.fetch_add(
+            usize::try_from(info.input_records()).unwrap(),
+            Ordering::SeqCst,
+        );
+        self.output_records.fetch_add(
+            usize::try_from(info.output_records()).unwrap(),
+            Ordering::SeqCst,
+        );
+        self.input_bytes.fetch_add(
+            usize::try_from(info.total_input_bytes()).unwrap(),
+            Ordering::SeqCst,
+        );
+        self.output_bytes.fetch_add(
+            usize::try_from(info.total_output_bytes()).unwrap(),
+            Ordering::SeqCst,
+        );
 
         if info.compaction_reason() == DBCompactionReason::KManualCompaction {
             self.manual_compaction.fetch_add(1, Ordering::SeqCst);
@@ -91,10 +99,12 @@ impl EventListener for StallEventCounter {
     fn on_flush_completed(&self, info: &FlushJobInfo) {
         assert!(!info.cf_name().unwrap().is_empty());
         self.flush.fetch_add(1, Ordering::SeqCst);
-        self.triggered_writes_slowdown
-            .fetch_add(info.triggered_writes_slowdown() as usize, Ordering::SeqCst);
+        self.triggered_writes_slowdown.fetch_add(
+            usize::from(info.triggered_writes_slowdown()),
+            Ordering::SeqCst,
+        );
         self.triggered_writes_stop
-            .fetch_add(info.triggered_writes_stop() as usize, Ordering::SeqCst);
+            .fetch_add(usize::from(info.triggered_writes_stop()), Ordering::SeqCst);
     }
 
     fn on_stall_conditions_changed(&self, info: &WriteStallInfo) {
@@ -313,7 +323,8 @@ fn test_event_listener_status_reset() {
     db.flush_opt(&fopts).unwrap();
     assert_eq!(counter.load(Ordering::SeqCst), 1);
     assert!(
-        StatusSeverity::from(severity.load(Ordering::SeqCst) as u8) >= StatusSeverity::KHardError
+        StatusSeverity::from(u8::try_from(severity.load(Ordering::SeqCst)).unwrap())
+            >= StatusSeverity::KHardError
     );
 }
 

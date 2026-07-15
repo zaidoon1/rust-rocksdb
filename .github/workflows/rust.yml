@@ -104,6 +104,60 @@ jobs:
             serde1" \
             -- -D warnings
 
+  system-rocksdb-10:
+    name: System RocksDB 10 compatibility
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          cache: false
+
+      - name: Build RocksDB 10.10.1
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang git libclang-dev pkg-config
+          git clone --depth 1 --branch v10.10.1 \
+            https://github.com/facebook/rocksdb.git "$RUNNER_TEMP/rocksdb-10.10.1"
+          make -C "$RUNNER_TEMP/rocksdb-10.10.1" -j2 static_lib \
+            DISABLE_WARNING_AS_ERROR=1 \
+            PORTABLE=1 \
+            USE_BZIP2=0 \
+            USE_GFLAGS=0 \
+            USE_LZ4=0 \
+            USE_RTTI=1 \
+            USE_SNAPPY=0 \
+            USE_ZLIB=0 \
+            USE_ZSTD=0
+          mkdir -p "$RUNNER_TEMP/rocksdb-10-install/lib" \
+            "$RUNNER_TEMP/rocksdb-10-install/include"
+          cp "$RUNNER_TEMP/rocksdb-10.10.1/librocksdb.a" \
+            "$RUNNER_TEMP/rocksdb-10-install/lib/"
+          cp -R "$RUNNER_TEMP/rocksdb-10.10.1/include/rocksdb" \
+            "$RUNNER_TEMP/rocksdb-10-install/include/"
+
+      - name: Test compatibility guards
+        env:
+          ROCKSDB_LIB_DIR: ${{ runner.temp }}/rocksdb-10-install/lib
+          ROCKSDB_INCLUDE_DIR: ${{ runner.temp }}/rocksdb-10-install/include
+          ROCKSDB_STATIC: "1"
+        run: |
+          cargo test --test test_rocksdb_options --no-default-features \
+            --features bindgen-runtime test_read_options
+          cargo test --test test_rocksdb_options --no-default-features \
+            --features bindgen-runtime test_set_index_block_search_type_all_variants
+          cargo test --test test_rocksdb_options --no-default-features \
+            --features bindgen-runtime test_set_memtable_batch_lookup_optimization
+          cargo test --test test_slice_transform --no-default-features \
+            --features bindgen-runtime
+
   audit:
     name: Security audit
     runs-on: ubuntu-latest

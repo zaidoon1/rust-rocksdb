@@ -980,11 +980,13 @@ mod system {
             }
             let _ = config.probe(package);
         };
-        // Unconditional: unlike our own vendored build, we don't control
-        // whether the system librocksdb was built with snappy/io_uring
-        // support.
+        // Preserve the historical best-effort snappy probe: unlike our own
+        // vendored build, we don't control whether the system librocksdb was
+        // built with snappy support.
         probe("snappy");
-        probe("liburing");
+        if cfg!(feature = "io-uring") {
+            probe("liburing");
+        }
     }
 
     /// `ROCKSDB_STATIC` set to any non-empty value → static link;
@@ -1664,6 +1666,10 @@ mod extensions {
         // headers compile the same way against the user's
         // `rocksdb/options.h`.
         let cxx_std = env::var("ROCKSDB_CXX_STD").unwrap_or_else(|_| DEFAULT_CXX_STD.to_string());
+        let cxx_std = cxx_std
+            .strip_prefix("-std=")
+            .or_else(|| cxx_std.strip_prefix("/std:"))
+            .unwrap_or(&cxx_std);
         if target.is_msvc() {
             cfg.flag(format!("/std:{cxx_std}"));
         } else {

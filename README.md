@@ -462,7 +462,7 @@ By default, `rust-rocksdb` builds RocksDB from the bundled submodule. To link ag
 | `ROCKSDB_USE_PKG_CONFIG=1` | Probe `pkg-config rocksdb` to discover lib + include paths automatically. Accepts `1` or `true`.             |
 | `ROCKSDB_LIB_DIR=<path>`   | Look for `librocksdb.{a,so,dylib,dll}` in `<path>`. If `ROCKSDB_INCLUDE_DIR` is unset, `<path>/../include` is used when it contains `rocksdb/c.h`. |
 | `ROCKSDB_STATIC`           | Static-link the system rocksdb (default is dynamic). Any non-empty value enables it (legacy semantics).      |
-| `ROCKSDB_INCLUDE_DIR=<p>`  | Headers for `bindgen`. With `ROCKSDB_LIB_DIR`, this is optional if `<path>/../include` contains `rocksdb/c.h`; with `ROCKSDB_USE_PKG_CONFIG` it is *merged in front* of pkg-config's discovered paths (does not replace them). |
+| `ROCKSDB_INCLUDE_DIR=<p>`  | Headers for `bindgen`. With `ROCKSDB_LIB_DIR`, this overrides the `<path>/../include` fallback; with `ROCKSDB_USE_PKG_CONFIG`, it is searched before pkg-config's include paths. |
 | `ROCKSDB_COMPILE=1`        | Force the bundled vendored build even if the above are set. Accepts `1` or `true` (case-insensitive).        |
 | `ROCKSDB_CXX_STD=c++23`    | Override the C++ standard used to compile RocksDB (default `c++20`). Only used for vendored builds.          |
 | `CXXSTDLIB=stdc++`         | Override the C++ stdlib linked (e.g. `c++` for libc++, `stdc++` for libstdc++).                              |

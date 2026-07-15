@@ -4809,8 +4809,8 @@ pub enum BlockBasedPinningTier {
 /// [`BlockBasedOptions::set_index_block_search_type`].
 ///
 /// These numeric values are pinned to RocksDB's C/C++ ABI. Older system
-/// headers can be missing the named constants, so the Rust enum keeps the
-/// underlying discriminants explicit.
+/// headers can be missing the named constants, so `librocksdb-sys` provides
+/// compatibility definitions when needed.
 ///
 /// `Auto` is only meaningful in combination with
 /// [`BlockBasedOptions::set_uniform_cv_threshold`]: the threshold gates whether
@@ -4822,7 +4822,7 @@ pub enum BlockBasedPinningTier {
 #[cfg_attr(feature = "serde1", derive(serde::Serialize, serde::Deserialize))]
 pub enum IndexBlockSearchType {
     /// Standard binary search. The default and safest choice.
-    Binary = 0,
+    Binary = ffi::rocksdb_block_based_table_index_block_search_type_binary as isize,
     /// Interpolation search. Faster than binary search for index blocks whose
     /// keys are uniformly distributed; significantly slower when they are not.
     ///
@@ -4834,12 +4834,12 @@ pub enum IndexBlockSearchType {
     /// because the shortened successor skews end-keys away from the uniform
     /// distribution that interpolation search relies on. Avoid combining the
     /// two.
-    Interpolation = 1,
+    Interpolation = ffi::rocksdb_block_based_table_index_block_search_type_interpolation as isize,
     /// Per-block adaptive selection between binary and interpolation search,
     /// based on the per-block "is_uniform" footer bit. Requires
     /// `uniform_cv_threshold >= 0` on the write path; see
     /// [`BlockBasedOptions::set_uniform_cv_threshold`].
-    Auto = 2,
+    Auto = ffi::rocksdb_block_based_table_index_block_search_type_auto as isize,
 }
 
 pub struct FifoCompactOptions {

@@ -74,6 +74,21 @@ impl Cache {
         unsafe { ffi::rocksdb_cache_get_pinned_usage(self.0.inner.as_ptr()) }
     }
 
+    /// Returns the configured cache capacity in bytes.
+    pub fn get_capacity(&self) -> usize {
+        unsafe { ffi::rocksdb_cache_get_capacity(self.0.inner.as_ptr()) }
+    }
+
+    /// Returns the number of entries currently occupying the cache hash tables.
+    pub fn get_occupancy_count(&self) -> usize {
+        unsafe { ffi::rocksdb_cache_get_occupancy_count(self.0.inner.as_ptr()) }
+    }
+
+    /// Returns the total number of cache hash table addresses.
+    pub fn get_table_address_count(&self) -> usize {
+        unsafe { ffi::rocksdb_cache_get_table_address_count(self.0.inner.as_ptr()) }
+    }
+
     /// Sets cache capacity in bytes.
     pub fn set_capacity(&mut self, capacity: size_t) {
         unsafe {

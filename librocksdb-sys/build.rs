@@ -482,8 +482,12 @@ mod vendor {
 
     /// Other Cargo features that translate into preprocessor defines.
     fn apply_optional_features(cfg: &mut cc::Build, target: &Target) {
-        if cfg!(feature = "rtti") {
-            cfg.define("USE_RTTI", Some("1"));
+        if cfg!(feature = "rtti") || cfg!(feature = "coroutines") {
+            cfg.define("ROCKSDB_USE_RTTI", None);
+        } else if target.is_msvc() {
+            cfg.flag_if_supported("/GR-");
+        } else {
+            cfg.flag_if_supported("-fno-rtti");
         }
         if cfg!(feature = "malloc-usable-size") && target.os == "linux" {
             cfg.define("ROCKSDB_MALLOC_USABLE_SIZE", Some("1"));
@@ -1472,7 +1476,11 @@ mod extensions {
         }
 
         cfg.file("c-api-extensions/c_api_extensions.cc");
+        cfg.define("RUST_ROCKSDB_SYSTEM_BACKEND", None);
         cfg.cpp(true);
+        if target.is_msvc() && cfg!(feature = "mt_static") {
+            cfg.static_crt(true);
+        }
 
         // Match the vendored build's C++ standard so the extension's
         // headers compile the same way against the user's

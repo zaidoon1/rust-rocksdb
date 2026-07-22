@@ -1185,6 +1185,26 @@ impl TransactionDB<MultiThreaded> {
         )
     }
 
+    fn property_int_value_impl(
+        name: impl CStrLike,
+        get_property: impl FnOnce(*const c_char, *mut u64) -> c_int,
+        get_string_property: impl FnOnce(*const c_char) -> *mut c_char,
+    ) -> Result<Option<u64>, Error> {
+        let prop_name = name.bake().map_err(|err| {
+            Error::new(format!("Failed to convert property name to CString: {err}"))
+        })?;
+        let mut value = 0;
+        if get_property(prop_name.as_ptr(), &raw mut value) == 0 {
+            return Ok(Some(value));
+        }
+
+        Self::property_value_impl(
+            prop_name.as_ref(),
+            get_string_property,
+            Self::parse_property_int_value,
+        )
+    }
+
     fn parse_property_int_value(value: &str) -> Result<u64, Error> {
         value.parse::<u64>().map_err(|err| {
             Error::new(format!(
@@ -1198,10 +1218,12 @@ impl TransactionDB<MultiThreaded> {
     /// Full list of properties that return int values could be find
     /// [here](https://github.com/facebook/rocksdb/blob/08809f5e6cd9cc4bc3958dd4d59457ae78c76660/include/rocksdb/db.h#L654-L689).
     pub fn property_int_value(&self, name: impl CStrLike) -> Result<Option<u64>, Error> {
-        Self::property_value_impl(
+        Self::property_int_value_impl(
             name,
+            |prop_name, value| unsafe {
+                ffi::rocksdb_transactiondb_property_int(self.inner, prop_name, value)
+            },
             |prop_name| unsafe { ffi::rocksdb_transactiondb_property_value(self.inner, prop_name) },
-            Self::parse_property_int_value,
         )
     }
 }

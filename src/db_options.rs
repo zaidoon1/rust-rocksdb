@@ -3313,6 +3313,40 @@ impl Options {
         }
     }
 
+    /// Controls whether RocksDB opens and validates SST files in the background after open.
+    ///
+    /// Enabling this can reduce open latency for databases with many SST files
+    /// or high latency storage. It is mostly useful with
+    /// [`Options::set_max_open_files`] set to `-1`.
+    ///
+    /// This option is not compatible with FIFO compaction and requires
+    /// [`Options::set_skip_stats_update_on_db_open`] to be `true`. SST open
+    /// errors are no longer returned by `DB::open`; they can instead surface as
+    /// background errors or from operations that access the affected file.
+    ///
+    /// Default: `false`
+    pub fn set_open_files_async(&mut self, enabled: bool) -> Result<(), Error> {
+        let supported = unsafe {
+            ffi::rust_rocksdb_options_set_open_files_async(self.inner, c_uchar::from(enabled)) != 0
+        };
+        if !supported {
+            return Err(Error::new(
+                "open_files_async requires RocksDB 11.1 or newer".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Returns whether SST files are opened and validated in the background after open.
+    pub fn get_open_files_async(&self) -> bool {
+        unsafe { ffi::rust_rocksdb_options_get_open_files_async(self.inner) != 0 }
+    }
+
+    /// Returns whether the linked RocksDB supports `open_files_async`.
+    pub fn supports_open_files_async() -> bool {
+        unsafe { ffi::rust_rocksdb_options_open_files_async_supported() != 0 }
+    }
+
     /// Specify the maximal number of info log files to be kept.
     ///
     /// Default: 1000

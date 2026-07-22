@@ -25,6 +25,11 @@ use rust_rocksdb::{
     // `key_may_exist_*_pinned_value` helpers. Users who want to hold
     // onto the pinned value past the immediate call site need the name.
     ColumnFamilyMetaData,
+    // Returned by batch-owned pinned MultiGet APIs.
+    DBPinnableBatch,
+    DBPinnableBatchIter,
+    // Returned by `Snapshot::read_options{,_opt}`.
+    SnapshotReadOptions,
 };
 
 #[test]
@@ -34,4 +39,7 @@ fn newly_exported_types_resolve() {
     // obvious in CI logs.
     let _ = std::any::type_name::<ColumnFamilyMetaData>();
     let _ = std::any::type_name::<CSlice>();
+    let _ = std::any::type_name::<DBPinnableBatch<'static>>();
+    let _ = std::any::type_name::<DBPinnableBatchIter<'static, 'static>>();
+    let _ = std::any::type_name::<SnapshotReadOptions<'static, 'static>>();
 }

@@ -82,6 +82,27 @@ impl WriteBufferManager {
         unsafe { ffi::rocksdb_write_buffer_manager_memory_usage(self.0.inner.as_ptr()) }
     }
 
+    /// Returns the memory used by active memtables in bytes.
+    pub fn get_mutable_memtable_memory_usage(&self) -> usize {
+        unsafe {
+            ffi::rocksdb_write_buffer_manager_mutable_memtable_memory_usage(self.0.inner.as_ptr())
+        }
+    }
+
+    /// Returns the cache capacity reserved by dummy entries in bytes.
+    ///
+    /// This returns zero when the manager was created without a cache.
+    pub fn get_dummy_entries_in_cache_usage(&self) -> usize {
+        unsafe {
+            ffi::rocksdb_write_buffer_manager_dummy_entries_in_cache_usage(self.0.inner.as_ptr())
+        }
+    }
+
+    /// Returns whether memtable memory is accounted against a cache.
+    pub fn cost_to_cache(&self) -> bool {
+        unsafe { ffi::rocksdb_write_buffer_manager_cost_to_cache(self.0.inner.as_ptr()) }
+    }
+
     /// Returns the current buffer size in bytes.
     pub fn get_buffer_size(&self) -> usize {
         unsafe { ffi::rocksdb_write_buffer_manager_buffer_size(self.0.inner.as_ptr()) }

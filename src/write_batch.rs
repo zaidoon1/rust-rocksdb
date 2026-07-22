@@ -13,8 +13,71 @@
 // limitations under the License.
 
 use crate::{AsColumnFamilyRef, ffi};
-use libc::{c_char, c_void, size_t};
-use std::slice;
+use libc::{c_char, c_int, c_void, size_t};
+use std::{io::IoSlice, slice};
+
+const INLINE_WRITE_BATCH_PARTS: usize = 4;
+
+enum WriteBatchPartStorage {
+    Inline([ffi::rocksdb_slice_t; INLINE_WRITE_BATCH_PARTS]),
+    Heap(Vec<ffi::rocksdb_slice_t>),
+}
+
+struct WriteBatchParts {
+    storage: WriteBatchPartStorage,
+    count: c_int,
+}
+
+impl WriteBatchParts {
+    fn new(parts: &[IoSlice<'_>], name: &str) -> Result<Self, crate::Error> {
+        let count = c_int::try_from(parts.len()).map_err(|_| {
+            crate::Error::new(format!(
+                "{name} has {} parts; expected at most {}",
+                parts.len(),
+                c_int::MAX
+            ))
+        })?;
+        let storage = if parts.len() <= INLINE_WRITE_BATCH_PARTS {
+            Self::inline(parts)
+        } else {
+            Self::heap(parts)
+        };
+        Ok(Self { storage, count })
+    }
+
+    fn inline(parts: &[IoSlice<'_>]) -> WriteBatchPartStorage {
+        let mut slices = std::array::from_fn(|_| ffi::rocksdb_slice_t {
+            data: std::ptr::null(),
+            size: 0,
+        });
+        for (index, part) in parts.iter().enumerate() {
+            slices[index] = ffi::rocksdb_slice_t {
+                data: part.as_ptr().cast(),
+                size: part.len(),
+            };
+        }
+        WriteBatchPartStorage::Inline(slices)
+    }
+
+    fn heap(parts: &[IoSlice<'_>]) -> WriteBatchPartStorage {
+        WriteBatchPartStorage::Heap(
+            parts
+                .iter()
+                .map(|part| ffi::rocksdb_slice_t {
+                    data: part.as_ptr().cast(),
+                    size: part.len(),
+                })
+                .collect(),
+        )
+    }
+
+    fn as_ptr(&self) -> *const ffi::rocksdb_slice_t {
+        match &self.storage {
+            WriteBatchPartStorage::Inline(slices) => slices.as_ptr(),
+            WriteBatchPartStorage::Heap(slices) => slices.as_ptr(),
+        }
+    }
+}
 
 /// A type alias to keep compatibility. See [`WriteBatchWithTransaction`] for details
 pub type WriteBatch = WriteBatchWithTransaction<false>;
@@ -272,6 +335,30 @@ impl<const TRANSACTION: bool> WriteBatchWithTransaction<TRANSACTION> {
         }
     }
 
+    /// Inserts one key and value assembled from multiple byte slices.
+    ///
+    /// This avoids concatenating the parts in Rust. RocksDB copies the key and
+    /// value parts into the write batch during this call, so the slices do not
+    /// need to outlive the method.
+    pub fn put_vectored(
+        &mut self,
+        key: &[IoSlice<'_>],
+        value: &[IoSlice<'_>],
+    ) -> Result<(), crate::Error> {
+        let key = WriteBatchParts::new(key, "key")?;
+        let value = WriteBatchParts::new(value, "value")?;
+        unsafe {
+            ffi_try!(ffi::rust_rocksdb_writebatch_put_slices(
+                self.inner,
+                key.count,
+                key.as_ptr(),
+                value.count,
+                value.as_ptr(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Insert a value into the specific column family of the database under the given key.
     pub fn put_cf<K, V>(&mut self, cf: &impl AsColumnFamilyRef, key: K, value: V)
     where
@@ -291,6 +378,32 @@ impl<const TRANSACTION: bool> WriteBatchWithTransaction<TRANSACTION> {
                 value.len() as size_t,
             );
         }
+    }
+
+    /// Inserts one key and value assembled from multiple byte slices into a column family.
+    ///
+    /// This avoids concatenating the parts in Rust. RocksDB copies the key and
+    /// value parts into the write batch during this call, so the slices do not
+    /// need to outlive the method.
+    pub fn put_cf_vectored(
+        &mut self,
+        cf: &impl AsColumnFamilyRef,
+        key: &[IoSlice<'_>],
+        value: &[IoSlice<'_>],
+    ) -> Result<(), crate::Error> {
+        let key = WriteBatchParts::new(key, "key")?;
+        let value = WriteBatchParts::new(value, "value")?;
+        unsafe {
+            ffi_try!(ffi::rust_rocksdb_writebatch_put_slices_cf(
+                self.inner,
+                cf.inner(),
+                key.count,
+                key.as_ptr(),
+                value.count,
+                value.as_ptr(),
+            ));
+        }
+        Ok(())
     }
 
     /// Insert a value into the specific column family of the database
@@ -337,6 +450,30 @@ impl<const TRANSACTION: bool> WriteBatchWithTransaction<TRANSACTION> {
         }
     }
 
+    /// Merges one key and value assembled from multiple byte slices.
+    ///
+    /// This avoids concatenating the parts in Rust. RocksDB copies the key and
+    /// value parts into the write batch during this call, so the slices do not
+    /// need to outlive the method.
+    pub fn merge_vectored(
+        &mut self,
+        key: &[IoSlice<'_>],
+        value: &[IoSlice<'_>],
+    ) -> Result<(), crate::Error> {
+        let key = WriteBatchParts::new(key, "key")?;
+        let value = WriteBatchParts::new(value, "value")?;
+        unsafe {
+            ffi_try!(ffi::rust_rocksdb_writebatch_merge_slices(
+                self.inner,
+                key.count,
+                key.as_ptr(),
+                value.count,
+                value.as_ptr(),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn merge_cf<K, V>(&mut self, cf: &impl AsColumnFamilyRef, key: K, value: V)
     where
         K: AsRef<[u8]>,
@@ -357,6 +494,32 @@ impl<const TRANSACTION: bool> WriteBatchWithTransaction<TRANSACTION> {
         }
     }
 
+    /// Merges one key and value assembled from multiple byte slices in a column family.
+    ///
+    /// This avoids concatenating the parts in Rust. RocksDB copies the key and
+    /// value parts into the write batch during this call, so the slices do not
+    /// need to outlive the method.
+    pub fn merge_cf_vectored(
+        &mut self,
+        cf: &impl AsColumnFamilyRef,
+        key: &[IoSlice<'_>],
+        value: &[IoSlice<'_>],
+    ) -> Result<(), crate::Error> {
+        let key = WriteBatchParts::new(key, "key")?;
+        let value = WriteBatchParts::new(value, "value")?;
+        unsafe {
+            ffi_try!(ffi::rust_rocksdb_writebatch_merge_slices_cf(
+                self.inner,
+                cf.inner(),
+                key.count,
+                key.as_ptr(),
+                value.count,
+                value.as_ptr(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Removes the database entry for key. Does nothing if the key was not found.
     pub fn delete<K: AsRef<[u8]>>(&mut self, key: K) {
         let key = key.as_ref();
@@ -368,6 +531,23 @@ impl<const TRANSACTION: bool> WriteBatchWithTransaction<TRANSACTION> {
                 key.len() as size_t,
             );
         }
+    }
+
+    /// Removes the entry for one key assembled from multiple byte slices.
+    ///
+    /// This avoids concatenating the parts in Rust. RocksDB copies the key
+    /// parts into the write batch during this call, so the slices do not need
+    /// to outlive the method.
+    pub fn delete_vectored(&mut self, key: &[IoSlice<'_>]) -> Result<(), crate::Error> {
+        let key = WriteBatchParts::new(key, "key")?;
+        unsafe {
+            ffi_try!(ffi::rust_rocksdb_writebatch_delete_slices(
+                self.inner,
+                key.count,
+                key.as_ptr(),
+            ));
+        }
+        Ok(())
     }
 
     /// Removes the database entry in the specific column family for key.
@@ -383,6 +563,28 @@ impl<const TRANSACTION: bool> WriteBatchWithTransaction<TRANSACTION> {
                 key.len() as size_t,
             );
         }
+    }
+
+    /// Removes the entry for one key assembled from multiple byte slices in a column family.
+    ///
+    /// This avoids concatenating the parts in Rust. RocksDB copies the key
+    /// parts into the write batch during this call, so the slices do not need
+    /// to outlive the method.
+    pub fn delete_cf_vectored(
+        &mut self,
+        cf: &impl AsColumnFamilyRef,
+        key: &[IoSlice<'_>],
+    ) -> Result<(), crate::Error> {
+        let key = WriteBatchParts::new(key, "key")?;
+        unsafe {
+            ffi_try!(ffi::rust_rocksdb_writebatch_delete_slices_cf(
+                self.inner,
+                cf.inner(),
+                key.count,
+                key.as_ptr(),
+            ));
+        }
+        Ok(())
     }
 
     /// Removes the database entry in the specific column family with timestamp for key.
@@ -457,6 +659,37 @@ impl WriteBatchWithTransaction<false> {
         }
     }
 
+    /// Removes entries in a range whose bounds are assembled from byte slices.
+    ///
+    /// The range includes `from` and excludes `to`. The two bounds must have
+    /// RocksDB copies both bounds into the write batch during this call, so the
+    /// slices do not need to outlive the method.
+    pub fn delete_range_vectored(
+        &mut self,
+        from: &[IoSlice<'_>],
+        to: &[IoSlice<'_>],
+    ) -> Result<(), crate::Error> {
+        if from.len() != to.len() {
+            return Err(crate::Error::new(format!(
+                "range start has {} parts but range end has {} parts; expected equal counts",
+                from.len(),
+                to.len()
+            )));
+        }
+        let from = WriteBatchParts::new(from, "range start")?;
+        let to = WriteBatchParts::new(to, "range end")?;
+        unsafe {
+            ffi_try!(ffi::rust_rocksdb_writebatch_delete_range_slices(
+                self.inner,
+                from.count,
+                from.as_ptr(),
+                to.count,
+                to.as_ptr(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Remove database entries in column family from start key to end key.
     ///
     /// Removes the database entries in the range ["begin_key", "end_key"), i.e.,
@@ -475,6 +708,39 @@ impl WriteBatchWithTransaction<false> {
                 end_key.len() as size_t,
             );
         }
+    }
+
+    /// Removes entries in a column family range whose bounds are assembled from byte slices.
+    ///
+    /// The range includes `from` and excludes `to`. The two bounds must have
+    /// RocksDB copies both bounds into the write batch during this call, so the
+    /// slices do not need to outlive the method.
+    pub fn delete_range_cf_vectored(
+        &mut self,
+        cf: &impl AsColumnFamilyRef,
+        from: &[IoSlice<'_>],
+        to: &[IoSlice<'_>],
+    ) -> Result<(), crate::Error> {
+        if from.len() != to.len() {
+            return Err(crate::Error::new(format!(
+                "range start has {} parts but range end has {} parts; expected equal counts",
+                from.len(),
+                to.len()
+            )));
+        }
+        let from = WriteBatchParts::new(from, "range start")?;
+        let to = WriteBatchParts::new(to, "range end")?;
+        unsafe {
+            ffi_try!(ffi::rust_rocksdb_writebatch_delete_range_slices_cf(
+                self.inner,
+                cf.inner(),
+                from.count,
+                from.as_ptr(),
+                to.count,
+                to.as_ptr(),
+            ));
+        }
+        Ok(())
     }
 }
 

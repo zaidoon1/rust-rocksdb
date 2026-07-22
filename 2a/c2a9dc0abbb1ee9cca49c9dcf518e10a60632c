@@ -1,0 +1,29 @@
+Cargo.toml
+  s_a0e6775bbf305e::t_da15c95120a80d 55,58-61
+benches/hot_paths.rs
+  s_d263853d4a0d2a::t_47a7c1ec2d7827 1-396
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2ac2a9dc0abbb1ee9cca49c9dcf518e10a60632c",
+  "prompts": {},
+  "sessions": {
+    "s_a0e6775bbf305e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f884c-aca0-7732-bc3e-d557a0279745",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    },
+    "s_d263853d4a0d2a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f884e-c152-7333-9fbf-9aa9ccd11203",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,77 @@
+CHANGELOG.md
+  s_d263853d4a0d2a::t_e850bef7a5d794 3-19
+librocksdb-sys/build.rs
+  s_d263853d4a0d2a::t_c589873ff25c36 485-490,1479,1481-1483
+librocksdb-sys/c-api-extensions/c_api_extensions.cc
+  s_d263853d4a0d2a::t_e0928388094dac 15,17-18,20,23,25-26,32,38,40-41,45,75-83,361-396,410-899
+librocksdb-sys/c-api-extensions/c_api_extensions.h
+  s_d263853d4a0d2a::t_b65d434cfb2c1f 80-87,99-164
+src/cache.rs
+  s_939ac6d9b09cd9::t_b2056acc471389 77-91
+src/db.rs
+  s_d263853d4a0d2a::t_fb9ab588392c23 34-37,432-460,1582,1596,1606-1610,1644-1778,1871,1875-1878,1880-1881,1984-2006,2009-2011,2013-2032,2034-2069,2071,2074-2076,2079-2080,2082-2106,2492-2571,3344-3363,3377,3379-3381,3395,3397-3399
+src/db_iterator.rs
+  s_d263853d4a0d2a::t_e07849ccb30248 22,89,117-126,135,347-361,368-382,626-722,729-732
+src/db_options.rs
+  s_939ac6d9b09cd9::t_407398abaad225 3316-3349
+src/db_pinnable_batch.rs
+  s_d263853d4a0d2a::t_b2dee97ccc03c3 1-137
+src/lib.rs
+  s_a0e6775bbf305e::t_eba2f3984fb287 97,141,147,149
+src/perf.rs
+  s_d263853d4a0d2a::t_1dc4b360351c38 16-19,32,34-36,38,41,43,45,62-74,81,83-86,92-94,124-153,317,320-379
+src/snapshot.rs
+  s_d263853d4a0d2a::t_534e53516e9567 23-45,96-112,190,200,207,209,217,219,229,240,248,250,260,262,270,280,287,293,300,307-361,375-376
+src/write_batch.rs
+  s_d263853d4a0d2a::t_3f64aa191334a8 16-80,338-361,383-408,453-476,497-522,536-552,568-589,662-692,712-744
+src/write_buffer_manager.rs
+  s_939ac6d9b09cd9::t_095a67fb7931b1 85-105
+tests/test_batched_pinned_multiget.rs
+  s_d263853d4a0d2a::t_646335c5f42671 1-270
+tests/test_borrowed_iterator.rs
+  s_939ac6d9b09cd9::t_f0f89fabc19697 1-130
+tests/test_low_level_efficiency_apis.rs
+  s_d263853d4a0d2a::t_f5c457a930c5b6 1-242
+tests/test_multi_cf_iterators.rs
+  s_d263853d4a0d2a::t_5a7560efb1a46d 1-106
+tests/test_public_api.rs
+  s_939ac6d9b09cd9::t_f777d557e97474 28-32,42-44
+src/transactions/transaction_db.rs
+  s_939ac6d9b09cd9::t_b369f0e617c6ab 1188-1207,1221,1223-1225
+tests/test_direct_property_int.rs
+  s_939ac6d9b09cd9::t_3c0ea71939bf07 1-75
+tests/test_snapshot_read_options.rs
+  s_939ac6d9b09cd9::t_ac48be728539dc 1-142
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c6533a81cb861924a66a0d131c935e023063c5a6",
+  "prompts": {},
+  "sessions": {
+    "s_939ac6d9b09cd9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f8888-4733-7613-97cb-d678dac184b0",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    },
+    "s_a0e6775bbf305e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f884c-aca0-7732-bc3e-d557a0279745",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    },
+    "s_d263853d4a0d2a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f884e-c152-7333-9fbf-9aa9ccd11203",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    }
+  }
+}

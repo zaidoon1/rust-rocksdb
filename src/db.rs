@@ -31,9 +31,10 @@ use crate::column_family::ColumnFamilyTtl;
 use crate::ffi_util::CSlice;
 use crate::{
     ColumnFamily, ColumnFamilyDescriptor, CompactOptions, DBIteratorWithThreadMode,
-    DBPinnableSlice, DBRawIteratorWithThreadMode, DBWALIterator, DEFAULT_COLUMN_FAMILY_NAME,
-    Direction, Error, FlushOptions, IngestExternalFileOptions, IteratorMode, Options, ReadOptions,
-    SnapshotWithThreadMode, WaitForCompactOptions, WriteBatch, WriteBatchWithIndex, WriteOptions,
+    DBPinnableBatch, DBPinnableSlice, DBRawIteratorWithThreadMode, DBWALIterator,
+    DEFAULT_COLUMN_FAMILY_NAME, Direction, Error, FlushOptions, IngestExternalFileOptions,
+    IteratorMode, Options, ReadOptions, SnapshotWithThreadMode, WaitForCompactOptions, WriteBatch,
+    WriteBatchWithIndex, WriteOptions,
     column_family::{AsColumnFamilyRef, BoundColumnFamily, UnboundColumnFamily},
     db_options::{ImportColumnFamilyOptions, OptionsMustOutliveDB},
     ffi,
@@ -426,6 +427,35 @@ impl<T: ThreadMode, D: DBInner> DBAccess for DBCommon<T, D> {
 
 pub struct DBWithThreadModeInner {
     inner: *mut ffi::rocksdb_t,
+}
+
+struct OwnedColumnFamilyHandle {
+    inner: *mut ffi::rocksdb_column_family_handle_t,
+}
+
+struct PinnedMultiGetOutput {
+    values: Vec<*mut ffi::rocksdb_pinnableslice_t>,
+    errors: Vec<*mut c_char>,
+}
+
+struct CreatedIterators {
+    handles: Vec<*mut ffi::rocksdb_iterator_t>,
+}
+
+impl OwnedColumnFamilyHandle {
+    fn default_for(db: *mut ffi::rocksdb_t) -> Self {
+        Self {
+            inner: unsafe { ffi::rocksdb_get_default_column_family_handle(db) },
+        }
+    }
+}
+
+impl Drop for OwnedColumnFamilyHandle {
+    fn drop(&mut self) {
+        unsafe {
+            ffi::rocksdb_column_family_handle_destroy(self.inner);
+        }
+    }
 }
 
 impl DBInner for DBWithThreadModeInner {
@@ -1549,8 +1579,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
 
     /// Returns pinned values associated with the given keys using default read options.
     ///
-    /// This iterates `get_pinned_opt` for each key and returns zero-copy
-    /// `DBPinnableSlice` values when present, avoiding value copies.
+    /// RocksDB processes the keys in one native batch. Results stay in input order.
     pub fn multi_get_pinned<K, I>(
         &'_ self,
         keys: I,
@@ -1564,8 +1593,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
 
     /// Returns pinned values associated with the given keys using the provided read options.
     ///
-    /// This iterates `get_pinned_opt` for each key and returns zero-copy
-    /// `DBPinnableSlice` values when present, avoiding value copies.
+    /// RocksDB processes the keys in one native batch. Results stay in input order.
     pub fn multi_get_pinned_opt<K, I>(
         &'_ self,
         keys: I,
@@ -1575,9 +1603,11 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         K: AsRef<[u8]>,
         I: IntoIterator<Item = K>,
     {
-        keys.into_iter()
-            .map(|k| self.get_pinned_opt(k, readopts))
-            .collect()
+        let owned_keys: Vec<K> = keys.into_iter().collect();
+        if owned_keys.len() == 1 {
+            return vec![self.get_pinned_opt(owned_keys[0].as_ref(), readopts)];
+        }
+        self.batched_multi_get_pinned_owned(&owned_keys, false, readopts)
     }
 
     /// Returns pinned values associated with the given keys and column families
@@ -1609,6 +1639,141 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         keys.into_iter()
             .map(|(cf, k)| self.get_pinned_cf_opt(cf, k, readopts))
             .collect()
+    }
+
+    /// Returns pinned values for default-column-family keys in one native batch.
+    ///
+    /// Set `sorted_input` only when keys are sorted according to the column
+    /// family's comparator. Results stay in input order, including duplicates.
+    pub fn batched_multi_get_pinned<K, I>(
+        &'_ self,
+        keys: I,
+        sorted_input: bool,
+    ) -> Vec<Result<Option<DBPinnableSlice<'_>>, Error>>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = K>,
+    {
+        DEFAULT_READ_OPTS.with(|opts| self.batched_multi_get_pinned_opt(keys, sorted_input, opts))
+    }
+
+    /// Returns pinned values for default-column-family keys in one native batch
+    /// using the provided read options.
+    pub fn batched_multi_get_pinned_opt<K, I>(
+        &'_ self,
+        keys: I,
+        sorted_input: bool,
+        readopts: &ReadOptions,
+    ) -> Vec<Result<Option<DBPinnableSlice<'_>>, Error>>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = K>,
+    {
+        let owned_keys: Vec<K> = keys.into_iter().collect();
+        self.batched_multi_get_pinned_owned(&owned_keys, sorted_input, readopts)
+    }
+
+    /// Returns pinned values for keys in one column family using one native batch.
+    ///
+    /// Set `sorted_input` only when keys are sorted according to the column
+    /// family's comparator. Results stay in input order, including duplicates.
+    pub fn batched_multi_get_pinned_cf<K, I>(
+        &'_ self,
+        cf: &impl AsColumnFamilyRef,
+        keys: I,
+        sorted_input: bool,
+    ) -> Vec<Result<Option<DBPinnableSlice<'_>>, Error>>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = K>,
+    {
+        DEFAULT_READ_OPTS
+            .with(|opts| self.batched_multi_get_pinned_cf_opt(cf, keys, sorted_input, opts))
+    }
+
+    /// Returns pinned values for keys in one column family using one native batch
+    /// and the provided read options.
+    pub fn batched_multi_get_pinned_cf_opt<K, I>(
+        &'_ self,
+        cf: &impl AsColumnFamilyRef,
+        keys: I,
+        sorted_input: bool,
+        readopts: &ReadOptions,
+    ) -> Vec<Result<Option<DBPinnableSlice<'_>>, Error>>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = K>,
+    {
+        let owned_keys: Vec<K> = keys.into_iter().collect();
+        let key_slices = Self::key_slices(&owned_keys);
+        self.batched_multi_get_pinned_inner(cf.inner(), &key_slices, sorted_input, readopts)
+    }
+
+    /// Returns one owner for all default-column-family pinned results.
+    ///
+    /// Values borrow from the returned batch, avoiding one native wrapper
+    /// allocation and one destroy call per successful key.
+    pub fn batched_multi_get_pinned_batch<K, I>(
+        &'_ self,
+        keys: I,
+        sorted_input: bool,
+    ) -> Result<DBPinnableBatch<'_>, Error>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = K>,
+    {
+        DEFAULT_READ_OPTS
+            .with(|opts| self.batched_multi_get_pinned_batch_opt(keys, sorted_input, opts))
+    }
+
+    /// Returns one owner for all default-column-family pinned results using
+    /// the provided read options.
+    pub fn batched_multi_get_pinned_batch_opt<K, I>(
+        &'_ self,
+        keys: I,
+        sorted_input: bool,
+        readopts: &ReadOptions,
+    ) -> Result<DBPinnableBatch<'_>, Error>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = K>,
+    {
+        let owned_keys: Vec<K> = keys.into_iter().collect();
+        let key_slices = Self::key_slices(&owned_keys);
+        self.create_pinnable_batch(ptr::null_mut(), &key_slices, sorted_input, readopts)
+    }
+
+    /// Returns one owner for all pinned results from one column family.
+    pub fn batched_multi_get_pinned_batch_cf<K, I>(
+        &'_ self,
+        cf: &impl AsColumnFamilyRef,
+        keys: I,
+        sorted_input: bool,
+    ) -> Result<DBPinnableBatch<'_>, Error>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = K>,
+    {
+        DEFAULT_READ_OPTS
+            .with(|opts| self.batched_multi_get_pinned_batch_cf_opt(cf, keys, sorted_input, opts))
+    }
+
+    /// Returns one owner for all pinned results from one column family using
+    /// the provided read options.
+    pub fn batched_multi_get_pinned_batch_cf_opt<K, I>(
+        &'_ self,
+        cf: &impl AsColumnFamilyRef,
+        keys: I,
+        sorted_input: bool,
+        readopts: &ReadOptions,
+    ) -> Result<DBPinnableBatch<'_>, Error>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = K>,
+    {
+        let owned_keys: Vec<K> = keys.into_iter().collect();
+        let key_slices = Self::key_slices(&owned_keys);
+        self.create_pinnable_batch(cf.inner(), &key_slices, sorted_input, readopts)
     }
 
     /// Return the values associated with the given keys and column families.
@@ -1703,45 +1868,17 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         K: AsRef<[u8]> + 'a + ?Sized,
         I: IntoIterator<Item = &'a K>,
     {
-        let (ptr_keys, keys_sizes): (Vec<_>, Vec<_>) = keys
+        let key_slices: Vec<_> = keys
             .into_iter()
             .map(|k| {
                 let k = k.as_ref();
-                (k.as_ptr() as *const c_char, k.len())
+                ffi::rocksdb_slice_t {
+                    data: k.as_ptr() as *const c_char,
+                    size: k.len(),
+                }
             })
-            .unzip();
-
-        let mut pinned_values = vec![ptr::null_mut(); ptr_keys.len()];
-        let mut errors = vec![ptr::null_mut(); ptr_keys.len()];
-
-        unsafe {
-            ffi::rocksdb_batched_multi_get_cf(
-                self.inner.inner(),
-                readopts.inner,
-                cf.inner(),
-                ptr_keys.len(),
-                ptr_keys.as_ptr(),
-                keys_sizes.as_ptr(),
-                pinned_values.as_mut_ptr(),
-                errors.as_mut_ptr(),
-                sorted_input,
-            );
-            pinned_values
-                .into_iter()
-                .zip(errors)
-                .map(|(v, e)| {
-                    if e.is_null() {
-                        if v.is_null() {
-                            Ok(None)
-                        } else {
-                            Ok(Some(DBPinnableSlice::from_c(v)))
-                        }
-                    } else {
-                        Err(convert_rocksdb_error(e))
-                    }
-                })
-                .collect()
-        }
+            .collect();
+        self.batched_multi_get_pinned_inner(cf.inner(), &key_slices, sorted_input, readopts)
     }
 
     /// Return the values associated with the given keys and the specified column family
@@ -1844,40 +1981,129 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
             })
             .collect();
 
-        if slices.is_empty() {
+        self.batched_multi_get_pinned_inner(cf.inner(), &slices, sorted_input, readopts)
+    }
+
+    fn key_slices<K: AsRef<[u8]>>(keys: &[K]) -> Vec<ffi::rocksdb_slice_t> {
+        keys.iter()
+            .map(|key| {
+                let key = key.as_ref();
+                ffi::rocksdb_slice_t {
+                    data: key.as_ptr() as *const c_char,
+                    size: key.len(),
+                }
+            })
+            .collect()
+    }
+
+    fn batched_multi_get_pinned_owned<'a, K: AsRef<[u8]>>(
+        &'a self,
+        keys: &[K],
+        sorted_input: bool,
+        readopts: &ReadOptions,
+    ) -> Vec<Result<Option<DBPinnableSlice<'a>>, Error>> {
+        let key_slices = Self::key_slices(keys);
+        if key_slices.is_empty() {
             return Vec::new();
         }
+        let default_cf = OwnedColumnFamilyHandle::default_for(self.inner.inner());
+        self.batched_multi_get_pinned_inner(default_cf.inner, &key_slices, sorted_input, readopts)
+    }
 
-        let mut pinned_values = vec![ptr::null_mut(); slices.len()];
-        let mut errors = vec![ptr::null_mut(); slices.len()];
-
-        unsafe {
-            ffi::rocksdb_batched_multi_get_cf_slice(
+    fn create_pinnable_batch<'a>(
+        &'a self,
+        cf: *mut ffi::rocksdb_column_family_handle_t,
+        keys: &[ffi::rocksdb_slice_t],
+        sorted_input: bool,
+        readopts: &ReadOptions,
+    ) -> Result<DBPinnableBatch<'a>, Error> {
+        let batch = unsafe {
+            ffi_try!(ffi::rust_rocksdb_batched_multi_get_pinned(
                 self.inner.inner(),
                 readopts.inner,
-                cf.inner(),
-                slices.len(),
-                slices.as_ptr(),
+                cf,
+                keys.len(),
+                keys.as_ptr(),
+                c_uchar::from(sorted_input),
+            ))
+        };
+        // SAFETY: The extension returns a uniquely owned batch.
+        Ok(unsafe { DBPinnableBatch::from_c(batch) })
+    }
+
+    fn batched_multi_get_pinned_inner<'a>(
+        &'a self,
+        cf: *mut ffi::rocksdb_column_family_handle_t,
+        keys: &[ffi::rocksdb_slice_t],
+        sorted_input: bool,
+        readopts: &ReadOptions,
+    ) -> Vec<Result<Option<DBPinnableSlice<'a>>, Error>> {
+        if keys.is_empty() {
+            return Vec::new();
+        }
+        let output = match self.execute_batched_multi_get(cf, keys, sorted_input, readopts) {
+            Ok(output) => output,
+            Err(error) => {
+                let message = error.to_string();
+                return (0..keys.len())
+                    .map(|_| Err(Error::new(message.clone())))
+                    .collect();
+            }
+        };
+        output
+            .values
+            .into_iter()
+            .zip(output.errors)
+            .map(|(value, error)| unsafe { Self::convert_pinned_result(value, error) })
+            .collect()
+    }
+
+    fn execute_batched_multi_get(
+        &self,
+        cf: *mut ffi::rocksdb_column_family_handle_t,
+        keys: &[ffi::rocksdb_slice_t],
+        sorted_input: bool,
+        readopts: &ReadOptions,
+    ) -> Result<PinnedMultiGetOutput, Error> {
+        let mut pinned_values = vec![ptr::null_mut(); keys.len()];
+        let mut errors = vec![ptr::null_mut(); keys.len()];
+        unsafe {
+            ffi_try!(ffi::rust_rocksdb_batched_multi_get_cf_slice_safe(
+                self.inner.inner(),
+                readopts.inner,
+                cf,
+                keys.len(),
+                keys.as_ptr(),
                 pinned_values.as_mut_ptr(),
                 errors.as_mut_ptr(),
-                sorted_input,
-            );
-            pinned_values
-                .into_iter()
-                .zip(errors)
-                .map(|(v, e)| {
-                    if e.is_null() {
-                        if v.is_null() {
-                            Ok(None)
-                        } else {
-                            Ok(Some(DBPinnableSlice::from_c(v)))
-                        }
-                    } else {
-                        Err(convert_rocksdb_error(e))
-                    }
-                })
-                .collect()
+                c_uchar::from(sorted_input),
+            ));
         }
+        Ok(PinnedMultiGetOutput {
+            values: pinned_values,
+            errors,
+        })
+    }
+
+    /// Converts one result returned by `rocksdb_batched_multi_get_cf_slice`.
+    ///
+    /// # Safety
+    ///
+    /// `value` must be null or an owned pinnable slice. `error` must be null or
+    /// an owned RocksDB error string.
+    unsafe fn convert_pinned_result<'a>(
+        value: *mut ffi::rocksdb_pinnableslice_t,
+        error: *mut c_char,
+    ) -> Result<Option<DBPinnableSlice<'a>>, Error> {
+        if error.is_null() {
+            return Ok((!value.is_null()).then(|| unsafe { DBPinnableSlice::from_c(value) }));
+        }
+        if !value.is_null() {
+            unsafe {
+                ffi::rocksdb_pinnableslice_destroy(value);
+            }
+        }
+        Err(convert_rocksdb_error(error))
     }
 
     /// Returns `false` if the given key definitely doesn't exist in the database, otherwise returns
@@ -2261,6 +2487,86 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
     ) -> DBRawIteratorWithThreadMode<'b, Self> {
         let opts = ReadOptions::default();
         DBRawIteratorWithThreadMode::new_cf(self, cf_handle.inner(), opts)
+    }
+
+    /// Opens raw iterators for multiple column families from one consistent
+    /// RocksDB state.
+    ///
+    /// The returned iterators match the input column family order and own their
+    /// native handles. This method uses default read options because one native
+    /// `rocksdb_create_iterators` call shares its options across every iterator,
+    /// while custom bounds and timestamps require one shared Rust owner.
+    pub fn raw_iterators_cf<'a, 'b, W, I>(
+        &'a self,
+        column_families: I,
+    ) -> Result<Vec<DBRawIteratorWithThreadMode<'a, Self>>, Error>
+    where
+        W: AsColumnFamilyRef + 'b,
+        I: IntoIterator<Item = &'b W>,
+    {
+        let mut cf_handles: Vec<_> = column_families
+            .into_iter()
+            .map(AsColumnFamilyRef::inner)
+            .collect();
+        if cf_handles.is_empty() {
+            return Ok(Vec::new());
+        }
+        let created = self.create_iterators_cf(&mut cf_handles)?;
+        Ok(created
+            .handles
+            .into_iter()
+            .map(DBRawIteratorWithThreadMode::from_inner_without_readopts)
+            .collect())
+    }
+
+    fn create_iterators_cf(
+        &self,
+        cf_handles: &mut [*mut ffi::rocksdb_column_family_handle_t],
+    ) -> Result<CreatedIterators, Error> {
+        let mut iterator_handles = vec![ptr::null_mut(); cf_handles.len()];
+        let readopts = ReadOptions::default();
+        unsafe {
+            ffi_try!(ffi::rust_rocksdb_create_iterators_safe(
+                self.inner.inner(),
+                readopts.inner,
+                cf_handles.as_mut_ptr(),
+                iterator_handles.as_mut_ptr(),
+                iterator_handles.len(),
+            ));
+        }
+        Self::validate_created_iterators(&iterator_handles)?;
+        Ok(CreatedIterators {
+            handles: iterator_handles,
+        })
+    }
+
+    fn validate_created_iterators(
+        iterator_handles: &[*mut ffi::rocksdb_iterator_t],
+    ) -> Result<(), Error> {
+        if iterator_handles.iter().any(|iterator| iterator.is_null()) {
+            unsafe {
+                Self::destroy_iterators(iterator_handles);
+            }
+            return Err(Error::new(
+                "rocksdb_create_iterators returned a null iterator".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Destroys non-null iterator handles owned by the caller.
+    ///
+    /// # Safety
+    ///
+    /// Every non-null pointer must identify a live, uniquely owned RocksDB iterator.
+    unsafe fn destroy_iterators(iterators: &[*mut ffi::rocksdb_iterator_t]) {
+        for &iterator in iterators {
+            if !iterator.is_null() {
+                unsafe {
+                    ffi::rocksdb_iter_destroy(iterator);
+                }
+            }
+        }
     }
 
     /// Opens a raw iterator over the database, using the given read options
@@ -3035,6 +3341,26 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         )
     }
 
+    fn property_int_value_impl(
+        name: impl CStrLike,
+        get_property: impl FnOnce(*const c_char, *mut u64) -> c_int,
+        get_string_property: impl FnOnce(*const c_char) -> *mut c_char,
+    ) -> Result<Option<u64>, Error> {
+        let prop_name = name.bake().map_err(|err| {
+            Error::new(format!("Failed to convert property name to CString: {err}"))
+        })?;
+        let mut value = 0;
+        if get_property(prop_name.as_ptr(), &raw mut value) == 0 {
+            return Ok(Some(value));
+        }
+
+        Self::property_value_impl(
+            prop_name.as_ref(),
+            get_string_property,
+            Self::parse_property_int_value,
+        )
+    }
+
     fn parse_property_int_value(value: &str) -> Result<u64, Error> {
         value.parse::<u64>().map_err(|err| {
             Error::new(format!(
@@ -3048,10 +3374,12 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
     /// Full list of properties that return int values could be find
     /// [here](https://github.com/facebook/rocksdb/blob/08809f5e6cd9cc4bc3958dd4d59457ae78c76660/include/rocksdb/db.h#L654-L689).
     pub fn property_int_value(&self, name: impl CStrLike) -> Result<Option<u64>, Error> {
-        Self::property_value_impl(
+        Self::property_int_value_impl(
             name,
+            |prop_name, value| unsafe {
+                ffi::rocksdb_property_int(self.inner.inner(), prop_name, value)
+            },
             |prop_name| unsafe { ffi::rocksdb_property_value(self.inner.inner(), prop_name) },
-            Self::parse_property_int_value,
         )
     }
 
@@ -3064,12 +3392,14 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         cf: &impl AsColumnFamilyRef,
         name: impl CStrLike,
     ) -> Result<Option<u64>, Error> {
-        Self::property_value_impl(
+        Self::property_int_value_impl(
             name,
+            |prop_name, value| unsafe {
+                ffi::rocksdb_property_int_cf(self.inner.inner(), cf.inner(), prop_name, value)
+            },
             |prop_name| unsafe {
                 ffi::rocksdb_property_value_cf(self.inner.inner(), cf.inner(), prop_name)
             },
-            Self::parse_property_int_value,
         )
     }
 

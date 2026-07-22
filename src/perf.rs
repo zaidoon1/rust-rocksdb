@@ -13,7 +13,10 @@
 // limitations under the License.
 
 use libc::{c_int, c_uchar};
-use std::marker::PhantomData;
+use std::{
+    cell::{Cell, RefCell},
+    marker::PhantomData,
+};
 
 use crate::cache::Cache;
 use crate::ffi_util::from_cstr_and_free;
@@ -26,18 +29,20 @@ pub enum PerfStatsLevel {
     /// Unknown settings
     Uninitialized = 0,
     /// Disable perf stats
-    Disable,
+    Disable = 1,
     /// Enables only count stats
-    EnableCount,
+    EnableCount = 2,
+    /// Enables count stats and time spent waiting for RocksDB work
+    EnableWait = 3,
     /// Count stats and enable time stats except for mutexes
-    EnableTimeExceptForMutex,
+    EnableTimeExceptForMutex = 4,
     /// Other than time, also measure CPU time counters. Still don't measure
     /// time (neither wall time nor CPU time) for mutexes
-    EnableTimeAndCPUTimeExceptForMutex,
+    EnableTimeAndCPUTimeExceptForMutex = 5,
     /// Enables count and time stats
-    EnableTime,
+    EnableTime = 6,
     /// N.B must always be the last value!
-    OutOfBound,
+    OutOfBound = 7,
 }
 
 // Include the generated PerfMetric enum from perf_enum.rs
@@ -54,19 +59,39 @@ pub fn set_perf_stats(lvl: PerfStatsLevel) {
 /// and transparently.
 pub struct PerfContext {
     pub(crate) inner: *mut ffi::rocksdb_perfcontext_t,
+    reusable: bool,
+}
+
+thread_local! {
+    static ACTIVE_MANUAL_PERF_CONTEXTS: Cell<usize> = const { Cell::new(0) };
+    static REUSABLE_PERF_CONTEXT: RefCell<PerfContext> = RefCell::new({
+        let inner = unsafe { ffi::rocksdb_perfcontext_create() };
+        assert!(!inner.is_null(), "Could not create Perf Context");
+        PerfContext {
+            inner,
+            reusable: true,
+        }
+    });
 }
 
 impl Default for PerfContext {
     fn default() -> Self {
         let ctx = unsafe { ffi::rocksdb_perfcontext_create() };
         assert!(!ctx.is_null(), "Could not create Perf Context");
+        ACTIVE_MANUAL_PERF_CONTEXTS.with(|count| count.set(count.get() + 1));
 
-        Self { inner: ctx }
+        Self {
+            inner: ctx,
+            reusable: false,
+        }
     }
 }
 
 impl Drop for PerfContext {
     fn drop(&mut self) {
+        if !self.reusable {
+            ACTIVE_MANUAL_PERF_CONTEXTS.with(|count| count.set(count.get() - 1));
+        }
         unsafe {
             ffi::rocksdb_perfcontext_destroy(self.inner);
         }
@@ -94,6 +119,36 @@ impl PerfContext {
     pub fn metric(&self, id: PerfMetric) -> u64 {
         unsafe { ffi::rocksdb_perfcontext_metric(self.inner, id as c_int) }
     }
+}
+
+/// Runs `f` with a reusable thread-local [`PerfContext`].
+///
+/// The context is reset before each call. This avoids allocating and destroying
+/// the C wrapper for every measurement.
+///
+/// # Panics
+///
+/// Panics if called reentrantly or while a manually created [`PerfContext`] is
+/// alive on the same thread. RocksDB returns the same underlying context to all
+/// wrappers on a thread, so resetting it would discard the manual measurement.
+pub fn with_thread_local<F, R>(f: F) -> R
+where
+    F: FnOnce(&mut PerfContext) -> R,
+{
+    ACTIVE_MANUAL_PERF_CONTEXTS.with(|count| {
+        assert_eq!(
+            count.get(),
+            0,
+            "with_thread_local cannot run while a manual PerfContext is alive on the same thread"
+        );
+    });
+    REUSABLE_PERF_CONTEXT.with(|ctx| {
+        let mut ctx = ctx.try_borrow_mut().unwrap_or_else(|_| {
+            panic!("with_thread_local cannot be called reentrantly on the same thread")
+        });
+        ctx.reset();
+        f(&mut ctx)
+    })
 }
 
 /// Memory usage stats
@@ -259,7 +314,68 @@ pub fn get_memory_usage_stats(
 mod tests {
     use super::*;
     use crate::{DB, Options};
+    use std::panic;
     use tempfile::TempDir;
+
+    #[test]
+    fn perf_stats_level_matches_rocksdb_11_1_2() {
+        assert_eq!(PerfStatsLevel::Uninitialized as i32, 0);
+        assert_eq!(PerfStatsLevel::Disable as i32, 1);
+        assert_eq!(PerfStatsLevel::EnableCount as i32, 2);
+        assert_eq!(PerfStatsLevel::EnableWait as i32, 3);
+        assert_eq!(PerfStatsLevel::EnableTimeExceptForMutex as i32, 4);
+        assert_eq!(PerfStatsLevel::EnableTimeAndCPUTimeExceptForMutex as i32, 5);
+        assert_eq!(PerfStatsLevel::EnableTime as i32, 6);
+        assert_eq!(PerfStatsLevel::OutOfBound as i32, 7);
+    }
+
+    #[test]
+    fn with_thread_local_reuses_context_after_unwind() {
+        let first = with_thread_local(|ctx| ctx.inner);
+        let panic_result = panic::catch_unwind(|| {
+            with_thread_local(|_| panic!("test panic"));
+        });
+        assert!(panic_result.is_err());
+        let second = with_thread_local(|ctx| ctx.inner);
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn with_thread_local_resets_context_before_use() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        let db = DB::open(&opts, temp_dir.path()).unwrap();
+        db.put(b"key", b"value").unwrap();
+
+        set_perf_stats(PerfStatsLevel::EnableCount);
+        let comparison_count = with_thread_local(|ctx| {
+            db.get(b"key").unwrap();
+            ctx.metric(PerfMetric::UserKeyComparisonCount)
+        });
+        assert!(comparison_count > 0);
+        assert_eq!(
+            with_thread_local(|ctx| ctx.metric(PerfMetric::UserKeyComparisonCount)),
+            0
+        );
+        set_perf_stats(PerfStatsLevel::Disable);
+    }
+
+    #[test]
+    #[should_panic(expected = "with_thread_local cannot be called reentrantly on the same thread")]
+    fn with_thread_local_rejects_reentrant_use() {
+        with_thread_local(|_| with_thread_local(|_| ()));
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "with_thread_local cannot run while a manual PerfContext is alive on the same thread"
+    )]
+    fn with_thread_local_rejects_active_manual_context() {
+        let _manual = PerfContext::default();
+        with_thread_local(|_| ());
+    }
 
     #[test]
     fn test_perf_context_with_db_operations() {

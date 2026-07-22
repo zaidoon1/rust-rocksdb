@@ -94,6 +94,7 @@ mod comparator;
 mod db;
 mod db_iterator;
 mod db_options;
+mod db_pinnable_batch;
 mod db_pinnable_slice;
 mod env;
 pub mod event_listener;
@@ -137,14 +138,15 @@ pub use crate::{
         Options, PlainTableFactoryOptions, RateLimiterMode, ReadOptions, ReadTier,
         UniversalCompactOptions, UniversalCompactionStopStyle, WaitForCompactOptions, WriteOptions,
     },
+    db_pinnable_batch::{DBPinnableBatch, DBPinnableBatchIter},
     db_pinnable_slice::DBPinnableSlice,
     env::Env,
     ffi_util::{CSlice, CStrLike},
     iter_range::{IterateBounds, PrefixRange},
     merge_operator::MergeOperands,
-    perf::{PerfContext, PerfMetric, PerfStatsLevel},
+    perf::{PerfContext, PerfMetric, PerfStatsLevel, with_thread_local},
     slice_transform::SliceTransform,
-    snapshot::{Snapshot, SnapshotWithThreadMode},
+    snapshot::{Snapshot, SnapshotReadOptions, SnapshotWithThreadMode},
     sst_file_manager::SstFileManager,
     sst_file_writer::SstFileWriter,
     transactions::{

@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- perf: add allocation-free iterator callbacks, reusable snapshot read
+  options, native batched pinned reads, and a batch-owned pinned result
+  type.
+- perf: add slice-based vectored `WriteBatch` operations that avoid Rust
+  key and value concatenation and return RocksDB errors.
+- perf: use RocksDB's integer property API when available, reuse
+  thread-local `PerfContext` wrappers safely, and avoid per-iterator
+  `ReadOptions` allocations when creating iterators for multiple column
+  families.
+- feat: expose `open_files_async`, cache occupancy metrics, and detailed
+  write buffer manager memory accounting.
+- fix: align `PerfStatsLevel` values and RTTI build flags with RocksDB
+  11.1.2, and prevent transaction-backed snapshots from being shared
+  across threads.
+
 ## 0.51.0 (2026-06-26)
 
 - fix(librocksdb-sys): upgrade the bundled RocksDB submodule to

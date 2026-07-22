@@ -19,7 +19,7 @@ use crate::{
 };
 use libc::{c_char, c_uchar, size_t};
 use std::mem::ManuallyDrop;
-use std::{marker::PhantomData, slice};
+use std::{marker::PhantomData, ops::ControlFlow, slice};
 
 /// A type alias to keep compatibility. See [`DBRawIteratorWithThreadMode`] for details
 pub type DBRawIterator<'a> = DBRawIteratorWithThreadMode<'a, DB>;
@@ -86,7 +86,7 @@ pub struct DBRawIteratorWithThreadMode<'a, D: DBAccess> {
     /// And yes, we need to store the entire ReadOptions structure since C++
     /// ReadOptions keep reference to C rocksdb_readoptions_t wrapper which
     /// point to vectors we own.  See issue #660.
-    readopts: ReadOptions,
+    readopts: Option<ReadOptions>,
 
     db: PhantomData<&'a D>,
 }
@@ -114,7 +114,16 @@ impl<'a, D: DBAccess> DBRawIteratorWithThreadMode<'a, D> {
         let inner = std::ptr::NonNull::new(inner).unwrap();
         Self {
             inner,
-            readopts,
+            readopts: Some(readopts),
+            db: PhantomData,
+        }
+    }
+
+    pub(crate) fn from_inner_without_readopts(inner: *mut ffi::rocksdb_iterator_t) -> Self {
+        let inner = std::ptr::NonNull::new(inner).expect("RocksDB returned a null iterator");
+        Self {
+            inner,
+            readopts: None,
             db: PhantomData,
         }
     }
@@ -123,7 +132,7 @@ impl<'a, D: DBAccess> DBRawIteratorWithThreadMode<'a, D> {
         let value = ManuallyDrop::new(self);
         // SAFETY: value won't be used beyond this point
         let inner = unsafe { std::ptr::read(&raw const value.inner) };
-        let readopts = unsafe { std::ptr::read(&raw const value.readopts) };
+        let readopts = unsafe { std::ptr::read(&raw const value.readopts) }.unwrap_or_default();
 
         (inner, readopts)
     }
@@ -335,18 +344,42 @@ impl<'a, D: DBAccess> DBRawIteratorWithThreadMode<'a, D> {
     /// Seeks to the next key.
     pub fn next(&mut self) {
         if self.valid() {
-            unsafe {
-                ffi::rocksdb_iter_next(self.inner.as_ptr());
-            }
+            // SAFETY: The validity check above guarantees that RocksDB permits
+            // advancing the iterator.
+            unsafe { self.next_unchecked() }
+        }
+    }
+
+    /// Advances to the next key without checking iterator validity.
+    ///
+    /// # Safety
+    ///
+    /// The iterator must be valid.
+    #[inline]
+    unsafe fn next_unchecked(&mut self) {
+        unsafe {
+            ffi::rocksdb_iter_next(self.inner.as_ptr());
         }
     }
 
     /// Seeks to the previous key.
     pub fn prev(&mut self) {
         if self.valid() {
-            unsafe {
-                ffi::rocksdb_iter_prev(self.inner.as_ptr());
-            }
+            // SAFETY: The validity check above guarantees that RocksDB permits
+            // advancing the iterator.
+            unsafe { self.prev_unchecked() }
+        }
+    }
+
+    /// Advances to the previous key without checking iterator validity.
+    ///
+    /// # Safety
+    ///
+    /// The iterator must be valid.
+    #[inline]
+    unsafe fn prev_unchecked(&mut self) {
+        unsafe {
+            ffi::rocksdb_iter_prev(self.inner.as_ptr());
         }
     }
 
@@ -590,24 +623,113 @@ impl<'a, D: DBAccess> DBIteratorWithThreadMode<'a, D> {
         self.set_mode(mode);
         Ok(())
     }
+
+    /// Visits the remaining entries without allocating key or value buffers.
+    ///
+    /// The key and value slices are valid only for the duration of each callback.
+    /// Returning [`ControlFlow::Break`] stops the scan after consuming the current
+    /// entry. The iterator can then resume at the following entry. Callback errors
+    /// and RocksDB iterator errors are returned through `E`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::ops::ControlFlow;
+    ///
+    /// use rust_rocksdb::{DB, Error, IteratorMode};
+    ///
+    /// # let tempdir = tempfile::tempdir().unwrap();
+    /// let db = DB::open_default(tempdir.path()).unwrap();
+    /// db.put(b"k1", b"value").unwrap();
+    ///
+    /// let mut total_bytes = 0;
+    /// let mut iter = db.iterator(IteratorMode::Start);
+    /// let outcome: Result<ControlFlow<()>, Error> = iter.try_for_each_ref(|key, value| {
+    ///     total_bytes += key.len() + value.len();
+    ///     Ok(ControlFlow::Continue(()))
+    /// });
+    ///
+    /// assert!(matches!(outcome, Ok(ControlFlow::Continue(()))));
+    /// assert_eq!(total_bytes, 7);
+    /// ```
+    ///
+    /// Borrowed entries cannot escape the callback:
+    ///
+    /// ```compile_fail,E0521
+    /// use std::ops::ControlFlow;
+    ///
+    /// use rust_rocksdb::{DB, Error, IteratorMode};
+    ///
+    /// # let tempdir = tempfile::tempdir().unwrap();
+    /// let db = DB::open_default(tempdir.path()).unwrap();
+    /// let mut iter = db.iterator(IteratorMode::Start);
+    /// let mut saved_key = None;
+    ///
+    /// let _: Result<ControlFlow<()>, Error> = iter.try_for_each_ref(|key, _| {
+    ///     saved_key = Some(key);
+    ///     Ok(ControlFlow::Break(()))
+    /// });
+    /// ```
+    #[inline]
+    pub fn try_for_each_ref<B, E, F>(&mut self, mut visit: F) -> Result<ControlFlow<B>, E>
+    where
+        E: From<Error>,
+        F: FnMut(&[u8], &[u8]) -> Result<ControlFlow<B>, E>,
+    {
+        loop {
+            let item = self
+                .next_with(|key, value| visit(key, value))
+                .map_err(E::from)?;
+            match item {
+                Some(Ok(ControlFlow::Continue(()))) => {}
+                Some(Ok(ControlFlow::Break(value))) => return Ok(ControlFlow::Break(value)),
+                Some(Err(error)) => return Err(error),
+                None => return Ok(ControlFlow::Continue(())),
+            }
+        }
+    }
+
+    #[inline]
+    fn next_with<T>(&mut self, visit: impl FnOnce(&[u8], &[u8]) -> T) -> Result<Option<T>, Error> {
+        if self.done {
+            return Ok(None);
+        }
+
+        let Some((key, value)) = self.raw.item() else {
+            self.done = true;
+            self.raw.status()?;
+            return Ok(None);
+        };
+
+        let item = visit(key, value);
+        // SAFETY: `raw.item()` returned an entry, which proves that the
+        // iterator is valid until it is advanced.
+        unsafe { self.advance_unchecked() };
+        Ok(Some(item))
+    }
+
+    /// Advances in the configured direction without checking iterator validity.
+    ///
+    /// # Safety
+    ///
+    /// The raw iterator must be valid.
+    #[inline]
+    unsafe fn advance_unchecked(&mut self) {
+        match self.direction {
+            Direction::Forward => unsafe { self.raw.next_unchecked() },
+            Direction::Reverse => unsafe { self.raw.prev_unchecked() },
+        }
+    }
 }
 
 impl<D: DBAccess> Iterator for DBIteratorWithThreadMode<'_, D> {
     type Item = Result<KVBytes, Error>;
 
     fn next(&mut self) -> Option<Result<KVBytes, Error>> {
-        if self.done {
-            None
-        } else if let Some((key, value)) = self.raw.item() {
-            let item = (Box::from(key), Box::from(value));
-            match self.direction {
-                Direction::Forward => self.raw.next(),
-                Direction::Reverse => self.raw.prev(),
-            }
-            Some(Ok(item))
-        } else {
-            self.done = true;
-            self.raw.status().err().map(Result::Err)
+        match self.next_with(|key, value| (Box::from(key), Box::from(value))) {
+            Ok(Some(item)) => Some(Ok(item)),
+            Ok(None) => None,
+            Err(error) => Some(Err(error)),
         }
     }
 }

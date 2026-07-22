@@ -20,6 +20,29 @@ use crate::{
 /// A type alias to keep compatibility. See [`SnapshotWithThreadMode`] for details
 pub type Snapshot<'a> = SnapshotWithThreadMode<'a, DB>;
 
+/// Reusable read state bound to a [`SnapshotWithThreadMode`].
+///
+/// Creating this value configures one native [`ReadOptions`] with the snapshot.
+/// Its get and multi-get methods reuse those options until the session is
+/// dropped. Custom options can be supplied with
+/// [`SnapshotWithThreadMode::read_options_opt`].
+///
+/// The session cannot outlive its snapshot:
+///
+/// ```compile_fail,E0597
+/// use rust_rocksdb::DB;
+///
+/// let db = DB::open_default("foo").unwrap();
+/// let _read_options = {
+///     let snapshot = db.snapshot();
+///     snapshot.read_options()
+/// };
+/// ```
+pub struct SnapshotReadOptions<'snapshot, 'db, D: DBAccess = DB> {
+    snapshot: &'snapshot SnapshotWithThreadMode<'db, D>,
+    readopts: ReadOptions,
+}
+
 /// A consistent view of the database at the point of creation.
 ///
 /// # Examples
@@ -68,6 +91,23 @@ impl<'a, D: DBAccess> SnapshotWithThreadMode<'a, D> {
     /// Returns the sequence number of the snapshot.
     pub fn sequence_number(&self) -> u64 {
         unsafe { ffi::rocksdb_snapshot_get_sequence_number(self.inner) }
+    }
+
+    /// Creates reusable default read options bound to this snapshot.
+    pub fn read_options(&'_ self) -> SnapshotReadOptions<'_, 'a, D> {
+        self.read_options_opt(ReadOptions::default())
+    }
+
+    /// Creates reusable custom read options bound to this snapshot.
+    ///
+    /// Any snapshot already configured on `readopts` is replaced with this
+    /// snapshot.
+    pub fn read_options_opt(&'_ self, mut readopts: ReadOptions) -> SnapshotReadOptions<'_, 'a, D> {
+        readopts.set_snapshot(self);
+        SnapshotReadOptions {
+            snapshot: self,
+            readopts,
+        }
     }
 
     /// Creates an iterator over the data in this snapshot, using the default read options.
@@ -147,8 +187,7 @@ impl<'a, D: DBAccess> SnapshotWithThreadMode<'a, D> {
 
     /// Returns the bytes associated with a key value with default read options.
     pub fn get<K: AsRef<[u8]>>(&self, key: K) -> Result<Option<Vec<u8>>, Error> {
-        let readopts = ReadOptions::default();
-        self.get_opt(key, readopts)
+        self.read_options().get(key)
     }
 
     /// Returns the bytes associated with a key value and given column family with default read
@@ -158,18 +197,16 @@ impl<'a, D: DBAccess> SnapshotWithThreadMode<'a, D> {
         cf: &impl AsColumnFamilyRef,
         key: K,
     ) -> Result<Option<Vec<u8>>, Error> {
-        let readopts = ReadOptions::default();
-        self.get_cf_opt(cf, key.as_ref(), readopts)
+        self.read_options().get_cf(cf, key)
     }
 
     /// Returns the bytes associated with a key value and given read options.
     pub fn get_opt<K: AsRef<[u8]>>(
         &self,
         key: K,
-        mut readopts: ReadOptions,
+        readopts: ReadOptions,
     ) -> Result<Option<Vec<u8>>, Error> {
-        readopts.set_snapshot(self);
-        self.db.get_opt(key.as_ref(), &readopts)
+        self.read_options_opt(readopts).get(key)
     }
 
     /// Returns the bytes associated with a key value, given column family and read options.
@@ -177,10 +214,9 @@ impl<'a, D: DBAccess> SnapshotWithThreadMode<'a, D> {
         &self,
         cf: &impl AsColumnFamilyRef,
         key: K,
-        mut readopts: ReadOptions,
+        readopts: ReadOptions,
     ) -> Result<Option<Vec<u8>>, Error> {
-        readopts.set_snapshot(self);
-        self.db.get_cf_opt(cf, key.as_ref(), &readopts)
+        self.read_options_opt(readopts).get_cf(cf, key)
     }
 
     /// Return the value associated with a key using RocksDB's PinnableSlice
@@ -190,8 +226,7 @@ impl<'a, D: DBAccess> SnapshotWithThreadMode<'a, D> {
         &'_ self,
         key: K,
     ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
-        let readopts = ReadOptions::default();
-        self.get_pinned_opt(key, readopts)
+        self.read_options().get_pinned(key)
     }
 
     /// Return the value associated with a key using RocksDB's PinnableSlice
@@ -202,8 +237,7 @@ impl<'a, D: DBAccess> SnapshotWithThreadMode<'a, D> {
         cf: &impl AsColumnFamilyRef,
         key: K,
     ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
-        let readopts = ReadOptions::default();
-        self.get_pinned_cf_opt(cf, key.as_ref(), readopts)
+        self.read_options().get_pinned_cf(cf, key)
     }
 
     /// Return the value associated with a key using RocksDB's PinnableSlice
@@ -211,10 +245,9 @@ impl<'a, D: DBAccess> SnapshotWithThreadMode<'a, D> {
     pub fn get_pinned_opt<K: AsRef<[u8]>>(
         &'_ self,
         key: K,
-        mut readopts: ReadOptions,
+        readopts: ReadOptions,
     ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
-        readopts.set_snapshot(self);
-        self.db.get_pinned_opt(key.as_ref(), &readopts)
+        self.read_options_opt(readopts).get_pinned(key)
     }
 
     /// Return the value associated with a key using RocksDB's PinnableSlice
@@ -224,10 +257,9 @@ impl<'a, D: DBAccess> SnapshotWithThreadMode<'a, D> {
         &'_ self,
         cf: &impl AsColumnFamilyRef,
         key: K,
-        mut readopts: ReadOptions,
+        readopts: ReadOptions,
     ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
-        readopts.set_snapshot(self);
-        self.db.get_pinned_cf_opt(cf, key.as_ref(), &readopts)
+        self.read_options_opt(readopts).get_pinned_cf(cf, key)
     }
 
     /// Returns the bytes associated with the given key values and default read options.
@@ -235,8 +267,7 @@ impl<'a, D: DBAccess> SnapshotWithThreadMode<'a, D> {
     where
         I: IntoIterator<Item = K>,
     {
-        let readopts = ReadOptions::default();
-        self.multi_get_opt(keys, readopts)
+        self.read_options().multi_get(keys)
     }
 
     /// Returns the bytes associated with the given key values and default read options.
@@ -246,37 +277,88 @@ impl<'a, D: DBAccess> SnapshotWithThreadMode<'a, D> {
         I: IntoIterator<Item = (&'b W, K)>,
         W: AsColumnFamilyRef + 'b,
     {
-        let readopts = ReadOptions::default();
-        self.multi_get_cf_opt(keys_cf, readopts)
+        self.read_options().multi_get_cf(keys_cf)
     }
 
     /// Returns the bytes associated with the given key values and given read options.
     pub fn multi_get_opt<K, I>(
         &self,
         keys: I,
-        mut readopts: ReadOptions,
+        readopts: ReadOptions,
     ) -> Vec<Result<Option<Vec<u8>>, Error>>
     where
         K: AsRef<[u8]>,
         I: IntoIterator<Item = K>,
     {
-        readopts.set_snapshot(self);
-        self.db.multi_get_opt(keys, &readopts)
+        self.read_options_opt(readopts).multi_get(keys)
     }
 
     /// Returns the bytes associated with the given key values, given column family and read options.
     pub fn multi_get_cf_opt<'b, K, I, W>(
         &self,
         keys_cf: I,
-        mut readopts: ReadOptions,
+        readopts: ReadOptions,
     ) -> Vec<Result<Option<Vec<u8>>, Error>>
     where
         K: AsRef<[u8]>,
         I: IntoIterator<Item = (&'b W, K)>,
         W: AsColumnFamilyRef + 'b,
     {
-        readopts.set_snapshot(self);
-        self.db.multi_get_cf_opt(keys_cf, &readopts)
+        self.read_options_opt(readopts).multi_get_cf(keys_cf)
+    }
+}
+
+impl<'db, D: DBAccess> SnapshotReadOptions<'_, 'db, D> {
+    /// Returns the bytes associated with a key.
+    pub fn get<K: AsRef<[u8]>>(&self, key: K) -> Result<Option<Vec<u8>>, Error> {
+        self.snapshot.db.get_opt(key, &self.readopts)
+    }
+
+    /// Returns the bytes associated with a key in a column family.
+    pub fn get_cf<K: AsRef<[u8]>>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        key: K,
+    ) -> Result<Option<Vec<u8>>, Error> {
+        self.snapshot.db.get_cf_opt(cf, key, &self.readopts)
+    }
+
+    /// Returns a pinned value associated with a key.
+    pub fn get_pinned<K: AsRef<[u8]>>(
+        &self,
+        key: K,
+    ) -> Result<Option<DBPinnableSlice<'db>>, Error> {
+        let db: &'db D = self.snapshot.db;
+        db.get_pinned_opt(key, &self.readopts)
+    }
+
+    /// Returns a pinned value associated with a key in a column family.
+    pub fn get_pinned_cf<K: AsRef<[u8]>>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        key: K,
+    ) -> Result<Option<DBPinnableSlice<'db>>, Error> {
+        let db: &'db D = self.snapshot.db;
+        db.get_pinned_cf_opt(cf, key, &self.readopts)
+    }
+
+    /// Returns the values associated with the given keys.
+    pub fn multi_get<K, I>(&self, keys: I) -> Vec<Result<Option<Vec<u8>>, Error>>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = K>,
+    {
+        self.snapshot.db.multi_get_opt(keys, &self.readopts)
+    }
+
+    /// Returns the values associated with the given keys and column families.
+    pub fn multi_get_cf<'b, K, I, W>(&self, keys_cf: I) -> Vec<Result<Option<Vec<u8>>, Error>>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = (&'b W, K)>,
+        W: AsColumnFamilyRef + 'b,
+    {
+        self.snapshot.db.multi_get_cf_opt(keys_cf, &self.readopts)
     }
 }
 
@@ -290,5 +372,5 @@ impl<D: DBAccess> Drop for SnapshotWithThreadMode<'_, D> {
 
 /// `Send` and `Sync` implementations for `SnapshotWithThreadMode` are safe, because `SnapshotWithThreadMode` is
 /// immutable and can be safely shared between threads.
-unsafe impl<D: DBAccess> Send for SnapshotWithThreadMode<'_, D> {}
-unsafe impl<D: DBAccess> Sync for SnapshotWithThreadMode<'_, D> {}
+unsafe impl<D: DBAccess + Sync> Send for SnapshotWithThreadMode<'_, D> {}
+unsafe impl<D: DBAccess + Sync> Sync for SnapshotWithThreadMode<'_, D> {}

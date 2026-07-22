@@ -77,6 +77,14 @@ extern ROCKSDB_LIBRARY_API void rocksdb_options_set_memtable_batch_lookup_optimi
 extern ROCKSDB_LIBRARY_API unsigned char rocksdb_options_get_memtable_batch_lookup_optimization(
     rocksdb_options_t*);
 
+/* Options::open_files_async compatibility wrapper. */
+extern ROCKSDB_LIBRARY_API unsigned char
+rust_rocksdb_options_open_files_async_supported(void);
+extern ROCKSDB_LIBRARY_API unsigned char
+rust_rocksdb_options_set_open_files_async(rocksdb_options_t*, unsigned char);
+extern ROCKSDB_LIBRARY_API unsigned char
+rust_rocksdb_options_get_open_files_async(rocksdb_options_t*);
+
 /* -------------------------------------------------------------------------
  * CompactOptions::blob_garbage_collection_age_cutoff
  *
@@ -87,6 +95,72 @@ extern ROCKSDB_LIBRARY_API void rocksdb_compactoptions_set_blob_garbage_collecti
     rocksdb_compactoptions_t*, double);
 extern ROCKSDB_LIBRARY_API double rocksdb_compactoptions_get_blob_garbage_collection_age_cutoff(
     rocksdb_compactoptions_t*);
+
+/* -------------------------------------------------------------------------
+ * Batch-owned pinned MultiGet results
+ *
+ * The upstream batched C API allocates one rocksdb_pinnableslice_t wrapper
+ * per successful key. This additive API keeps the PinnableSlice values in one
+ * owner so Rust can borrow every result without per-key wrapper allocation.
+ * ------------------------------------------------------------------------- */
+typedef struct rust_rocksdb_pinnable_batch_t rust_rocksdb_pinnable_batch_t;
+
+enum {
+  rust_rocksdb_pinnable_batch_not_found = 0,
+  rust_rocksdb_pinnable_batch_found = 1,
+  rust_rocksdb_pinnable_batch_error = 2,
+};
+
+extern ROCKSDB_LIBRARY_API rust_rocksdb_pinnable_batch_t*
+rust_rocksdb_batched_multi_get_pinned(
+    rocksdb_t*, const rocksdb_readoptions_t*,
+    rocksdb_column_family_handle_t*, size_t, const rocksdb_slice_t*,
+    unsigned char, char**);
+extern ROCKSDB_LIBRARY_API size_t rust_rocksdb_pinnable_batch_len(
+    const rust_rocksdb_pinnable_batch_t*);
+extern ROCKSDB_LIBRARY_API unsigned char rust_rocksdb_pinnable_batch_get(
+    const rust_rocksdb_pinnable_batch_t*, size_t, const char**, size_t*,
+    const char**, size_t*);
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_pinnable_batch_destroy(
+    rust_rocksdb_pinnable_batch_t*);
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_batched_multi_get_cf_slice_safe(
+    rocksdb_t*, const rocksdb_readoptions_t*,
+    rocksdb_column_family_handle_t*, size_t, const rocksdb_slice_t*,
+    rocksdb_pinnableslice_t**, char**, unsigned char, char**);
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_create_iterators_safe(
+    rocksdb_t*, rocksdb_readoptions_t*, rocksdb_column_family_handle_t**,
+    rocksdb_iterator_t**, size_t, char**);
+
+/* -------------------------------------------------------------------------
+ * Slice-based vectored WriteBatch operations
+ *
+ * The upstream putv/mergev/deletev wrappers rebuild Slice arrays from
+ * separate pointer and length arrays. These variants accept ABI-compatible
+ * rocksdb_slice_t arrays directly.
+ * ------------------------------------------------------------------------- */
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_writebatch_put_slices(
+    rocksdb_writebatch_t*, int, const rocksdb_slice_t*, int,
+    const rocksdb_slice_t*, char**);
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_writebatch_put_slices_cf(
+    rocksdb_writebatch_t*, rocksdb_column_family_handle_t*, int,
+    const rocksdb_slice_t*, int, const rocksdb_slice_t*, char**);
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_writebatch_merge_slices(
+    rocksdb_writebatch_t*, int, const rocksdb_slice_t*, int,
+    const rocksdb_slice_t*, char**);
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_writebatch_merge_slices_cf(
+    rocksdb_writebatch_t*, rocksdb_column_family_handle_t*, int,
+    const rocksdb_slice_t*, int, const rocksdb_slice_t*, char**);
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_writebatch_delete_slices(
+    rocksdb_writebatch_t*, int, const rocksdb_slice_t*, char**);
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_writebatch_delete_slices_cf(
+    rocksdb_writebatch_t*, rocksdb_column_family_handle_t*, int,
+    const rocksdb_slice_t*, char**);
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_writebatch_delete_range_slices(
+    rocksdb_writebatch_t*, int, const rocksdb_slice_t*, int,
+    const rocksdb_slice_t*, char**);
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_writebatch_delete_range_slices_cf(
+    rocksdb_writebatch_t*, rocksdb_column_family_handle_t*, int,
+    const rocksdb_slice_t*, int, const rocksdb_slice_t*, char**);
 
 /* -------------------------------------------------------------------------
  * EventListener background error status severity and recovery callbacks

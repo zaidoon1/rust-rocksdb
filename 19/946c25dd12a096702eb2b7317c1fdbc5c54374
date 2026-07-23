@@ -1,0 +1,23 @@
+README.md
+  s_939ac6d9b09cd9::t_b9ce61a25cd4ec 378,380-426,436,451,454
+CHANGELOG.md
+  s_939ac6d9b09cd9::t_1ce75592386689 5-7
+librocksdb-sys/build.rs
+  s_939ac6d9b09cd9::t_b582f30086cb95 189,345-370,412,1073
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "19946c25dd12a096702eb2b7317c1fdbc5c54374",
+  "prompts": {},
+  "sessions": {
+    "s_939ac6d9b09cd9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f8888-4733-7613-97cb-d678dac184b0",
+        "model": "unknown"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    }
+  }
+}

@@ -389,6 +389,10 @@ default development and test settings. Release builds, sanitizer builds, and
 profiles with different settings are unchanged. Set `ROCKSDB_NATIVE_DEBUG=1`
 when native RocksDB debug information is required.
 
+This matches the native package profile used by TiKV's application workspace,
+but applies it inside `rust-rocksdb` so consuming services do not need their own
+crate-specific profile configuration.
+
 Install [`sccache`](https://github.com/mozilla/sccache), then add this to
 `~/.cargo/config.toml`:
 

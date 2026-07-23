@@ -186,6 +186,7 @@ fn main() {
         "ROCKSDB_INCLUDE_DIR",
         "ROCKSDB_USE_PKG_CONFIG",
         "ROCKSDB_CXX_STD",
+        "ROCKSDB_NATIVE_DEBUG",
         // Snappy
         "SNAPPY_COMPILE",
         "SNAPPY_LIB_DIR",
@@ -341,6 +342,32 @@ fn emit_metadata(backend: &Backend) {
     println!("cargo::metadata=out_dir={}", out_dir().display());
 }
 
+/// Keep Cargo's default development and test settings from generating large
+/// native debug artifacts.
+fn apply_native_dev_defaults(config: &mut cc::Build) {
+    if env_truthy("ROCKSDB_NATIVE_DEBUG") || sanitizer_enabled() {
+        return;
+    }
+
+    let profile = env::var("PROFILE").unwrap_or_default();
+    let opt_level = env::var("OPT_LEVEL").unwrap_or_default();
+    let debug = env::var("DEBUG").unwrap_or_default();
+    let cargo_dev_defaults =
+        profile == "debug" && opt_level == "0" && matches!(debug.as_str(), "2" | "full" | "true");
+
+    if cargo_dev_defaults {
+        config.opt_level(1);
+        config.debug(false);
+    }
+}
+
+fn sanitizer_enabled() -> bool {
+    ["CFLAGS", "CXXFLAGS", "CARGO_ENCODED_RUSTFLAGS"]
+        .iter()
+        .filter_map(env::var_os)
+        .any(|flags| flags.to_string_lossy().contains("sanitize"))
+}
+
 // =========================================================================
 // Vendored build
 // =========================================================================
@@ -382,6 +409,7 @@ mod vendor {
             cfg.flag("-include").flag("cstdint");
         }
 
+        apply_native_dev_defaults(&mut cfg);
         cfg.cpp(true);
         cfg.compile("librocksdb.a");
     }
@@ -1042,6 +1070,7 @@ mod snappy {
         ] {
             cfg.file(src);
         }
+        apply_native_dev_defaults(&mut cfg);
         cfg.cpp(true);
         cfg.compile("libsnappy.a");
     }

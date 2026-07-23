@@ -375,9 +375,55 @@ cd rust-rocksdb
 git submodule update --init --recursive
 ```
 
-### Linking Against a Prebuilt RocksDB
+### Faster Local Development Builds
 
-By default, `rust-rocksdb` builds RocksDB from the bundled submodule. To link against a system-installed `librocksdb` instead (e.g. to share a single library across multiple Rust projects, cut compile time, or use a distro's package), the build script honors these opt-in environment variables:
+RocksDB is a large C++ dependency. The recommended development setup uses
+Cargo's build cache together with `sccache`. This keeps the cache outside the
+project's `target/` directory and avoids maintaining a separate RocksDB artifact
+format.
+
+When Cargo uses `PROFILE=debug`, `OPT_LEVEL=0`, and full debug information,
+`rust-rocksdb` automatically builds the bundled RocksDB and Snappy libraries
+with `opt-level = 1` and without native debug information. This covers Cargo's
+default development and test settings. Release builds, sanitizer builds, and
+profiles with different settings are unchanged. Set `ROCKSDB_NATIVE_DEBUG=1`
+when native RocksDB debug information is required.
+
+Install [`sccache`](https://github.com/mozilla/sccache), then add this to
+`~/.cargo/config.toml`:
+
+```toml
+[build]
+rustc-wrapper = "sccache"
+build-dir = "{cargo-cache-home}/build/{workspace-path-hash}"
+```
+
+`rust-librocksdb-sys` uses the `cc` crate, which recognizes `sccache` through
+`rustc-wrapper` and applies it to the bundled C and C++ compilation too.
+`build-dir` is stable in Cargo 1.91 and stores intermediate build output outside
+the workspace. Removing a project's `target/` directory therefore does not
+remove those intermediates.
+
+`ccache` is a C and C++ only alternative to `sccache`:
+
+```toml
+# .cargo/config.toml
+[env]
+CC = "ccache cc"
+CXX = "ccache c++"
+```
+
+Do not stack both cache wrappers around the same compiler. Cache misses are
+expected when the compiler, target, RocksDB sources, native features, or compiler
+flags change.
+
+### Using an Existing RocksDB Installation
+
+By default, `rust-rocksdb` builds RocksDB from the bundled submodule. Controlled
+development environments can avoid that build entirely by linking a compatible
+RocksDB installation. Prefer `pkg-config` when possible because its metadata can
+include the required native search paths and transitive libraries. The build
+script also supports explicit library and header directories:
 
 | Variable                   | Effect                                                                                                       |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------ |
@@ -387,6 +433,7 @@ By default, `rust-rocksdb` builds RocksDB from the bundled submodule. To link ag
 | `ROCKSDB_INCLUDE_DIR=<p>`  | Headers for `bindgen`. Mandatory with `ROCKSDB_LIB_DIR`; with `ROCKSDB_USE_PKG_CONFIG` it is *merged in front* of pkg-config's discovered paths (does not replace them). |
 | `ROCKSDB_COMPILE=1`        | Force the bundled vendored build even if the above are set. Accepts `1` or `true` (case-insensitive).        |
 | `ROCKSDB_CXX_STD=c++23`    | Override the C++ standard used to compile RocksDB (default `c++20`). Only used for vendored builds.          |
+| `ROCKSDB_NATIVE_DEBUG=1`    | Preserve Cargo's native development optimization and debug settings for vendored builds.                    |
 | `CXXSTDLIB=stdc++`         | Override the C++ stdlib linked (e.g. `c++` for libc++, `stdc++` for libstdc++).                              |
 
 When you opt in via any of these:
@@ -401,10 +448,10 @@ Same set of variables exists for snappy (`SNAPPY_LIB_DIR`, `SNAPPY_STATIC`, `SNA
 #### Examples
 
 ```bash
-# Use distro-installed librocksdb via pkg-config (Debian/Ubuntu: librocksdb-dev)
+# Use a compatible RocksDB installation discovered through pkg-config
 ROCKSDB_USE_PKG_CONFIG=1 cargo build
 
-# Manual path; static link
+# Use a manually managed static library and matching headers
 ROCKSDB_LIB_DIR=/opt/rocksdb/lib \
 ROCKSDB_INCLUDE_DIR=/opt/rocksdb/include \
 ROCKSDB_STATIC=1 \

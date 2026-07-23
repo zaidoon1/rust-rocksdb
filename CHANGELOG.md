@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- perf: reduce bundled RocksDB development build size by defaulting its
+  native compilation to `opt-level = 1` without debug information.
+  Set `ROCKSDB_NATIVE_DEBUG=1` to preserve Cargo's native debug settings.
 - perf: add allocation-free iterator callbacks, reusable snapshot read
   options, native batched pinned reads, and a batch-owned pinned result
   type.

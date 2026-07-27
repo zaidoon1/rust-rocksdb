@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+### Build configuration
+
+- perf: enable hardware CRC32C on aarch64. The `-march=...+crc` flag was
+  gated on `CARGO_CFG_TARGET_FEATURE`, which is only `neon` on stock
+  `aarch64-unknown-linux-gnu`, `aarch64-linux-android` and
+  `aarch64-pc-windows-msvc`, so `HAVE_ARM64_CRC` was never defined,
+  `util/crc32c_arm64.cc` compiled to an empty object, and every block
+  read and write used the software CRC table. RocksDB picks the ARM path
+  at runtime via `getauxval(AT_HWCAP)`, so the flag is now gated on the
+  compiler accepting it, as upstream does. Scoped to the two crc32c
+  translation units so folly's `F14IntrinsicsMode` stays consistent with
+  the prebuilt libfolly in coroutines builds.
+- perf: build the vendored snappy with its accelerated paths on. snappy
+  expects a generated `config.h`; we never produced one or defined
+  `HAVE_CONFIG_H`, so every `#if HAVE_*` was 0 and the NEON/SSSE3
+  `IncrementalCopy`, `__builtin_expect`, `__builtin_ctz` and
+  `__builtin_prefetch` were all disabled. snappy is a default feature.
+- perf: pass `-fno-builtin-memcmp` on non-MSVC, as upstream does, so key
+  comparisons use glibc's SIMD `memcmp` rather than GCC's inline
+  expansion.
+- perf: forward the `bmi2` and `popcnt` target features to the C++
+  build; `-Ctarget-feature=+bmi2` previously had no effect on it.
+- fix: don't define `HAVE_UINT128_EXTENSION` on 32-bit targets. GCC and
+  Clang only provide `__int128` on 64-bit, and `util/math128.h` aliases
+  it directly, so `i686` and `armv7` could not compile.
+- fix: stop defining `NIOSTATS_CONTEXT`/`NPERF_CONTEXT` on iOS, tvOS and
+  watchOS. They compile `PerfContext` and `IOStatsContext` out, so the
+  whole `perf` API silently returned zeros. Upstream defaults both on.
+- fix: define `ROCKSDB_AUXV_GETAUXVAL_PRESENT` on Android, without which
+  the aarch64 CRC32 runtime check always fails.
+
 - perf: reduce bundled RocksDB development build size by defaulting its
   native compilation to `opt-level = 1` without debug information.
   Set `ROCKSDB_NATIVE_DEBUG=1` to preserve Cargo's native debug settings.

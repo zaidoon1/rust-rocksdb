@@ -377,6 +377,46 @@ mod vendor {
 
     /// Compile RocksDB from the bundled submodule sources.
     pub(super) fn build(target: &Target) {
+        let (mut cfg, layout) = configure(target);
+
+        // These are pulled out into their own build below when they need
+        // different `-march` flags than the rest of the library.
+        let crc_sources = arm_crc32c_sources(target);
+
+        for src in collect_sources(target, layout) {
+            if crc_sources.contains(&src) {
+                continue;
+            }
+            cfg.file(format!("rocksdb/{src}"));
+        }
+        cfg.file("build_version.cc");
+        // Local C-API extensions are compiled as a regular translation
+        // unit alongside the submodule's `db/c.cc`. The two end up in the
+        // same `librocksdb.a`; the linker resolves the new symbols out of
+        // the extension's `.o` and everything else out of the submodule's.
+        cfg.file("c-api-extensions/c_api_extensions.cc");
+        cfg.compile("librocksdb.a");
+
+        if !crc_sources.is_empty() {
+            let (mut crc_cfg, _) = configure(target);
+            crc_cfg.flag_if_supported(ARM_CRC32C_MARCH);
+            for src in &crc_sources {
+                crc_cfg.file(format!("rocksdb/{src}"));
+            }
+            // A second archive is fine here: these two translation units
+            // reference only each other plus libc/libc++, so nothing in
+            // them points back into `librocksdb.a`. The dependency runs the
+            // other way (the rest of RocksDB calls `crc32c::Extend`), and
+            // this archive is emitted second, so a single-pass linker
+            // resolves it.
+            crc_cfg.compile("librocksdb_crc32c_arm.a");
+        }
+    }
+
+    /// Everything about the build except which files go into it. Shared by the
+    /// main library and the separate aarch64 CRC32C build so the two can't
+    /// drift apart.
+    fn configure(target: &Target) -> (cc::Build, SourceLayout) {
         let mut cfg = base_cfg(target);
 
         apply_compression_features(&mut cfg);
@@ -392,16 +432,6 @@ mod vendor {
         #[cfg(feature = "coroutines")]
         super::coroutines::apply_compile_config(&mut cfg);
 
-        for src in collect_sources(target, layout) {
-            cfg.file(format!("rocksdb/{src}"));
-        }
-        cfg.file("build_version.cc");
-        // Local C-API extensions are compiled as a regular translation
-        // unit alongside the submodule's `db/c.cc`. The two end up in the
-        // same `librocksdb.a`; the linker resolves the new symbols out of
-        // the extension's `.o` and everything else out of the submodule's.
-        cfg.file("c-api-extensions/c_api_extensions.cc");
-
         if !target.is_msvc() {
             // Force-include <cstdint>. Some translation units use uintN_t
             // through transitive includes that break under stricter GCC
@@ -411,7 +441,39 @@ mod vendor {
 
         apply_native_dev_defaults(&mut cfg);
         cfg.cpp(true);
-        cfg.compile("librocksdb.a");
+        (cfg, layout)
+    }
+
+    /// Baseline that turns on the ARMv8 CRC32 and crypto instructions.
+    const ARM_CRC32C_MARCH: &str = "-march=armv8-a+crc+crypto";
+
+    /// The translation units to compile with [`ARM_CRC32C_MARCH`], or empty if
+    /// that doesn't apply to this target.
+    ///
+    /// RocksDB's hardware CRC32C is behind `__ARM_FEATURE_CRC32`, which the
+    /// compiler only defines when a `+crc` capable arch is selected:
+    /// `util/crc32c_arm64.h` turns it into `HAVE_ARM64_CRC`, and all of
+    /// `util/crc32c_arm64.cc` sits behind that guard. Without the flag the file
+    /// is an empty object and every checksum falls back to the software table.
+    ///
+    /// The flag is deliberately not applied library-wide even though upstream's
+    /// CMake does exactly that. folly's F14 hash table picks its
+    /// `F14IntrinsicsMode` from `__ARM_FEATURE_CRC32`, so widening the flag to
+    /// every translation unit makes RocksDB's folly-using TUs disagree with the
+    /// prebuilt libfolly and the build fails at link time on
+    /// `F14LinkCheck<SimdAndCrc>::check()`. Neither crc32c source includes
+    /// folly, so scoping the flag to them keeps the two consistent.
+    ///
+    /// Both files need it together: `pmull_runtime_flag` is defined in
+    /// `crc32c.cc` under `HAVE_ARM64_CRC` and declared `extern` in
+    /// `crc32c_arm64.cc`.
+    fn arm_crc32c_sources(target: &Target) -> Vec<&'static str> {
+        // A user-specified CPU already went out as `-mcpu=<cpu>`; overriding it
+        // with `-march` here would narrow the baseline they asked for.
+        if target.arch != "aarch64" || target.rust_target_cpu.is_some() {
+            return Vec::new();
+        }
+        vec!["util/crc32c.cc", "util/crc32c_arm64.cc"]
     }
 
     /// Base `cc::Build` with the always-on flags, defines, includes, and
@@ -431,8 +493,15 @@ mod vendor {
         cfg.define("NDEBUG", Some("1"));
         // True for C++ >= 17. We set `-std=c++20` below.
         cfg.define("HAVE_ALIGNED_NEW", None);
-        // __uint128_t is supported by GCC and Clang; not MSVC.
-        if !target.is_msvc() {
+        // __uint128_t is supported by GCC and Clang; not MSVC. It also requires
+        // a 64-bit target: GCC/Clang only provide __int128 where TImode exists,
+        // so 32-bit targets (i686, armv7, thumbv7neon, armv7-linux-androideabi)
+        // do not define __SIZEOF_INT128__. Defining it there made
+        // `util/math128.h`'s `using Unsigned128 = __uint128_t;` a hard compile
+        // error. RocksDB's own fallback in `util/fastrange.h` is a bit-identical
+        // 64x64->hi64 decomposition, so dropping the define costs nothing but a
+        // few instructions and keeps the SST format unchanged.
+        if !target.is_msvc() && target.pointer_width == 64 {
             cfg.define("HAVE_UINT128_EXTENSION", None);
         }
 
@@ -445,6 +514,14 @@ mod vendor {
             cfg.flag("-std:c++20");
         } else {
             cfg.flag(cxx_standard());
+            // Upstream passes this on GCC (CMakeLists.txt) and on essentially
+            // every POSIX target (build_tools/build_detect_platform). GCC
+            // inline-expands `memcmp` for unknown lengths, which is slower than
+            // glibc's SIMD `memcmp` at the key sizes RocksDB compares; this
+            // flag keeps the library call. It affects `Slice::compare`, the
+            // `dbformat.cc` comparators and the block binary search, so it is
+            // squarely on the read hot path.
+            cfg.flag_if_supported("-fno-builtin-memcmp");
             // Mirrors RocksDB's CMakeLists.txt warning flags.
             for f in [
                 "-Wsign-compare",
@@ -549,7 +626,9 @@ mod vendor {
     fn apply_target_arch(cfg: &mut cc::Build, target: &Target) {
         match target.arch.as_str() {
             "x86_64" | "x86" => apply_x86(cfg, target),
-            "aarch64" => apply_aarch64(cfg, target),
+            // aarch64 needs no library-wide flags. Its one arch-specific
+            // concern, the CRC32 intrinsics, is handled per translation unit
+            // by `arm_crc32c_sources`.
             _ => {}
         }
     }
@@ -575,6 +654,16 @@ mod vendor {
         if target.has_feature("bmi1") {
             cfg.flag_if_supported("-mbmi");
         }
+        // Without -mbmi2 the compiler never defines __BMI2__, so RocksDB's
+        // `BottomNBits` (util/math.h) stays off `bzhi` and the LOUDS trie
+        // select stays off `pdep`, even for a user who explicitly asked for
+        // `-Ctarget-feature=+bmi2`.
+        if target.has_feature("bmi2") {
+            cfg.flag_if_supported("-mbmi2");
+        }
+        if target.has_feature("popcnt") {
+            cfg.flag_if_supported("-mpopcnt");
+        }
         if target.has_feature("lzcnt") {
             cfg.flag_if_supported("-mlzcnt");
         }
@@ -587,21 +676,6 @@ mod vendor {
         if target.has_feature("avx") && !target.has_feature("pclmulqdq") {
             println!(
                 r#"cargo::warning=RocksDB BUG: target arch missing -mpclmul; compile may fail: pass a named architecture e.g. -Ctarget-cpu=broadwell"#
-            );
-        }
-    }
-
-    fn apply_aarch64(cfg: &mut cc::Build, target: &Target) {
-        if target.has_feature("crc") && target.has_feature("aes") {
-            // If no -Ctarget-cpu was provided, set an explicit baseline
-            // that includes the crypto extensions RocksDB checks for via
-            // __ARM_FEATURE_CRYPTO. See facebook/rocksdb#14217.
-            if target.rust_target_cpu.is_none() {
-                cfg.flag_if_supported("-march=armv8-a+crc+aes+crypto");
-            }
-        } else {
-            println!(
-                r#"cargo::warning=building for aarch64 WITHOUT CRC instruction: build with RUSTFLAGS="-Ctarget-cpu=..." to optimize RocksDB e.g. -Ctarget-cpu=neoverse-n1"#
             );
         }
     }
@@ -644,8 +718,15 @@ mod vendor {
                 cfg.define("OS_MACOSX", None);
                 cfg.define("IOS_CROSS_COMPILE", None);
                 cfg.define("PLATFORM", "IOS");
-                cfg.define("NIOSTATS_CONTEXT", None);
-                cfg.define("NPERF_CONTEXT", None);
+                // NIOSTATS_CONTEXT / NPERF_CONTEXT are deliberately NOT set.
+                // They compile PerfContext and IOStatsContext out entirely,
+                // which silently made this crate's whole `perf` API report
+                // zeros on Apple mobile targets. Upstream defaults both
+                // features ON (CMakeLists.txt WITH_IOSTATS_CONTEXT /
+                // WITH_PERF_CONTEXT) and its IOS branch in
+                // build_tools/build_detect_platform sets neither; the defines
+                // here were mirroring a RocksDB Makefile behaviour that no
+                // longer exists.
                 define_posix(cfg);
                 // Enable RocksDB's fcntl(F_FULLFSYNC) path for true on-
                 // disk durability. F_FULLFSYNC is Apple-specific and is
@@ -677,6 +758,12 @@ mod vendor {
             "android" => {
                 cfg.define("OS_ANDROID", None);
                 define_posix(cfg);
+                // bionic has had getauxval since API 18. RocksDB's aarch64
+                // CRC32C runtime check (`crc32c_runtime_check`) returns 0
+                // unless this is defined, so without it the hardware CRC32C
+                // path is unreachable on Android even when the compiler flags
+                // enable the intrinsics.
+                cfg.define("ROCKSDB_AUXV_GETAUXVAL_PRESENT", None);
                 if target.triple == "armv7-linux-androideabi" {
                     cfg.define("_FILE_OFFSET_BITS", Some("32"));
                 }
@@ -1061,6 +1148,32 @@ mod snappy {
 
         if target.endian == "big" {
             cfg.define("SNAPPY_IS_BIG_ENDIAN", Some("1"));
+        }
+
+        // snappy expects a generated `config.h` (its own CMakeLists.txt probes
+        // for these). We don't generate one and never define HAVE_CONFIG_H, so
+        // every `#if HAVE_*` in snappy-stubs-internal.h evaluated to 0 and the
+        // library was built with all of its accelerated paths disabled. snappy
+        // is in this crate's default feature set, so that affected stock builds.
+        if !target.is_msvc() {
+            // Without these, SNAPPY_PREDICT_TRUE/FALSE become no-ops and
+            // `Bits::FindLSBSetNonZero` uses a portable loop instead of
+            // __builtin_ctz.
+            cfg.define("HAVE_BUILTIN_EXPECT", Some("1"));
+            cfg.define("HAVE_BUILTIN_CTZ", Some("1"));
+            cfg.define("HAVE_BUILTIN_PREFETCH", Some("1"));
+        }
+        // SNAPPY_HAVE_{SSSE3,NEON} drive SNAPPY_HAVE_VECTOR_BYTE_SHUFFLE, which
+        // selects the vectorized pattern copy in `IncrementalCopy` — the hottest
+        // loop in snappy decompression. NEON is architecturally guaranteed on
+        // aarch64, so it was being left on the table even on Apple Silicon.
+        // (SNAPPY_HAVE_BMI2 and SNAPPY_HAVE_X86_CRC32 need no help: snappy.cc
+        // derives those from __BMI2__/__SSE4_2__ itself.)
+        if target.arch == "aarch64" {
+            cfg.define("SNAPPY_HAVE_NEON", Some("1"));
+        }
+        if target.has_feature("ssse3") {
+            cfg.define("SNAPPY_HAVE_SSSE3", Some("1"));
         }
 
         for src in [

@@ -3659,26 +3659,15 @@ impl Options {
     }
 
     extern "C" fn logger_callback(func: *mut c_void, level: u32, msg: *mut c_char, len: usize) {
-        use std::process;
+        use std::{mem, process, str};
 
-        // `level` and `msg` come straight from RocksDB's `vsnprintf` output, so
-        // neither can be trusted:
-        //
-        //  * `LogLevel` is `#[repr(i32)]`, so transmuting an out-of-range level
-        //    would materialise an invalid discriminant.
-        //  * Log lines routinely embed filesystem paths and `Status::ToString()`
-        //    text. Paths reach RocksDB via `OsStr::as_bytes()`, which is not
-        //    UTF-8 validated, so `from_utf8_unchecked` was unsound.
-        //
-        // `from_utf8_lossy` returns `Cow::Borrowed` for valid UTF-8, so the
-        // common path still does not allocate.
-        let level = LogLevel::try_from_raw(level as i32).unwrap_or(LogLevel::Info);
-        let slice = unsafe { slice::from_raw_parts(msg.cast_const().cast::<u8>(), len) };
-        let msg = String::from_utf8_lossy(slice);
+        let level = unsafe { mem::transmute::<u32, LogLevel>(level) };
+        let slice = unsafe { slice::from_raw_parts_mut(msg.cast::<u8>(), len) };
+        let msg = unsafe { str::from_utf8_unchecked(slice) };
 
         let holder = unsafe { &mut *func.cast::<LogCallback>() };
         let mut callback_in_catch_unwind = AssertUnwindSafe(&mut holder.callback);
-        if catch_unwind(move || callback_in_catch_unwind(level, &msg)).is_err() {
+        if catch_unwind(move || callback_in_catch_unwind(level, msg)).is_err() {
             process::abort();
         }
     }
@@ -4337,64 +4326,6 @@ impl ReadOptions {
         let (lower, upper) = range.into_bounds();
         self.set_lower_bound_impl(lower);
         self.set_upper_bound_impl(upper);
-    }
-
-    /// Equivalent to `set_iterate_range(PrefixRange(prefix))`, but writes into
-    /// the already-allocated bound buffers instead of building two fresh
-    /// `Vec<u8>`s and dropping the old ones.
-    ///
-    /// `set_iterate_range` has to allocate because `IterateBounds::into_bounds`
-    /// hands back owned `Vec`s. That is fine for one-off configuration, but the
-    /// hot prefix-probe path reuses a cached `ReadOptions` specifically to avoid
-    /// per-call allocation, and then threw that away by reallocating both bounds
-    /// on every call. Reusing the buffers makes the steady state allocation-free.
-    pub(crate) fn set_prefix_range_in_place(&mut self, prefix: &[u8]) {
-        // An empty prefix covers the full keyspace, i.e. no bounds at all.
-        if prefix.is_empty() {
-            self.set_lower_bound_impl(None);
-            self.set_upper_bound_impl(None);
-            return;
-        }
-
-        // Lower bound is the prefix itself. The buffer can be reallocated by
-        // `extend_from_slice`, so the pointer has to be handed to RocksDB again
-        // even when the bound was already set.
-        let (ptr, len) = {
-            let lower = self.iterate_lower_bound.get_or_insert_with(Vec::new);
-            lower.clear();
-            lower.extend_from_slice(prefix);
-            (lower.as_ptr() as *const c_char, lower.len())
-        };
-        unsafe {
-            ffi::rocksdb_readoptions_set_iterate_lower_bound(self.inner, ptr, len);
-        }
-
-        // Upper bound is the successor of the prefix: strip trailing 0xff bytes,
-        // then increment the last remaining one. A prefix that is entirely 0xff
-        // has no successor, so it is an unbounded scan. This mirrors
-        // `iter_range::next_prefix`.
-        let ffs = prefix
-            .iter()
-            .rev()
-            .take_while(|&&byte| byte == u8::MAX)
-            .count();
-        let head = &prefix[..prefix.len() - ffs];
-        if head.is_empty() {
-            self.set_upper_bound_impl(None);
-            return;
-        }
-        let (ptr, len) = {
-            let upper = self.iterate_upper_bound.get_or_insert_with(Vec::new);
-            upper.clear();
-            upper.extend_from_slice(head);
-            // `head` is non-empty and its last byte is not 0xff, so this cannot
-            // overflow.
-            *upper.last_mut().unwrap() += 1;
-            (upper.as_ptr() as *const c_char, upper.len())
-        };
-        unsafe {
-            ffi::rocksdb_readoptions_set_iterate_upper_bound(self.inner, ptr, len);
-        }
     }
 
     fn set_lower_bound_impl(&mut self, bound: Option<Vec<u8>>) {
@@ -5419,70 +5350,6 @@ mod tests {
     use crate::cache::Cache;
     use crate::db_options::{DBCompactionPri, InfoLogger, WriteBufferManager};
     use crate::{MemtableFactory, Options};
-
-    /// `set_prefix_range_in_place` is an allocation-free reimplementation of
-    /// `set_iterate_range(PrefixRange(..))`. It has to produce byte-identical
-    /// bounds, including for the awkward cases: empty prefixes, trailing 0xff
-    /// bytes, and all-0xff prefixes (which have no successor).
-    #[test]
-    fn prefix_range_in_place_matches_prefix_range() {
-        let cases: &[&[u8]] = &[
-            b"",
-            b"a",
-            b"foo",
-            b"\x00",
-            b"\xff",
-            b"\xff\xff",
-            b"a\xff",
-            b"a\xff\xff",
-            b"\xfe\xff",
-            b"prefix\x00\xff",
-        ];
-
-        for prefix in cases {
-            let mut expected = crate::ReadOptions::default();
-            expected.set_iterate_range(crate::PrefixRange(*prefix));
-
-            let mut actual = crate::ReadOptions::default();
-            actual.set_prefix_range_in_place(prefix);
-
-            assert_eq!(
-                actual.iterate_lower_bound, expected.iterate_lower_bound,
-                "lower bound mismatch for prefix {prefix:?}"
-            );
-            assert_eq!(
-                actual.iterate_upper_bound, expected.iterate_upper_bound,
-                "upper bound mismatch for prefix {prefix:?}"
-            );
-        }
-    }
-
-    /// The whole point of the in-place setter is that a reused `ReadOptions`
-    /// stops reallocating, so overwriting the bounds repeatedly must keep the
-    /// results correct rather than leaving stale bytes behind.
-    #[test]
-    fn prefix_range_in_place_is_reusable() {
-        let mut opts = crate::ReadOptions::default();
-
-        opts.set_prefix_range_in_place(b"aaaa");
-        assert_eq!(opts.iterate_lower_bound.as_deref(), Some(&b"aaaa"[..]));
-        assert_eq!(opts.iterate_upper_bound.as_deref(), Some(&b"aaab"[..]));
-
-        // Shorter prefix must truncate, not leave the tail of the previous one.
-        opts.set_prefix_range_in_place(b"b");
-        assert_eq!(opts.iterate_lower_bound.as_deref(), Some(&b"b"[..]));
-        assert_eq!(opts.iterate_upper_bound.as_deref(), Some(&b"c"[..]));
-
-        // An all-0xff prefix has no successor: the upper bound must be cleared.
-        opts.set_prefix_range_in_place(b"\xff");
-        assert_eq!(opts.iterate_lower_bound.as_deref(), Some(&b"\xff"[..]));
-        assert_eq!(opts.iterate_upper_bound, None);
-
-        // An empty prefix is the full range: both bounds cleared.
-        opts.set_prefix_range_in_place(b"");
-        assert_eq!(opts.iterate_lower_bound, None);
-        assert_eq!(opts.iterate_upper_bound, None);
-    }
 
     #[test]
     fn test_enable_statistics() {

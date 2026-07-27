@@ -51,11 +51,6 @@ use libc::{c_char, c_int, c_uchar, c_void, size_t};
 thread_local! { static DEFAULT_READ_OPTS: ReadOptions = ReadOptions::default(); }
 thread_local! { static DEFAULT_WRITE_OPTS: WriteOptions = WriteOptions::default(); }
 thread_local! { static DEFAULT_FLUSH_OPTS: FlushOptions = FlushOptions::default(); }
-// `TransactionOptions::default()` is a C++ `new`/`delete` pair, so building one
-// per `transaction()` call put an allocation on the transaction-begin path.
-// `rocksdb_transaction_begin` only reads the options, so an immutable
-// thread-local instance is safe to share.
-thread_local! { static DEFAULT_TXN_OPTS: TransactionOptions = TransactionOptions::default(); }
 
 #[cfg(not(feature = "multi-threaded-cf"))]
 type DefaultThreadMode = crate::SingleThreaded;
@@ -501,9 +496,7 @@ impl<T: ThreadMode> TransactionDB<T> {
 
     /// Creates a transaction with default options.
     pub fn transaction(&'_ self) -> Transaction<'_, Self> {
-        DEFAULT_WRITE_OPTS.with(|write_opts| {
-            DEFAULT_TXN_OPTS.with(|txn_opts| self.transaction_opt(write_opts, txn_opts))
-        })
+        DEFAULT_WRITE_OPTS.with(|opts| self.transaction_opt(opts, &TransactionOptions::default()))
     }
 
     /// Creates a transaction with options.
@@ -1069,22 +1062,20 @@ impl<T: ThreadMode> TransactionDB<T> {
         SnapshotWithThreadMode::<Self>::new(self)
     }
 
-    /// Marks the column family as dropped in RocksDB.
-    ///
-    /// Deliberately does not take ownership of the handle. Callers must destroy
-    /// their handle (and forget the column family) only after this succeeds:
-    /// destroying it on failure would leave the column family still present in
-    /// the DB with no reachable handle.
-    fn mark_column_family_dropped(
+    fn drop_column_family<C>(
         &self,
         cf_inner: *mut ffi::rocksdb_column_family_handle_t,
+        _cf: C,
     ) -> Result<(), Error> {
         unsafe {
+            // first mark the column family as dropped
             ffi_try!(ffi::rocksdb_drop_column_family(
                 self.inner as *mut ffi::rocksdb_t,
                 cf_inner
             ));
         }
+        // Since `_cf` is dropped here, the column family handle is destroyed
+        // and any resources (mem, files) are reclaimed.
         Ok(())
     }
 }
@@ -1106,13 +1097,10 @@ impl TransactionDB<SingleThreaded> {
 
     /// Drops the column family with the given name
     pub fn drop_cf(&mut self, name: &str) -> Result<(), Error> {
-        let Some(cf) = self.cfs.cfs.get(name) else {
-            return Err(Error::new(format!("Invalid column family: {name}")));
-        };
-        self.mark_column_family_dropped(cf.inner)?;
-        // Only now reclaim resources (mem, files) by destroying the last handle.
-        drop(self.cfs.cfs.remove(name));
-        Ok(())
+        match self.cfs.cfs.remove(name) {
+            Some(cf) => self.drop_column_family(cf.inner, cf),
+            _ => Err(Error::new(format!("Invalid column family: {name}"))),
+        }
     }
 }
 
@@ -1143,13 +1131,10 @@ impl TransactionDB<MultiThreaded> {
     /// Drops the column family with the given name by internally locking the inner column
     /// family map. This avoids needing `&mut self` reference
     pub fn drop_cf(&self, name: &str) -> Result<(), Error> {
-        let Some(inner) = self.cfs.cfs.read().get(name).map(|cf| cf.inner) else {
-            return Err(Error::new(format!("Invalid column family: {name}")));
-        };
-        self.mark_column_family_dropped(inner)?;
-        // Only now reclaim resources (mem, files) by destroying the last handle.
-        drop(self.cfs.cfs.write().remove(name));
-        Ok(())
+        match self.cfs.cfs.write().remove(name) {
+            Some(cf) => self.drop_column_family(cf.inner, cf),
+            _ => Err(Error::new(format!("Invalid column family: {name}"))),
+        }
     }
 
     /// Implementation for property_value et al methods.

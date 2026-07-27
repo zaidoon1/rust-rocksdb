@@ -945,18 +945,15 @@ fn test_crc32_build() {
             Some(false)
         }
     } else if cfg!(target_arch = "aarch64") {
-        // On aarch64 the answer is a property of the CPU, not of the build:
-        // build.rs always passes `-march=armv8-a+crc+crypto` (when the compiler
-        // accepts it), so `HAVE_ARM64_CRC` is defined and RocksDB decides at
-        // runtime via `crc32c_runtime_check()` / `getauxval(AT_HWCAP)`.
-        //
-        // CRC32 is optional in ARMv8.0 and mandatory from ARMv8.1, so a machine
-        // without it is possible in principle. Asserting "Supported" here would
-        // make the test fail on such hardware for no good reason, so the real
-        // regression guard is the reported architecture below: if the `-march`
-        // flag were ever dropped, `HAVE_ARM64_CRC` would be undefined and
-        // RocksDB would fall through to its x86 branch and report "x86".
-        None
+        // Default Linux aarch64 does not support CRC32. RocksDB's runtime feature detection is
+        // also buggy as of 10.110 (2026-01-23), but it should report "Supported" if the feature is
+        // enabled at compile time.
+        if cfg!(target_feature = "crc") {
+            Some(true)
+        } else {
+            // TODO: Fix when upstream RocksDB fixes the runtime feature detection
+            Some(false)
+        }
     } else {
         println!(
             "TODO: test_crc32_build needs to be extended to support ARCH={}",
@@ -986,13 +983,13 @@ fn test_crc32_build() {
     let expected_arch = if cfg!(target_arch = "x86_64") {
         "x86".to_string()
     } else if cfg!(target_arch = "aarch64") {
-        // Always "Arm64": build.rs unconditionally enables the ARM CRC32
-        // intrinsics on aarch64, so `HAVE_ARM64_CRC` is defined and
-        // `IsFastCrc32Supported` takes its Arm64 branch regardless of what the
-        // runtime check reports. Seeing "x86" here means the `-march` flag was
-        // lost and the whole hardware CRC32C path silently reverted to the
-        // table-driven software implementation.
-        "Arm64".to_string()
+        // TODO: RocksDB has a bug: it can report x86 when the CRC feature is not enabled
+        // This should just be "Arm64" when the RocksDB bug is fixed
+        if cfg!(target_feature = "crc") {
+            "Arm64".to_string()
+        } else {
+            "x86".to_string()
+        }
     } else if cfg!(target_arch = "powerpc64") {
         "PPC".to_string()
     } else {

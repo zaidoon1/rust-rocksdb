@@ -67,18 +67,12 @@ impl<'a> SstFileWriter<'a> {
     }
 
     /// Prepare SstFileWriter to write into file located at "file_path".
-    ///
-    /// Takes `&mut self` because the underlying `rocksdb::SstFileWriter::Open`
-    /// mutates the writer (it installs a new `WritableFileWriter` and table
-    /// builder) and is not thread safe. With `&self` and the `Sync` impl below,
-    /// two threads could call this concurrently on the same writer from safe
-    /// code and race on those fields.
-    pub fn open<P: AsRef<Path>>(&mut self, path: P) -> Result<(), Error> {
+    pub fn open<P: AsRef<Path>>(&'a self, path: P) -> Result<(), Error> {
         let cpath = to_cpath(&path)?;
         self.open_raw(&cpath)
     }
 
-    fn open_raw(&mut self, cpath: &CString) -> Result<(), Error> {
+    fn open_raw(&'a self, cpath: &CString) -> Result<(), Error> {
         unsafe {
             ffi_try!(ffi::rocksdb_sstfilewriter_open(
                 self.inner,

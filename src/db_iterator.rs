@@ -423,17 +423,9 @@ impl<'a, D: DBAccess> DBRawIteratorWithThreadMode<'a, D> {
     ///
     /// Uses `rocksdb_iter_key_slice` which returns a `rocksdb_slice_t` by value,
     /// avoiding the overhead of output parameters compared to `rocksdb_iter_key`.
-    #[inline]
     unsafe fn key_impl(&self) -> &[u8] {
         unsafe {
             let slice = ffi::rocksdb_iter_key_slice(self.inner.as_ptr());
-            if slice.size == 0 {
-                // Empty keys and values are legal in RocksDB, and
-                // `slice::from_raw_parts` requires a dereferenceable pointer
-                // even for a zero length, so do not build a slice from
-                // whatever `data` happens to be.
-                return &[];
-            }
             slice::from_raw_parts(slice.data as *const c_uchar, slice.size)
         }
     }
@@ -448,17 +440,9 @@ impl<'a, D: DBAccess> DBRawIteratorWithThreadMode<'a, D> {
     ///
     /// Uses `rocksdb_iter_value_slice` which returns a `rocksdb_slice_t` by value,
     /// avoiding the overhead of output parameters compared to `rocksdb_iter_value`.
-    #[inline]
     unsafe fn value_impl(&self) -> &[u8] {
         unsafe {
             let slice = ffi::rocksdb_iter_value_slice(self.inner.as_ptr());
-            if slice.size == 0 {
-                // Empty keys and values are legal in RocksDB, and
-                // `slice::from_raw_parts` requires a dereferenceable pointer
-                // even for a zero length, so do not build a slice from
-                // whatever `data` happens to be.
-                return &[];
-            }
             slice::from_raw_parts(slice.data as *const c_uchar, slice.size)
         }
     }

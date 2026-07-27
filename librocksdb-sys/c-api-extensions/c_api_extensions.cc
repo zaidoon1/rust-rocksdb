@@ -897,28 +897,3 @@ extern "C" void rust_rocksdb_writebatch_delete_range_slices_cf(
 #endif
   });
 }
-
-// -----------------------------------------------------------------------------
-// Null-safe Snapshot::GetSequenceNumber
-//
-// `rocksdb_snapshot_t` is `struct { const Snapshot* rep; }` (db/c.cc), so a
-// pointer to the opaque handle is also a pointer to its `rep` field. See the
-// layout note above for why this file uses a reinterpret_cast rather than
-// re-declaring the struct.
-// -----------------------------------------------------------------------------
-
-extern "C" unsigned char rust_rocksdb_snapshot_try_get_sequence_number(
-    const rocksdb_snapshot_t* snapshot, uint64_t* seqno) {
-  if (snapshot == nullptr) {
-    return 0;
-  }
-  const ROCKSDB_NAMESPACE::Snapshot* rep =
-      *reinterpret_cast<const ROCKSDB_NAMESPACE::Snapshot* const*>(snapshot);
-  if (rep == nullptr) {
-    // A transaction started without `set_snapshot(true)` yields a wrapper whose
-    // `rep` is null; upstream's getter would dereference it.
-    return 0;
-  }
-  *seqno = rep->GetSequenceNumber();
-  return 1;
-}

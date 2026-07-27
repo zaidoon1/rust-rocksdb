@@ -62,30 +62,6 @@ thread_local! { static DEFAULT_FLUSH_OPTS: FlushOptions = FlushOptions::default(
 // Thread-local ReadOptions for hot prefix probes; preconfigured for prefix scans.
 thread_local! { static PREFIX_READ_OPTS: RefCell<ReadOptions> = RefCell::new({ let mut o = ReadOptions::default(); o.set_prefix_same_as_start(true); o }); }
 
-/// Runs `f` with `ReadOptions` bounded to `prefix` and `prefix_same_as_start`
-/// enabled, reusing a thread-local instance when it is available.
-///
-/// The borrow is held across an FFI call that can synchronously re-enter Rust
-/// through a user-supplied comparator or merge operator. If that callback probes
-/// another prefix on the same thread, a plain `borrow_mut` would panic with
-/// `BorrowMutError` — and because the callback runs inside an `extern "C"` frame
-/// the panic aborts the process. Falling back to fresh options on contention
-/// costs an allocation in that rare re-entrant case and keeps the fast path
-/// allocation-free.
-fn with_prefix_read_opts<R>(prefix: &[u8], f: impl FnOnce(&ReadOptions) -> R) -> R {
-    PREFIX_READ_OPTS.with(|rc| {
-        if let Ok(mut opts) = rc.try_borrow_mut() {
-            opts.set_prefix_range_in_place(prefix);
-            f(&opts)
-        } else {
-            let mut opts = ReadOptions::default();
-            opts.set_prefix_same_as_start(true);
-            opts.set_prefix_range_in_place(prefix);
-            f(&opts)
-        }
-    })
-}
-
 /// A range of keys, `start_key` is included, but not `end_key`.
 ///
 /// You should make sure `end_key` is not less than `start_key`.
@@ -483,7 +459,6 @@ impl Drop for OwnedColumnFamilyHandle {
 }
 
 impl DBInner for DBWithThreadModeInner {
-    #[inline]
     fn inner(&self) -> *mut ffi::rocksdb_t {
         self.inner
     }
@@ -931,7 +906,7 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
                 AccessType::WithTTL { ttl } => ffi_try!(ffi::rocksdb_open_with_ttl(
                     opts.inner,
                     cpath.as_ptr(),
-                    ttl_to_seconds(ttl),
+                    ttl.as_secs() as c_int,
                 )),
             }
         };
@@ -985,8 +960,8 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
                         .iter()
                         .map(|cf| match cf.ttl {
                             ColumnFamilyTtl::Disabled => i32::MAX,
-                            ColumnFamilyTtl::Duration(duration) => ttl_to_seconds(duration),
-                            ColumnFamilyTtl::SameAsDb => ttl_to_seconds(ttl),
+                            ColumnFamilyTtl::Duration(duration) => duration.as_secs() as i32,
+                            ColumnFamilyTtl::SameAsDb => ttl.as_secs() as i32,
                         })
                         .collect();
 
@@ -1184,7 +1159,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
 
     /// Flushes database memtables to SST files on the disk using default options.
     pub fn flush(&self) -> Result<(), Error> {
-        DEFAULT_FLUSH_OPTS.with(|opts| self.flush_opt(opts))
+        self.flush_opt(&FlushOptions::default())
     }
 
     /// Flushes database memtables to SST files on the disk for a given column family.
@@ -2355,7 +2330,11 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
     /// prefix via `PrefixRange`, minimizing stray IO per call.
     pub fn prefix_exists<P: AsRef<[u8]>>(&self, prefix: P) -> Result<bool, Error> {
         let p = prefix.as_ref();
-        with_prefix_read_opts(p, |opts| self.prefix_exists_opt(p, opts))
+        PREFIX_READ_OPTS.with(|rc| {
+            let mut opts = rc.borrow_mut();
+            opts.set_iterate_range(crate::PrefixRange(p));
+            self.prefix_exists_opt(p, &opts)
+        })
     }
 
     /// Returns `true` if there exists at least one key with the given prefix
@@ -2454,7 +2433,11 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         prefix: P,
     ) -> Result<bool, Error> {
         let p = prefix.as_ref();
-        with_prefix_read_opts(p, |opts| self.prefix_exists_cf_opt(cf_handle, p, opts))
+        PREFIX_READ_OPTS.with(|rc| {
+            let mut opts = rc.borrow_mut();
+            opts.set_iterate_range(crate::PrefixRange(p));
+            self.prefix_exists_cf_opt(cf_handle, p, &opts)
+        })
     }
 
     /// Returns `true` if there exists at least one key with the given prefix
@@ -3432,7 +3415,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
     /// sizes will be one-tenth the size of the corresponding user data size.
     ///
     /// Due to lack of abi, only data flushed to disk is taken into account.
-    pub fn get_approximate_sizes(&self, ranges: &[Range]) -> Result<Vec<u64>, Error> {
+    pub fn get_approximate_sizes(&self, ranges: &[Range]) -> Vec<u64> {
         self.get_approximate_sizes_cfopt(None::<&ColumnFamily>, ranges)
     }
 
@@ -3440,7 +3423,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         &self,
         cf: &impl AsColumnFamilyRef,
         ranges: &[Range],
-    ) -> Result<Vec<u64>, Error> {
+    ) -> Vec<u64> {
         self.get_approximate_sizes_cfopt(Some(cf), ranges)
     }
 
@@ -3448,7 +3431,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         &self,
         cf: Option<&impl AsColumnFamilyRef>,
         ranges: &[Range],
-    ) -> Result<Vec<u64>, Error> {
+    ) -> Vec<u64> {
         let start_keys: Vec<*const c_char> = ranges
             .iter()
             .map(|x| x.start_key.as_ptr() as *const c_char)
@@ -3496,13 +3479,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
                 );
             },
         }
-        // RocksDB reports failures here through `errptr`. Ignoring it both
-        // leaked the `strdup`ed message and returned a vector of zeros that the
-        // caller could not distinguish from "these ranges are empty".
-        if !err.is_null() {
-            return Err(convert_rocksdb_error(err));
-        }
-        Ok(sizes)
+        sizes
     }
 
     /// Iterate over batches of write operations since a given sequence.
@@ -3732,23 +3709,21 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         }
     }
 
-    /// Marks the column family as dropped in RocksDB.
-    ///
-    /// Deliberately does not take ownership of the handle. Callers must destroy
-    /// their handle (and forget the column family) only after this succeeds:
-    /// destroying it on failure would leave the column family still present in
-    /// the DB with no reachable handle, so the only way to touch it again would
-    /// be to reopen the database.
-    fn mark_column_family_dropped(
+    fn drop_column_family<C>(
         &self,
         cf_inner: *mut ffi::rocksdb_column_family_handle_t,
+        cf: C,
     ) -> Result<(), Error> {
         unsafe {
+            // first mark the column family as dropped
             ffi_try!(ffi::rocksdb_drop_column_family(
                 self.inner.inner(),
                 cf_inner
             ));
         }
+        // then finally reclaim any resources (mem, files) by destroying the only single column
+        // family handle by drop()-ing it
+        drop(cf);
         Ok(())
     }
 
@@ -3849,13 +3824,10 @@ impl<I: DBInner> DBCommon<SingleThreaded, I> {
 
     /// Drops the column family with the given name
     pub fn drop_cf(&mut self, name: &str) -> Result<(), Error> {
-        let Some(cf) = self.cfs.cfs.get(name) else {
-            return Err(Error::new(format!("Invalid column family: {name}")));
-        };
-        self.mark_column_family_dropped(cf.inner)?;
-        // Only now reclaim resources (mem, files) by destroying the last handle.
-        drop(self.cfs.cfs.remove(name));
-        Ok(())
+        match self.cfs.cfs.remove(name) {
+            Some(cf) => self.drop_column_family(cf.inner, cf),
+            _ => Err(Error::new(format!("Invalid column family: {name}"))),
+        }
     }
 
     /// Returns the underlying column family handle
@@ -3920,13 +3892,10 @@ impl<I: DBInner> DBCommon<MultiThreaded, I> {
     /// Drops the column family with the given name by internally locking the inner column
     /// family map. This avoids needing `&mut self` reference
     pub fn drop_cf(&self, name: &str) -> Result<(), Error> {
-        let Some(inner) = self.cfs.cfs.read().get(name).map(|cf| cf.inner) else {
-            return Err(Error::new(format!("Invalid column family: {name}")));
-        };
-        self.mark_column_family_dropped(inner)?;
-        // Only now reclaim resources (mem, files) by destroying the last handle.
-        drop(self.cfs.cfs.write().remove(name));
-        Ok(())
+        match self.cfs.cfs.write().remove(name) {
+            Some(cf) => self.drop_column_family(cf.inner, cf),
+            _ => Err(Error::new(format!("Invalid column family: {name}"))),
+        }
     }
 
     /// Returns the underlying column family handle
@@ -4205,19 +4174,6 @@ impl Drop for ExportImportFilesMetaData {
 
 unsafe impl Send for ExportImportFilesMetaData {}
 unsafe impl Sync for ExportImportFilesMetaData {}
-
-/// Converts a TTL to the `int` seconds count RocksDB's TTL API takes,
-/// saturating instead of wrapping.
-///
-/// `Duration::as_secs` is a `u64`, so a plain `as i32` cast wraps: a TTL of
-/// `Duration::from_secs(4_294_967_301)` (~136 years, i.e. "effectively never")
-/// became `5`, and RocksDB then compaction-deleted the whole column family a few
-/// seconds after the data was written. RocksDB only treats `ttl <= 0` specially,
-/// so there is no sentinel for "no expiry"; `i32::MAX` (~68 years) is the
-/// longest expressible TTL and is what `ColumnFamilyTtl::Disabled` already uses.
-fn ttl_to_seconds(ttl: Duration) -> c_int {
-    c_int::try_from(ttl.as_secs()).unwrap_or(c_int::MAX)
-}
 
 fn convert_options(opts: &[(&str, &str)]) -> Result<Vec<(CString, CString)>, Error> {
     opts.iter()

@@ -1,4 +1,5 @@
 use crate::db::DBInner;
+use crate::ffi_util::raw_data_and_free;
 use crate::{
     AsColumnFamilyRef, DBAccess, DBCommon, DBPinnableSlice, DBRawIteratorWithThreadMode, Error,
     Options, ReadOptions, ThreadMode, ffi,
@@ -98,7 +99,7 @@ impl WriteBatchWithIndex {
 
             // `value_data` was allocated by `malloc` on the C++ side; copy it
             // out and release it with `rocksdb_free`.
-            Ok(crate::ffi_util::raw_data_and_free(value_data, value_size))
+            Ok(raw_data_and_free(value_data, value_size))
         }
     }
 
@@ -125,7 +126,7 @@ impl WriteBatchWithIndex {
 
             // `value_data` was allocated by `malloc` on the C++ side; copy it
             // out and release it with `rocksdb_free`.
-            Ok(crate::ffi_util::raw_data_and_free(value_data, value_size))
+            Ok(raw_data_and_free(value_data, value_size))
         }
     }
 
@@ -162,7 +163,7 @@ impl WriteBatchWithIndex {
 
             // `value_data` was allocated by `malloc` on the C++ side; copy it
             // out and release it with `rocksdb_free`.
-            Ok(crate::ffi_util::raw_data_and_free(value_data, value_size))
+            Ok(raw_data_and_free(value_data, value_size))
         }
     }
 
@@ -242,7 +243,7 @@ impl WriteBatchWithIndex {
 
             // `value_data` was allocated by `malloc` on the C++ side; copy it
             // out and release it with `rocksdb_free`.
-            Ok(crate::ffi_util::raw_data_and_free(value_data, value_size))
+            Ok(raw_data_and_free(value_data, value_size))
         }
     }
 

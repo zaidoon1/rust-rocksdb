@@ -38,6 +38,7 @@ using ROCKSDB_NAMESPACE::Options;
 using ROCKSDB_NAMESPACE::PinnableSlice;
 using ROCKSDB_NAMESPACE::ReadOptions;
 using ROCKSDB_NAMESPACE::Slice;
+using ROCKSDB_NAMESPACE::Snapshot;
 using ROCKSDB_NAMESPACE::SliceParts;
 using ROCKSDB_NAMESPACE::Status;
 using ROCKSDB_NAMESPACE::SubcompactionJobInfo;
@@ -312,8 +313,10 @@ extern "C" void rust_rocksdb_options_add_eventlistener(
 // every test that round-trips a value through one of our setters will
 // fail loudly: the setter would write to one offset and rocksdb's
 // internal code would read from another. The integration tests in
-// `tests/test_rocksdb_options.rs` cover all three options that this file
-// exposes, so a layout regression is detectable.
+// `tests/test_rocksdb_options.rs` cover the options this file exposes,
+// and `transaction_snapshot_sequence_number_without_set_snapshot` in
+// `tests/test_transaction_db.rs` covers the `rocksdb_snapshot_t` cast
+// below, so a layout regression is detectable.
 
 // -----------------------------------------------------------------------------
 // ReadOptions::optimize_multiget_for_io
@@ -912,8 +915,7 @@ extern "C" unsigned char rust_rocksdb_snapshot_try_get_sequence_number(
   if (snapshot == nullptr) {
     return 0;
   }
-  const ROCKSDB_NAMESPACE::Snapshot* rep =
-      *reinterpret_cast<const ROCKSDB_NAMESPACE::Snapshot* const*>(snapshot);
+  const Snapshot* rep = *reinterpret_cast<const Snapshot* const*>(snapshot);
   if (rep == nullptr) {
     // A transaction started without `set_snapshot(true)` yields a wrapper whose
     // `rep` is null; upstream's getter would dereference it.

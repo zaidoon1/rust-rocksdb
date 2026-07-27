@@ -5,6 +5,40 @@ use crate::{
 };
 use libc::{c_char, c_uchar, size_t};
 
+/// A write batch that can also be read from, and that can be layered on top of
+/// a database iterator.
+///
+/// Values read out of the batch are copied, but iterators and pinned slices
+/// borrow, so the borrow checker is what keeps them from outliving their owner.
+///
+/// An iterator built with [`Self::iterator_with_base`] reads directly out of the
+/// batch's internal skip-list, so it cannot outlive the batch:
+///
+/// ```compile_fail,E0597
+/// use rust_rocksdb::{DB, WriteBatchWithIndex};
+///
+/// let db = DB::open_default("foo").unwrap();
+/// let mut iter = {
+///     let mut wbwi = WriteBatchWithIndex::new(0, true);
+///     wbwi.put(b"k", b"v");
+///     wbwi.iterator_with_base(db.raw_iterator())
+/// };
+/// iter.seek_to_first();
+/// ```
+///
+/// A slice from [`Self::get_pinned_from_batch_and_db`] pins a block in the
+/// database's block cache, so it cannot outlive the database:
+///
+/// ```compile_fail,E0597
+/// use rust_rocksdb::{DB, ReadOptions, WriteBatchWithIndex};
+///
+/// let wbwi = WriteBatchWithIndex::new(0, true);
+/// let readopts = ReadOptions::default();
+/// let _value = {
+///     let db = DB::open_default("foo").unwrap();
+///     wbwi.get_pinned_from_batch_and_db(&db, b"k", &readopts).unwrap()
+/// };
+/// ```
 pub struct WriteBatchWithIndex {
     pub(crate) inner: *mut ffi::rocksdb_writebatch_wi_t,
 }
@@ -62,15 +96,9 @@ impl WriteBatchWithIndex {
                 &raw mut value_size
             ));
 
-            if value_data.is_null() {
-                Ok(None)
-            } else {
-                Ok(Some(Vec::from_raw_parts(
-                    value_data.cast::<u8>(),
-                    value_size,
-                    value_size,
-                )))
-            }
+            // `value_data` was allocated by `malloc` on the C++ side; copy it
+            // out and release it with `rocksdb_free`.
+            Ok(crate::ffi_util::raw_data_and_free(value_data, value_size))
         }
     }
 
@@ -95,15 +123,9 @@ impl WriteBatchWithIndex {
                 &raw mut value_size
             ));
 
-            if value_data.is_null() {
-                Ok(None)
-            } else {
-                Ok(Some(Vec::from_raw_parts(
-                    value_data.cast::<u8>(),
-                    value_size,
-                    value_size,
-                )))
-            }
+            // `value_data` was allocated by `malloc` on the C++ side; copy it
+            // out and release it with `rocksdb_free`.
+            Ok(crate::ffi_util::raw_data_and_free(value_data, value_size))
         }
     }
 
@@ -138,24 +160,22 @@ impl WriteBatchWithIndex {
                 &raw mut value_size
             ));
 
-            if value_data.is_null() {
-                Ok(None)
-            } else {
-                Ok(Some(Vec::from_raw_parts(
-                    value_data.cast::<u8>(),
-                    value_size,
-                    value_size,
-                )))
-            }
+            // `value_data` was allocated by `malloc` on the C++ side; copy it
+            // out and release it with `rocksdb_free`.
+            Ok(crate::ffi_util::raw_data_and_free(value_data, value_size))
         }
     }
 
-    pub fn get_pinned_from_batch_and_db<T, I, K>(
-        &'_ self,
-        db: &DBCommon<T, I>,
+    /// The returned slice pins a block inside `db`'s block cache, so its
+    /// lifetime is tied to `db` rather than to `self`. Letting lifetime elision
+    /// pick `&self` here would allow the slice to outlive the database and
+    /// release a cache handle into a destroyed cache.
+    pub fn get_pinned_from_batch_and_db<'db, T, I, K>(
+        &self,
+        db: &'db DBCommon<T, I>,
         key: K,
         readopts: &ReadOptions,
-    ) -> Result<Option<DBPinnableSlice<'_>>, Error>
+    ) -> Result<Option<DBPinnableSlice<'db>>, Error>
     where
         T: ThreadMode,
         I: DBInner,
@@ -220,25 +240,22 @@ impl WriteBatchWithIndex {
                 &raw mut value_size
             ));
 
-            if value_data.is_null() {
-                Ok(None)
-            } else {
-                Ok(Some(Vec::from_raw_parts(
-                    value_data.cast::<u8>(),
-                    value_size,
-                    value_size,
-                )))
-            }
+            // `value_data` was allocated by `malloc` on the C++ side; copy it
+            // out and release it with `rocksdb_free`.
+            Ok(crate::ffi_util::raw_data_and_free(value_data, value_size))
         }
     }
 
-    pub fn get_pinned_from_batch_and_db_cf<T, I, K>(
-        &'_ self,
-        db: &DBCommon<T, I>,
+    /// The returned slice pins a block inside `db`'s block cache, so its
+    /// lifetime is tied to `db` rather than to `self`. See
+    /// [`Self::get_pinned_from_batch_and_db`].
+    pub fn get_pinned_from_batch_and_db_cf<'db, T, I, K>(
+        &self,
+        db: &'db DBCommon<T, I>,
         cf: &impl AsColumnFamilyRef,
         key: K,
         readopts: &ReadOptions,
-    ) -> Result<Option<DBPinnableSlice<'_>>, Error>
+    ) -> Result<Option<DBPinnableSlice<'db>>, Error>
     where
         T: ThreadMode,
         I: DBInner,
@@ -383,8 +400,13 @@ impl WriteBatchWithIndex {
         }
     }
 
+    /// The returned iterator reads directly out of this batch's internal
+    /// skip-list and write buffer, so it must not outlive the batch. Binding
+    /// `&self` to the same lifetime as the base iterator is what enforces that;
+    /// with an independent lifetime on `&self` the iterator could outlive the
+    /// batch and read freed memory.
     pub fn iterator_with_base<'a, D>(
-        &self,
+        &'a self,
         base_iterator: DBRawIteratorWithThreadMode<'a, D>,
     ) -> DBRawIteratorWithThreadMode<'a, D>
     where
@@ -403,8 +425,10 @@ impl WriteBatchWithIndex {
         DBRawIteratorWithThreadMode::from_inner(iterator, readopts)
     }
 
+    /// The returned iterator reads directly out of this batch, so it must not
+    /// outlive the batch. See [`Self::iterator_with_base`].
     pub fn iterator_with_base_cf<'a, D>(
-        &self,
+        &'a self,
         base_iterator: DBRawIteratorWithThreadMode<'a, D>,
         cf: &impl AsColumnFamilyRef,
     ) -> DBRawIteratorWithThreadMode<'a, D>

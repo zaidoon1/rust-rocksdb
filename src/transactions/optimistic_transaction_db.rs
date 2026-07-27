@@ -34,6 +34,13 @@ use crate::{
 // without synchronization overhead. Callers who need non-defaults must pass
 // explicit options.
 thread_local! { static DEFAULT_WRITE_OPTS: WriteOptions = WriteOptions::default(); }
+// See `DEFAULT_TXN_OPTS` in `transaction_db.rs`: building the options per call
+// is a C++ `new`/`delete` pair on the transaction-begin path, and
+// `rocksdb_optimistictransaction_begin` only reads them.
+thread_local! {
+    static DEFAULT_OTXN_OPTS: OptimisticTransactionOptions =
+        OptimisticTransactionOptions::default();
+}
 
 /// A type alias to RocksDB Optimistic Transaction DB.
 ///
@@ -82,6 +89,7 @@ pub struct OptimisticTransactionDBInner {
 }
 
 impl DBInner for OptimisticTransactionDBInner {
+    #[inline]
     fn inner(&self) -> *mut ffi::rocksdb_t {
         self.base
     }
@@ -261,8 +269,9 @@ impl<T: ThreadMode> OptimisticTransactionDB<T> {
 
     /// Creates a transaction with default options.
     pub fn transaction(&'_ self) -> Transaction<'_, Self> {
-        DEFAULT_WRITE_OPTS
-            .with(|opts| self.transaction_opt(opts, &OptimisticTransactionOptions::default()))
+        DEFAULT_WRITE_OPTS.with(|write_opts| {
+            DEFAULT_OTXN_OPTS.with(|otxn_opts| self.transaction_opt(write_opts, otxn_opts))
+        })
     }
 
     /// Creates a transaction with default options.

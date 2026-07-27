@@ -662,6 +662,35 @@ fn transaction_snapshot() {
     }
 }
 
+/// A transaction started without `set_snapshot(true)` still hands out a
+/// snapshot handle, but it wraps a null `rocksdb::Snapshot*`. Asking for its
+/// sequence number used to dereference that null pointer and segfault.
+#[test]
+fn transaction_snapshot_sequence_number_without_set_snapshot() {
+    let path = DBPath::new("_rust_rocksdb_transaction_db_snapshot_seqno");
+    {
+        let db: TransactionDB = TransactionDB::open_default(&path).unwrap();
+        db.put(b"k1", b"v1").unwrap();
+
+        // No set_snapshot(true): there is no underlying snapshot to report.
+        let txn = db.transaction();
+        assert_eq!(txn.snapshot().sequence_number(), None);
+
+        // With set_snapshot(true) the sequence number is available.
+        let mut opts = TransactionOptions::default();
+        opts.set_snapshot(true);
+        let txn = db.transaction_opt(&WriteOptions::default(), &opts);
+        let txn_seqno = txn.snapshot().sequence_number();
+        assert!(txn_seqno.is_some(), "expected a sequence number");
+
+        // A snapshot taken straight off the DB always has one, and it must
+        // reflect at least the write above.
+        let db_seqno = db.snapshot().sequence_number();
+        assert_eq!(db_seqno, txn_seqno);
+        assert!(db_seqno.unwrap() > 0);
+    }
+}
+
 #[test]
 fn two_phase_commit() {
     let path = DBPath::new("_rust_rocksdb_transaction_db_2pc");

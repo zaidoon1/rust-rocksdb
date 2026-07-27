@@ -73,6 +73,20 @@ pub struct SnapshotReadOptions<'snapshot, 'db, D: DBAccess = DB> {
 ///     db.snapshot()
 /// };
 /// ```
+///
+/// An iterator created from a snapshot must not outlive the snapshot either:
+/// RocksDB keeps the `const Snapshot*` inside the iterator's `ReadOptions`.
+///
+/// ```compile_fail,E0597
+/// use rust_rocksdb::{DB, IteratorMode};
+///
+/// let db = DB::open_default("foo").unwrap();
+/// let mut iter = {
+///     let snapshot = db.snapshot();
+///     snapshot.iterator(IteratorMode::Start)
+/// };
+/// let _ = iter.next();
+/// ```
 pub struct SnapshotWithThreadMode<'a, D: DBAccess> {
     db: &'a D,
     pub(crate) inner: *const ffi::rocksdb_snapshot_t,
@@ -88,9 +102,28 @@ impl<'a, D: DBAccess> SnapshotWithThreadMode<'a, D> {
         }
     }
 
-    /// Returns the sequence number of the snapshot.
-    pub fn sequence_number(&self) -> u64 {
-        unsafe { ffi::rocksdb_snapshot_get_sequence_number(self.inner) }
+    /// Returns the sequence number of the snapshot, or `None` if there is no
+    /// underlying snapshot.
+    ///
+    /// A [`Transaction`](crate::Transaction) that was not started with
+    /// [`TransactionOptions::set_snapshot(true)`](crate::TransactionOptions::set_snapshot)
+    /// still hands out a snapshot handle, but that handle wraps a null
+    /// `rocksdb::Snapshot*`. Upstream's
+    /// `rocksdb_snapshot_get_sequence_number` dereferences it unconditionally,
+    /// so this used to be a null dereference reachable from safe code:
+    ///
+    /// ```no_run
+    /// # use rust_rocksdb::{SingleThreaded, TransactionDB};
+    /// # let db = TransactionDB::<SingleThreaded>::open_default("foo").unwrap();
+    /// let txn = db.transaction(); // no set_snapshot(true)
+    /// assert_eq!(txn.snapshot().sequence_number(), None);
+    /// ```
+    pub fn sequence_number(&self) -> Option<u64> {
+        let mut seqno: u64 = 0;
+        let present = unsafe {
+            ffi::rust_rocksdb_snapshot_try_get_sequence_number(self.inner, &raw mut seqno)
+        };
+        (present != 0).then_some(seqno)
     }
 
     /// Creates reusable default read options bound to this snapshot.
@@ -111,7 +144,11 @@ impl<'a, D: DBAccess> SnapshotWithThreadMode<'a, D> {
     }
 
     /// Creates an iterator over the data in this snapshot, using the default read options.
-    pub fn iterator(&self, mode: IteratorMode) -> DBIteratorWithThreadMode<'a, D> {
+    ///
+    /// The iterator borrows the snapshot: the `ReadOptions` handed to RocksDB
+    /// carry a `const Snapshot*` that the iterator keeps, so it must not outlive
+    /// the snapshot.
+    pub fn iterator(&'_ self, mode: IteratorMode) -> DBIteratorWithThreadMode<'_, D> {
         let readopts = ReadOptions::default();
         self.iterator_opt(mode, readopts)
     }
@@ -128,11 +165,13 @@ impl<'a, D: DBAccess> SnapshotWithThreadMode<'a, D> {
     }
 
     /// Creates an iterator over the data in this snapshot, using the given read options.
+    ///
+    /// The iterator borrows the snapshot; see [`Self::iterator`].
     pub fn iterator_opt(
-        &self,
+        &'_ self,
         mode: IteratorMode,
         mut readopts: ReadOptions,
-    ) -> DBIteratorWithThreadMode<'a, D> {
+    ) -> DBIteratorWithThreadMode<'_, D> {
         readopts.set_snapshot(self);
         DBIteratorWithThreadMode::<D>::new(self.db, readopts, mode)
     }

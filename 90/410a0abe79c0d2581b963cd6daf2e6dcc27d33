@@ -1,0 +1,23 @@
+CHANGELOG.md
+  s_170e08dfd25335::t_189b2fe968efbd 5-35
+librocksdb-sys/build.rs
+  s_170e08dfd25335::t_a5a7a5d0f7698e 380-419,444-476,496-504,517-524,629-631,657-666,721-729,761-766,1153-1178
+tests/test_rocksdb_options.rs
+  s_170e08dfd25335::t_262cef3867b6fe 948-959,989-995
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "90410a0abe79c0d2581b963cd6daf2e6dcc27d33",
+  "prompts": {},
+  "sessions": {
+    "s_170e08dfd25335": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_05e1fbdd5ffeIVtPaBryQE7KyS",
+        "model": "claude-opus-5"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    }
+  }
+}

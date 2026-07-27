@@ -474,10 +474,13 @@ fn test_snapshot_sequence_number() {
         db.put(b"key2", b"value2").unwrap();
 
         let snapshot = db.snapshot();
-        assert_eq!(snapshot.sequence_number(), db.latest_sequence_number());
+        assert_eq!(
+            snapshot.sequence_number(),
+            Some(db.latest_sequence_number())
+        );
 
         db.put(b"key3", b"value3").unwrap();
-        assert_eq!(snapshot.sequence_number(), 2);
+        assert_eq!(snapshot.sequence_number(), Some(2));
         assert_eq!(db.latest_sequence_number(), 3);
     }
 }
@@ -727,6 +730,30 @@ fn test_open_with_ttl() {
     // in the database and drop all expired entries.
     db.compact_range(None::<&[u8]>, None::<&[u8]>);
     assert!(db.get(b"key1").unwrap().is_none());
+}
+
+/// A TTL longer than `i32::MAX` seconds used to wrap when cast to `int`, so a
+/// ~136 year TTL turned into a 1 second one and RocksDB compaction-deleted the
+/// data almost immediately. It must saturate to `i32::MAX` instead.
+#[test]
+fn test_open_with_huge_ttl_does_not_wrap() {
+    let path = DBPath::new("_rust_rocksdb_test_open_with_huge_ttl");
+
+    let mut opts = Options::default();
+    opts.create_if_missing(true);
+    // 2^32 + 1 seconds: `as i32` truncates this to exactly 1, which the sleep
+    // below would then outlast.
+    let ttl = Duration::from_secs(u64::from(u32::MAX) + 2);
+    let db = DB::open_with_ttl(&opts, &path, ttl).unwrap();
+    db.put(b"key1", b"value1").unwrap();
+
+    thread::sleep(Duration::from_secs(2));
+    db.compact_range(None::<&[u8]>, None::<&[u8]>);
+    assert_eq!(
+        db.get(b"key1").unwrap().as_deref(),
+        Some(&b"value1"[..]),
+        "a ~136 year TTL must not expire after 5 seconds"
+    );
 }
 
 #[test]
@@ -1857,8 +1884,9 @@ fn test_get_approximate_sizes_cf() {
         // Get approximate sizes
         let start_key = b"key_0000";
         let end_key = b"key_0999";
-        let sizes =
-            db.get_approximate_sizes_cf(&cf, &[rust_rocksdb::Range::new(start_key, end_key)]);
+        let sizes = db
+            .get_approximate_sizes_cf(&cf, &[rust_rocksdb::Range::new(start_key, end_key)])
+            .unwrap();
 
         // Check that the sizes are greater than zero
         assert!(sizes[0] > 0);

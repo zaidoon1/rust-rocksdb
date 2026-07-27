@@ -46,6 +46,37 @@ pub(crate) unsafe fn raw_data(ptr: *const c_char, size: usize) -> Option<Vec<u8>
     }
 }
 
+/// Copies `size` bytes out of a buffer that the RocksDB C API allocated with
+/// `malloc` (see `CopyString` in `rocksdb/db/c.cc`), then releases the original
+/// with `rocksdb_free`.
+///
+/// The copy is not optional. Handing a `malloc`ed pointer to
+/// `Vec::from_raw_parts` makes Rust's global allocator responsible for freeing
+/// memory it never allocated, which is undefined behaviour and corrupts the
+/// heap whenever the two allocators are not the same one: any downstream
+/// `#[global_allocator]` (mimalloc, jemallocator, snmalloc), or Windows, where
+/// Rust's `System` allocator uses `HeapAlloc`/`HeapFree` and the C runtime
+/// does not.
+pub(crate) unsafe fn raw_data_and_free(ptr: *mut c_char, size: usize) -> Option<Vec<u8>> {
+    if ptr.is_null() {
+        return None;
+    }
+    // A zero-length value is a legitimate RocksDB value. `malloc(0)` still
+    // returns a live pointer that has to be freed, but it is not necessarily
+    // valid to read from, so skip the copy rather than calling
+    // `from_raw_parts` on it.
+    let data = if size == 0 {
+        Vec::new()
+    } else {
+        // SAFETY: Caller guarantees `ptr` points to `size` readable bytes.
+        unsafe { std::slice::from_raw_parts(ptr.cast::<u8>(), size) }.to_vec()
+    };
+    // SAFETY: `ptr` came from `malloc` inside the RocksDB C API, so it must be
+    // released by the matching `free`, which is what `rocksdb_free` calls.
+    unsafe { ffi::rocksdb_free(ptr.cast::<c_void>()) };
+    Some(data)
+}
+
 /// Convert a RocksDB error message to an Error and frees it. The argument must not be used after
 /// this function is called.
 pub fn convert_rocksdb_error(rocksdb_err: *const c_char) -> Error {
@@ -242,7 +273,15 @@ impl CSlice {
 }
 
 impl AsRef<[u8]> for CSlice {
+    #[inline]
     fn as_ref(&self) -> &[u8] {
+        if self.len == 0 {
+            // `CopyString` returns `malloc(0)` for an empty value, and
+            // `malloc(0)` is allowed to return a pointer that must not be
+            // dereferenced. `slice::from_raw_parts(ptr, 0)` requires a
+            // dereferenceable pointer, so short-circuit instead.
+            return &[];
+        }
         unsafe { std::slice::from_raw_parts(self.data.cast::<u8>(), self.len) }
     }
 }

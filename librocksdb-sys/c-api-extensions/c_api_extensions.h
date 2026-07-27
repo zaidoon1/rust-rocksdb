@@ -238,6 +238,24 @@ extern ROCKSDB_LIBRARY_API void rust_rocksdb_eventlistener_destroy(
 extern ROCKSDB_LIBRARY_API void rust_rocksdb_options_add_eventlistener(
     rocksdb_options_t*, rust_rocksdb_eventlistener_t*);
 
+/* -------------------------------------------------------------------------
+ * Null-safe Snapshot::GetSequenceNumber
+ *
+ * `rocksdb_transaction_get_snapshot` always mallocs a `rocksdb_snapshot_t`
+ * wrapper, but its `rep` is `Transaction::GetSnapshot()`, which is nullptr
+ * unless the transaction was started with `set_snapshot(true)`. Upstream's
+ * `rocksdb_snapshot_get_sequence_number` dereferences `rep`
+ * unconditionally, so calling it on such a snapshot is a null dereference
+ * reachable from safe Rust. `rep` is not visible from Rust because
+ * `rocksdb_snapshot_t` is opaque, hence this accessor.
+ *
+ * Returns 1 and writes the sequence number through `seqno` when the
+ * snapshot is present; returns 0 and leaves `seqno` untouched otherwise.
+ * ------------------------------------------------------------------------- */
+extern ROCKSDB_LIBRARY_API unsigned char
+rust_rocksdb_snapshot_try_get_sequence_number(const rocksdb_snapshot_t*,
+                                             uint64_t* seqno);
+
 #ifdef __cplusplus
 }
 #endif

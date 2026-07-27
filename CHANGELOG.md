@@ -2,6 +2,56 @@
 
 ## Unreleased
 
+### Memory safety
+
+- fix: stop handing `malloc`ed buffers to Rust's allocator.
+  `WriteBatchWithIndex::get_from_batch`, `get_from_batch_cf`,
+  `get_from_batch_and_db` and `get_from_batch_and_db_cf` wrapped the
+  `char*` from the C API in a `Vec` with `Vec::from_raw_parts`. It comes
+  from `CopyString` (`db/c.cc`), which is plain `malloc`, so Rust's
+  global allocator was being asked to free memory it never allocated.
+  Works by accident with the system allocator, corrupts the heap under
+  any `#[global_allocator]` or on Windows. Also leaked the `malloc(0)`
+  block for every empty value.
+- fix: `WriteBatchWithIndex::iterator_with_base{,_cf}` returned an
+  iterator tied only to the base iterator, so the batch could be dropped
+  while the iterator was still reading its skip list.
+- fix: `WriteBatchWithIndex::get_pinned_from_batch_and_db{,_cf}` let
+  elision tie the pinned slice to the batch rather than to the DB whose
+  block cache it pins.
+- fix: `Snapshot::iterator` and `iterator_opt` returned the DB lifetime
+  instead of the `&self` borrow, so the iterator could outlive the
+  snapshot. Every other iterator constructor in the file already got
+  this right.
+- fix: the callback logger ran `str::from_utf8_unchecked` over RocksDB
+  log text and transmuted the level into a `#[repr(i32)]` enum. Paths
+  reach RocksDB through `OsStr::as_bytes` and are not UTF-8 validated.
+- fix: `SstFileWriter::open` took `&self` while mutating the writer,
+  which combined with the `Sync` impl let two threads race on it.
+- fix: guard `slice::from_raw_parts` on zero-length keys and values in
+  the iterator accessors, `DBPinnableSlice::deref` and `CSlice::as_ref`.
+- fix: `prefix_exists` held a `RefCell` borrow across an FFI call that
+  can re-enter through a user comparator, so a re-entrant probe hit
+  `BorrowMutError` and aborted from an `extern "C"` frame.
+
+### Correctness
+
+- fix!: `DB::get_approximate_sizes{,_cf}` now return
+  `Result<Vec<u64>, Error>`. The error was ignored and leaked, and a
+  failed call returned zeros the caller could not tell apart from empty
+  ranges.
+- fix!: `Snapshot::sequence_number` now returns `Option<u64>`. A
+  transaction started without `TransactionOptions::set_snapshot(true)`
+  gets a snapshot wrapping a null pointer, which the C getter
+  dereferences unconditionally.
+- fix: saturate rather than wrap when converting a TTL to seconds. A TTL
+  above `i32::MAX` seconds truncated, so "effectively never" became one
+  second and the data was compacted away. Affects `DB::open_with_ttl`
+  and `ColumnFamilyTtl::Duration`/`SameAsDb`.
+- fix: `drop_cf` destroyed the column family handle even when
+  `rocksdb_drop_column_family` failed, leaving the column family in the
+  DB with no handle left to reach it.
+
 ### Build configuration
 
 - perf: enable hardware CRC32C on aarch64. The `-march=...+crc` flag was

@@ -1071,10 +1071,11 @@ impl<T: ThreadMode> TransactionDB<T> {
 
     /// Marks the column family as dropped in RocksDB.
     ///
-    /// Deliberately does not take ownership of the handle. Callers must destroy
-    /// their handle (and forget the column family) only after this succeeds:
-    /// destroying it on failure would leave the column family still present in
-    /// the DB with no reachable handle.
+    /// Deliberately does not take ownership of the handle. Callers must take
+    /// the handle out of their map first, so that only one caller can ever
+    /// reach a given handle, and must put it back if this fails: destroying it
+    /// on failure would leave the column family still present in the DB with no
+    /// reachable handle.
     fn mark_column_family_dropped(
         &self,
         cf_inner: *mut ffi::rocksdb_column_family_handle_t,
@@ -1106,13 +1107,20 @@ impl TransactionDB<SingleThreaded> {
 
     /// Drops the column family with the given name
     pub fn drop_cf(&mut self, name: &str) -> Result<(), Error> {
-        let Some(cf) = self.cfs.cfs.get(name) else {
+        let Some(cf) = self.cfs.cfs.remove(name) else {
             return Err(Error::new(format!("Invalid column family: {name}")));
         };
-        self.mark_column_family_dropped(cf.inner)?;
-        // Only now reclaim resources (mem, files) by destroying the last handle.
-        drop(self.cfs.cfs.remove(name));
-        Ok(())
+        match self.mark_column_family_dropped(cf.inner) {
+            // `cf` is dropped here, which destroys the handle and reclaims the
+            // memory and files behind it.
+            Ok(()) => Ok(()),
+            Err(e) => {
+                // The column family is still there, so put the handle back
+                // rather than destroying the only way to reach it.
+                self.cfs.cfs.insert(name.to_owned(), cf);
+                Err(e)
+            }
+        }
     }
 }
 
@@ -1143,13 +1151,25 @@ impl TransactionDB<MultiThreaded> {
     /// Drops the column family with the given name by internally locking the inner column
     /// family map. This avoids needing `&mut self` reference
     pub fn drop_cf(&self, name: &str) -> Result<(), Error> {
-        let Some(inner) = self.cfs.cfs.read().get(name).map(|cf| cf.inner) else {
+        // Take the handle out under the write lock before touching RocksDB.
+        // Looking it up under a read lock and removing it afterwards would let
+        // two concurrent callers observe the same handle: the first would drop
+        // and destroy it, and the second would then hand a freed pointer to
+        // `rocksdb_drop_column_family`.
+        let Some(cf) = self.cfs.cfs.write().remove(name) else {
             return Err(Error::new(format!("Invalid column family: {name}")));
         };
-        self.mark_column_family_dropped(inner)?;
-        // Only now reclaim resources (mem, files) by destroying the last handle.
-        drop(self.cfs.cfs.write().remove(name));
-        Ok(())
+        match self.mark_column_family_dropped(cf.inner) {
+            // `cf` is dropped here, which destroys the handle and reclaims the
+            // memory and files behind it.
+            Ok(()) => Ok(()),
+            Err(e) => {
+                // The column family is still there, so put the handle back
+                // rather than destroying the only way to reach it.
+                self.cfs.cfs.write().insert(name.to_owned(), cf);
+                Err(e)
+            }
+        }
     }
 
     /// Implementation for property_value et al methods.

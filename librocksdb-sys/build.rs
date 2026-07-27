@@ -377,18 +377,29 @@ mod vendor {
 
     /// Compile RocksDB from the bundled submodule sources.
     pub(super) fn build(target: &Target) {
-        let (mut cfg, layout) = configure(target);
+        let (mut cfg, layout) = configure(target, CpuBaseline::FromTargetCpu);
 
         // These are pulled out into their own build below when they need
         // different `-march` flags than the rest of the library.
         let crc_sources = arm_crc32c_sources(target);
 
+        let mut moved = 0;
         for src in collect_sources(target, layout) {
             if crc_sources.contains(&src) {
+                moved += 1;
                 continue;
             }
             cfg.file(format!("rocksdb/{src}"));
         }
+        // Names are matched against rocksdb_lib_sources.txt by string. If a
+        // rename upstream ever broke that match we would compile these twice
+        // and hit duplicate symbols, so fail here with a readable message
+        // instead.
+        assert_eq!(
+            moved,
+            crc_sources.len(),
+            "crc32c source names no longer match rocksdb_lib_sources.txt"
+        );
         cfg.file("build_version.cc");
         // Local C-API extensions are compiled as a regular translation
         // unit alongside the submodule's `db/c.cc`. The two end up in the
@@ -398,7 +409,12 @@ mod vendor {
         cfg.compile("librocksdb.a");
 
         if !crc_sources.is_empty() {
-            let (mut crc_cfg, _) = configure(target);
+            // `CpuBaseline::Ignore`: these two files pin their own `-march`, and
+            // a user's `-mcpu` on top of it would be a second, conflicting
+            // baseline flag. Dropping it costs nothing — they are self-contained
+            // CRC routines, so per-CPU scheduling tuning is irrelevant, and the
+            // only thing that matters is that `+crc` is available.
+            let (mut crc_cfg, _) = configure(target, CpuBaseline::Ignore);
             crc_cfg.flag_if_supported(ARM_CRC32C_MARCH);
             for src in &crc_sources {
                 crc_cfg.file(format!("rocksdb/{src}"));
@@ -413,16 +429,29 @@ mod vendor {
         }
     }
 
+    /// Whether a `configure` call should forward the user's `-Ctarget-cpu`.
+    #[derive(Copy, Clone, PartialEq, Eq)]
+    enum CpuBaseline {
+        /// Pass `-Ctarget-cpu` through as `-march`/`-mcpu`, as usual.
+        FromTargetCpu,
+        /// Ignore `-Ctarget-cpu`. Used for the aarch64 CRC32C translation
+        /// units, which pin their own `-march` and would otherwise end up with
+        /// two conflicting baseline flags.
+        Ignore,
+    }
+
     /// Everything about the build except which files go into it. Shared by the
     /// main library and the separate aarch64 CRC32C build so the two can't
     /// drift apart.
-    fn configure(target: &Target) -> (cc::Build, SourceLayout) {
+    fn configure(target: &Target, baseline: CpuBaseline) -> (cc::Build, SourceLayout) {
         let mut cfg = base_cfg(target);
 
         apply_compression_features(&mut cfg);
         apply_optional_features(&mut cfg, target);
         apply_jemalloc(&mut cfg, target);
-        apply_target_cpu(&mut cfg, target);
+        if baseline == CpuBaseline::FromTargetCpu {
+            apply_target_cpu(&mut cfg, target);
+        }
         apply_target_arch(&mut cfg, target);
         let layout = apply_target_os(&mut cfg, target);
         apply_lfs_defines(&mut cfg, target, layout);
@@ -468,9 +497,15 @@ mod vendor {
     /// `crc32c.cc` under `HAVE_ARM64_CRC` and declared `extern` in
     /// `crc32c_arm64.cc`.
     fn arm_crc32c_sources(target: &Target) -> Vec<&'static str> {
-        // A user-specified CPU already went out as `-mcpu=<cpu>`; overriding it
-        // with `-march` here would narrow the baseline they asked for.
-        if target.arch != "aarch64" || target.rust_target_cpu.is_some() {
+        if target.arch != "aarch64" {
+            return Vec::new();
+        }
+        // `cl.exe` has no `-march`, and treats unknown options as a D9002
+        // warning rather than an error, so `flag_if_supported` would happily
+        // pass it through and spam every translation unit for no benefit.
+        // MSVC infers the CRC intrinsics from `/arch:` instead, which is a
+        // separate change.
+        if target.is_msvc() {
             return Vec::new();
         }
         vec!["util/crc32c.cc", "util/crc32c_arm64.cc"]

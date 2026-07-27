@@ -3661,23 +3661,31 @@ impl Options {
     extern "C" fn logger_callback(func: *mut c_void, level: u32, msg: *mut c_char, len: usize) {
         use std::process;
 
-        // `level` and `msg` come straight from RocksDB's `vsnprintf` output, so
-        // neither can be trusted:
+        // Neither argument can be trusted:
         //
-        //  * `LogLevel` is `#[repr(i32)]`, so transmuting an out-of-range level
-        //    would materialise an invalid discriminant.
-        //  * Log lines routinely embed filesystem paths and `Status::ToString()`
-        //    text. Paths reach RocksDB via `OsStr::as_bytes()`, which is not
-        //    UTF-8 validated, so `from_utf8_unchecked` was unsound.
+        //  * `LogLevel` is `#[repr(i32)]`, and `level` is whatever
+        //    `InfoLogLevel` the C layer cast to an unsigned, so transmuting it
+        //    could materialise an invalid discriminant.
+        //  * `msg` is raw `vsnprintf` output. Log lines routinely embed
+        //    filesystem paths and `Status::ToString()` text, and paths reach
+        //    RocksDB via `OsStr::as_bytes()`, which is not UTF-8 validated, so
+        //    `from_utf8_unchecked` was unsound.
         //
         // `from_utf8_lossy` returns `Cow::Borrowed` for valid UTF-8, so the
         // common path still does not allocate.
         let level = LogLevel::try_from_raw(level as i32).unwrap_or(LogLevel::Info);
-        let slice = unsafe { slice::from_raw_parts(msg.cast_const().cast::<u8>(), len) };
+        let slice = if len == 0 {
+            &[][..]
+        } else {
+            unsafe { slice::from_raw_parts(msg.cast_const().cast::<u8>(), len) }
+        };
         let msg = String::from_utf8_lossy(slice);
 
-        let holder = unsafe { &mut *func.cast::<LogCallback>() };
-        let mut callback_in_catch_unwind = AssertUnwindSafe(&mut holder.callback);
+        // Shared reference, not `&mut`: RocksDB logs from several background
+        // threads at once, so a `&mut` here would alias. `LogCallbackFn` is a
+        // `dyn Fn`, so a shared reference is all it needs.
+        let holder = unsafe { &*func.cast::<LogCallback>() };
+        let callback_in_catch_unwind = AssertUnwindSafe(&holder.callback);
         if catch_unwind(move || callback_in_catch_unwind(level, &msg)).is_err() {
             process::abort();
         }
@@ -5407,10 +5415,16 @@ unsafe extern "C" fn logger_callback(
     len: size_t,
 ) {
     let rust_callback: &LoggerCallback = unsafe { &*(raw_cb as LoggerCallbackPtr) };
-    let raw_msg = unsafe { std::slice::from_raw_parts(msg.cast_const().cast::<u8>(), len) };
+    let raw_msg = if len == 0 {
+        &[][..]
+    } else {
+        unsafe { std::slice::from_raw_parts(msg.cast_const().cast::<u8>(), len) }
+    };
     let msg = String::from_utf8_lossy(raw_msg);
-    let level =
-        LogLevel::try_from_raw(level as i32).expect("rocksdb generated an invalid log level");
+    // Don't panic on an unexpected level: this runs in an `extern "C"` frame,
+    // where unwinding aborts the process. Losing the exact level of one log
+    // line is not worth taking the process down for.
+    let level = LogLevel::try_from_raw(level as i32).unwrap_or(LogLevel::Info);
     (rust_callback)(level, &msg);
 }
 

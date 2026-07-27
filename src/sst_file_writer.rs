@@ -70,7 +70,7 @@ impl<'a> SstFileWriter<'a> {
     ///
     /// Takes `&mut self` because the underlying `rocksdb::SstFileWriter::Open`
     /// mutates the writer (it installs a new `WritableFileWriter` and table
-    /// builder) and is not thread safe. With `&self` and the `Sync` impl below,
+    /// builder) and is not thread safe. With `&self` and the `Sync` impl above,
     /// two threads could call this concurrently on the same writer from safe
     /// code and race on those fields.
     pub fn open<P: AsRef<Path>>(&mut self, path: P) -> Result<(), Error> {

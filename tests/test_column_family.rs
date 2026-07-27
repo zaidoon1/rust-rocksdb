@@ -494,3 +494,59 @@ fn test_no_leaked_column_family() {
         drop(db);
     }
 }
+
+/// `drop_cf` on a `MultiThreaded` DB takes `&self`, so several threads can call
+/// it for the same column family at once. Exactly one of them may reach
+/// `rocksdb_drop_column_family` with the handle; the rest must find it already
+/// gone.
+///
+/// This is a regression test. An earlier version looked the handle up under a
+/// read lock and only removed it from the map after the FFI call, so two
+/// callers could both come away with the same pointer: the first destroyed it,
+/// the second passed the freed pointer to RocksDB. The assertion below fails
+/// deterministically on that version because both threads report success, and
+/// CI's AddressSanitizer job catches the use-after-free itself.
+#[test]
+#[cfg(feature = "multi-threaded-cf")]
+fn test_concurrent_drop_cf_has_exactly_one_winner() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let n = DBPath::new("_rust_rocksdb_concurrent_drop_cf");
+    {
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        let db: Arc<DB> = Arc::new(DB::open(&opts, &n).unwrap());
+
+        for round in 0..25 {
+            let cf_name = format!("cf{round}");
+            db.create_cf(&cf_name, &Options::default()).unwrap();
+            db.put_cf(&db.cf_handle(&cf_name).unwrap(), b"k", b"v")
+                .unwrap();
+
+            let successes = Arc::new(AtomicUsize::new(0));
+            std::thread::scope(|scope| {
+                for _ in 0..4 {
+                    let db = Arc::clone(&db);
+                    let successes = Arc::clone(&successes);
+                    let cf_name = cf_name.clone();
+                    scope.spawn(move || {
+                        if db.drop_cf(&cf_name).is_ok() {
+                            successes.fetch_add(1, Ordering::Relaxed);
+                        }
+                    });
+                }
+            });
+
+            assert_eq!(
+                successes.load(Ordering::Relaxed),
+                1,
+                "exactly one thread should win the race to drop {cf_name}"
+            );
+            assert!(
+                db.cf_handle(&cf_name).is_none(),
+                "{cf_name} should be gone from the handle map"
+            );
+        }
+    }
+}

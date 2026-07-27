@@ -752,7 +752,7 @@ fn test_open_with_huge_ttl_does_not_wrap() {
     assert_eq!(
         db.get(b"key1").unwrap().as_deref(),
         Some(&b"value1"[..]),
-        "a ~136 year TTL must not expire after 5 seconds"
+        "a ~136 year TTL must not expire after 2 seconds"
     );
 }
 

@@ -946,9 +946,10 @@ fn test_crc32_build() {
         }
     } else if cfg!(target_arch = "aarch64") {
         // On aarch64 the answer is a property of the CPU, not of the build:
-        // build.rs always passes `-march=armv8-a+crc+crypto` (when the compiler
-        // accepts it), so `HAVE_ARM64_CRC` is defined and RocksDB decides at
-        // runtime via `crc32c_runtime_check()` / `getauxval(AT_HWCAP)`.
+        // build.rs compiles the crc32c sources with `-march=armv8-a+crc+crypto`
+        // on every non-MSVC aarch64 target, so `HAVE_ARM64_CRC` is defined and
+        // RocksDB decides at runtime via `crc32c_runtime_check()` /
+        // `getauxval(AT_HWCAP)`.
         //
         // CRC32 is optional in ARMv8.0 and mandatory from ARMv8.1, so a machine
         // without it is possible in principle. Asserting "Supported" here would
@@ -985,14 +986,20 @@ fn test_crc32_build() {
     // this may fail if RocksDB changes its string formatting
     let expected_arch = if cfg!(target_arch = "x86_64") {
         "x86".to_string()
-    } else if cfg!(target_arch = "aarch64") {
-        // Always "Arm64": build.rs unconditionally enables the ARM CRC32
-        // intrinsics on aarch64, so `HAVE_ARM64_CRC` is defined and
-        // `IsFastCrc32Supported` takes its Arm64 branch regardless of what the
-        // runtime check reports. Seeing "x86" here means the `-march` flag was
-        // lost and the whole hardware CRC32C path silently reverted to the
-        // table-driven software implementation.
+    } else if cfg!(all(target_arch = "aarch64", not(target_env = "msvc"))) {
+        // Always "Arm64" on non-MSVC aarch64: build.rs pins
+        // `-march=armv8-a+crc+crypto` on the crc32c sources regardless of
+        // `-Ctarget-cpu`, so `HAVE_ARM64_CRC` is defined and
+        // `IsFastCrc32Supported` takes its Arm64 branch whatever the runtime
+        // check reports. Seeing "x86" here means the flag was lost and the
+        // hardware CRC32C path silently reverted to the software table.
+        // MSVC has no `-march` and is not covered by that, so it is excluded.
         "Arm64".to_string()
+    } else if cfg!(all(target_arch = "aarch64", target_env = "msvc")) {
+        // aarch64 MSVC gets no `-march`, so `HAVE_ARM64_CRC` stays undefined
+        // and `IsFastCrc32Supported` falls through to its x86 branch. Enabling
+        // the intrinsics there needs `/arch:`, which is a separate change.
+        "x86".to_string()
     } else if cfg!(target_arch = "powerpc64") {
         "PPC".to_string()
     } else {

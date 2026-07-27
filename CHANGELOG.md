@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+This release contains breaking API changes (marked `fix!` below) and needs
+a minor version bump.
+
 ### Memory safety
 
 - fix: stop handing `malloc`ed buffers to Rust's allocator.
@@ -13,21 +16,25 @@
   Works by accident with the system allocator, corrupts the heap under
   any `#[global_allocator]` or on Windows. Also leaked the `malloc(0)`
   block for every empty value.
-- fix: `WriteBatchWithIndex::iterator_with_base{,_cf}` returned an
+- fix!: `WriteBatchWithIndex::iterator_with_base{,_cf}` returned an
   iterator tied only to the base iterator, so the batch could be dropped
-  while the iterator was still reading its skip list.
-- fix: `WriteBatchWithIndex::get_pinned_from_batch_and_db{,_cf}` let
+  while the iterator was still reading its skip list. The iterator now
+  borrows the batch, which is a source-breaking signature change.
+- fix!: `WriteBatchWithIndex::get_pinned_from_batch_and_db{,_cf}` let
   elision tie the pinned slice to the batch rather than to the DB whose
-  block cache it pins.
-- fix: `Snapshot::iterator` and `iterator_opt` returned the DB lifetime
+  block cache it pins. Source-breaking in both directions: the slice may
+  now outlive the batch, and may no longer outlive the DB.
+- fix!: `Snapshot::iterator` and `iterator_opt` returned the DB lifetime
   instead of the `&self` borrow, so the iterator could outlive the
   snapshot. Every other iterator constructor in the file already got
-  this right.
+  this right. Source-breaking for code that relied on the longer
+  lifetime.
 - fix: the callback logger ran `str::from_utf8_unchecked` over RocksDB
   log text and transmuted the level into a `#[repr(i32)]` enum. Paths
   reach RocksDB through `OsStr::as_bytes` and are not UTF-8 validated.
-- fix: `SstFileWriter::open` took `&self` while mutating the writer,
-  which combined with the `Sync` impl let two threads race on it.
+- fix!: `SstFileWriter::open` took `&self` while mutating the writer,
+  which combined with the `Sync` impl let two threads race on it. It now
+  takes `&mut self`, so callers need a `mut` binding.
 - fix: guard `slice::from_raw_parts` on zero-length keys and values in
   the iterator accessors, `DBPinnableSlice::deref` and `CSlice::as_ref`.
 - fix: `prefix_exists` held a `RefCell` borrow across an FFI call that
@@ -56,14 +63,16 @@
 
 - perf: enable hardware CRC32C on aarch64. The `-march=...+crc` flag was
   gated on `CARGO_CFG_TARGET_FEATURE`, which is only `neon` on stock
-  `aarch64-unknown-linux-gnu`, `aarch64-linux-android` and
-  `aarch64-pc-windows-msvc`, so `HAVE_ARM64_CRC` was never defined,
+  `aarch64-unknown-linux-gnu` and `aarch64-linux-android`, so
+  `HAVE_ARM64_CRC` was never defined,
   `util/crc32c_arm64.cc` compiled to an empty object, and every block
   read and write used the software CRC table. RocksDB picks the ARM path
   at runtime via `getauxval(AT_HWCAP)`, so the flag is now gated on the
   compiler accepting it, as upstream does. Scoped to the two crc32c
   translation units so folly's `F14IntrinsicsMode` stays consistent with
-  the prebuilt libfolly in coroutines builds.
+  the prebuilt libfolly in coroutines builds, and applied regardless of
+  `-Ctarget-cpu`. MSVC is excluded: it has no `-march` and would need
+  `/arch:` instead.
 - perf: build the vendored snappy with its accelerated paths on. snappy
   expects a generated `config.h`; we never produced one or defined
   `HAVE_CONFIG_H`, so every `#if HAVE_*` was 0 and the NEON/SSSE3

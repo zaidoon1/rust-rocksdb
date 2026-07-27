@@ -584,6 +584,10 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
     ///
     /// This applies the given `ttl` to all column families created without an explicit TTL.
     /// See [`DB::open_cf_descriptors_with_ttl`] for more control over individual column family TTLs.
+    ///
+    /// RocksDB stores the TTL as a 32-bit second count, so a `ttl` longer than
+    /// `i32::MAX` seconds (about 68 years) is clamped to that maximum rather
+    /// than wrapping.
     pub fn open_with_ttl<P: AsRef<Path>>(
         opts: &Options,
         path: P,
@@ -2376,7 +2380,13 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
             if ffi::rocksdb_iter_valid(iter) != 0 {
                 let mut key_len: size_t = 0;
                 let key_ptr = ffi::rocksdb_iter_key(iter, &raw mut key_len);
-                let key = slice::from_raw_parts(key_ptr.cast::<u8>(), key_len as usize);
+                // An empty key is legal, and `from_raw_parts` wants a
+                // dereferenceable pointer even at length 0.
+                let key = if key_len == 0 {
+                    &[][..]
+                } else {
+                    slice::from_raw_parts(key_ptr.cast::<u8>(), key_len as usize)
+                };
                 Ok(key.starts_with(prefix))
             } else if let Err(e) = (|| {
                 // Check status to differentiate end-of-range vs error
@@ -2476,7 +2486,13 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
             if ffi::rocksdb_iter_valid(iter) != 0 {
                 let mut key_len: size_t = 0;
                 let key_ptr = ffi::rocksdb_iter_key(iter, &raw mut key_len);
-                let key = slice::from_raw_parts(key_ptr.cast::<u8>(), key_len as usize);
+                // An empty key is legal, and `from_raw_parts` wants a
+                // dereferenceable pointer even at length 0.
+                let key = if key_len == 0 {
+                    &[][..]
+                } else {
+                    slice::from_raw_parts(key_ptr.cast::<u8>(), key_len as usize)
+                };
                 Ok(key.starts_with(prefix))
             } else if let Err(e) = (|| {
                 ffi_try!(ffi::rocksdb_iter_get_error(iter));
@@ -3432,10 +3448,20 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
     /// sizes will be one-tenth the size of the corresponding user data size.
     ///
     /// Due to lack of abi, only data flushed to disk is taken into account.
+    /// # Errors
+    ///
+    /// Returns the RocksDB error if the size estimate fails, for instance on an
+    /// I/O error reading the manifest. No partial sizes are reported in that
+    /// case.
     pub fn get_approximate_sizes(&self, ranges: &[Range]) -> Result<Vec<u64>, Error> {
         self.get_approximate_sizes_cfopt(None::<&ColumnFamily>, ranges)
     }
 
+    /// Like [`Self::get_approximate_sizes`], for a single column family.
+    ///
+    /// # Errors
+    ///
+    /// See [`Self::get_approximate_sizes`].
     pub fn get_approximate_sizes_cf(
         &self,
         cf: &impl AsColumnFamilyRef,
@@ -3734,11 +3760,12 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
 
     /// Marks the column family as dropped in RocksDB.
     ///
-    /// Deliberately does not take ownership of the handle. Callers must destroy
-    /// their handle (and forget the column family) only after this succeeds:
-    /// destroying it on failure would leave the column family still present in
-    /// the DB with no reachable handle, so the only way to touch it again would
-    /// be to reopen the database.
+    /// Deliberately does not take ownership of the handle. Callers must take
+    /// the handle out of their map first, so that only one caller can ever
+    /// reach a given handle, and must put it back if this fails: destroying it
+    /// on failure would leave the column family still present in the DB with no
+    /// reachable handle, so the only way to touch it again would be to reopen
+    /// the database.
     fn mark_column_family_dropped(
         &self,
         cf_inner: *mut ffi::rocksdb_column_family_handle_t,
@@ -3849,13 +3876,20 @@ impl<I: DBInner> DBCommon<SingleThreaded, I> {
 
     /// Drops the column family with the given name
     pub fn drop_cf(&mut self, name: &str) -> Result<(), Error> {
-        let Some(cf) = self.cfs.cfs.get(name) else {
+        let Some(cf) = self.cfs.cfs.remove(name) else {
             return Err(Error::new(format!("Invalid column family: {name}")));
         };
-        self.mark_column_family_dropped(cf.inner)?;
-        // Only now reclaim resources (mem, files) by destroying the last handle.
-        drop(self.cfs.cfs.remove(name));
-        Ok(())
+        match self.mark_column_family_dropped(cf.inner) {
+            // `cf` is dropped here, which destroys the handle and reclaims the
+            // memory and files behind it.
+            Ok(()) => Ok(()),
+            Err(e) => {
+                // The column family is still there, so put the handle back
+                // rather than destroying the only way to reach it.
+                self.cfs.cfs.insert(name.to_owned(), cf);
+                Err(e)
+            }
+        }
     }
 
     /// Returns the underlying column family handle
@@ -3920,13 +3954,25 @@ impl<I: DBInner> DBCommon<MultiThreaded, I> {
     /// Drops the column family with the given name by internally locking the inner column
     /// family map. This avoids needing `&mut self` reference
     pub fn drop_cf(&self, name: &str) -> Result<(), Error> {
-        let Some(inner) = self.cfs.cfs.read().get(name).map(|cf| cf.inner) else {
+        // Take the handle out under the write lock before touching RocksDB.
+        // Looking it up under a read lock and removing it afterwards would let
+        // two concurrent callers observe the same handle: the first would drop
+        // and destroy it, and the second would then hand a freed pointer to
+        // `rocksdb_drop_column_family`.
+        let Some(cf) = self.cfs.cfs.write().remove(name) else {
             return Err(Error::new(format!("Invalid column family: {name}")));
         };
-        self.mark_column_family_dropped(inner)?;
-        // Only now reclaim resources (mem, files) by destroying the last handle.
-        drop(self.cfs.cfs.write().remove(name));
-        Ok(())
+        match self.mark_column_family_dropped(cf.inner) {
+            // `cf` is dropped here, which destroys the handle and reclaims the
+            // memory and files behind it.
+            Ok(()) => Ok(()),
+            Err(e) => {
+                // The column family is still there, so put the handle back
+                // rather than destroying the only way to reach it.
+                self.cfs.cfs.write().insert(name.to_owned(), cf);
+                Err(e)
+            }
+        }
     }
 
     /// Returns the underlying column family handle
@@ -4212,9 +4258,13 @@ unsafe impl Sync for ExportImportFilesMetaData {}
 /// `Duration::as_secs` is a `u64`, so a plain `as i32` cast wraps: a TTL of
 /// `Duration::from_secs(4_294_967_301)` (~136 years, i.e. "effectively never")
 /// became `5`, and RocksDB then compaction-deleted the whole column family a few
-/// seconds after the data was written. RocksDB only treats `ttl <= 0` specially,
-/// so there is no sentinel for "no expiry"; `i32::MAX` (~68 years) is the
-/// longest expressible TTL and is what `ColumnFamilyTtl::Disabled` already uses.
+/// seconds after the data was written.
+///
+/// Clamping to `i32::MAX` (~68 years) rather than mapping an over-large TTL to
+/// RocksDB's never-expire sentinel (`ttl <= 0`, see `DBWithTTLImpl::IsStale`) is
+/// deliberate: silently turning a finite TTL the caller asked for into "keep
+/// forever" is a worse surprise than expiring it 68 years out, and `i32::MAX` is
+/// the longest TTL the C API can express anyway.
 fn ttl_to_seconds(ttl: Duration) -> c_int {
     c_int::try_from(ttl.as_secs()).unwrap_or(c_int::MAX)
 }

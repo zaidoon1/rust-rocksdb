@@ -28,11 +28,13 @@ unsafe impl Sync for DBPinnableBatch<'_> {}
 
 impl<'db> DBPinnableBatch<'db> {
     /// Returns the number of results in the batch.
+    #[inline]
     pub fn len(&self) -> usize {
         self.len
     }
 
     /// Returns whether the batch contains no results.
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }

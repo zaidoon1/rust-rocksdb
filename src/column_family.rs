@@ -165,12 +165,14 @@ pub trait AsColumnFamilyRef {
 }
 
 impl AsColumnFamilyRef for ColumnFamily {
+    #[inline]
     fn inner(&self) -> *mut ffi::rocksdb_column_family_handle_t {
         self.inner
     }
 }
 
 impl AsColumnFamilyRef for &'_ ColumnFamily {
+    #[inline]
     fn inner(&self) -> *mut ffi::rocksdb_column_family_handle_t {
         self.inner
     }
@@ -182,6 +184,7 @@ impl AsColumnFamilyRef for &'_ ColumnFamily {
 // Also, ColumnFamilyRef might not be Arc<BoundColumnFamily<'a>> depending crate
 // feature flags so, we can't use the type alias here.
 impl AsColumnFamilyRef for Arc<BoundColumnFamily<'_>> {
+    #[inline]
     fn inner(&self) -> *mut ffi::rocksdb_column_family_handle_t {
         self.inner
     }

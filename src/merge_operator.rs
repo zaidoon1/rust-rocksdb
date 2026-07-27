@@ -198,14 +198,17 @@ impl MergeOperands {
         }
     }
 
+    #[inline]
     pub fn len(&self) -> usize {
         self.num_operands
     }
 
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.num_operands == 0
     }
 
+    #[inline]
     pub fn iter(&'_ self) -> MergeOperandsIter<'_> {
         MergeOperandsIter {
             operands: self,
@@ -213,6 +216,7 @@ impl MergeOperands {
         }
     }
 
+    #[inline]
     fn get_operand(&self, index: usize) -> Option<&[u8]> {
         if index >= self.num_operands {
             None
@@ -234,6 +238,7 @@ pub struct MergeOperandsIter<'a> {
 impl<'a> Iterator for MergeOperandsIter<'a> {
     type Item = &'a [u8];
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         let operand = self.operands.get_operand(self.cursor)?;
         self.cursor += 1;

@@ -100,6 +100,7 @@ impl Drop for PerfContext {
 
 impl PerfContext {
     /// Reset context
+    #[inline]
     pub fn reset(&mut self) {
         unsafe {
             ffi::rocksdb_perfcontext_reset(self.inner);
@@ -116,6 +117,7 @@ impl PerfContext {
     }
 
     /// Returns value of a metric
+    #[inline]
     pub fn metric(&self, id: PerfMetric) -> u64 {
         unsafe { ffi::rocksdb_perfcontext_metric(self.inner, id as c_int) }
     }

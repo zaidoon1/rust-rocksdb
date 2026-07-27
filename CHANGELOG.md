@@ -83,9 +83,25 @@
 - fix: define `ROCKSDB_AUXV_GETAUXVAL_PRESENT` on Android, without which
   the aarch64 CRC32 runtime check always fails.
 
+### Performance
+
 - perf: reduce bundled RocksDB development build size by defaulting its
   native compilation to `opt-level = 1` without debug information.
   Set `ROCKSDB_NATIVE_DEBUG=1` to preserve Cargo's native debug settings.
+- perf: `prefix_exists` and `prefix_exists_cf` no longer allocate once
+  warm. They reuse a thread-local `ReadOptions` to avoid allocating and
+  then reallocated both iterate bounds on every call through
+  `set_iterate_range(PrefixRange(..))`, which returns owned `Vec`s.
+- perf: read `DBPinnableSlice`'s pointer and length once at construction
+  instead of calling into C on every deref, index and `as_ref`.
+- perf: reuse thread-local defaults in `DB::flush`,
+  `TransactionDB::transaction` and
+  `OptimisticTransactionDB::transaction`, which each built a fresh C++
+  options object per call.
+- perf: `#[inline]` on the non-generic accessors a downstream crate
+  can't inline without LTO: `AsColumnFamilyRef::inner`, `DBInner::inner`,
+  the `DBPinnableSlice`/`DBPinnableBatch` accessors, `MergeOperands` and
+  its iterator, and `PerfContext::reset`/`metric`.
 - perf: add allocation-free iterator callbacks, reusable snapshot read
   options, native batched pinned reads, and a batch-owned pinned result
   type.

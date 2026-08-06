@@ -126,6 +126,11 @@ a minor version bump.
   11.1.2, and prevent transaction-backed snapshots from being shared
   across threads.
 
+### Features
+
+- feat: expose `disable_file_deletions` and `enable_file_deletions` on
+  `OptimisticTransactionDB`.
+
 ## 0.51.0 (2026-06-26)
 
 - fix(librocksdb-sys): upgrade the bundled RocksDB submodule to

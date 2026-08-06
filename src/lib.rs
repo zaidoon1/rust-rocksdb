@@ -128,7 +128,7 @@ pub use crate::{
     db::{
         ColumnFamilyMetaData, DB, DBAccess, DBCommon, DBWithThreadMode, ExportImportFilesMetaData,
         GetIntoBufferResult, LiveFile, MultiThreaded, PrefixProber, Range, SingleThreaded,
-        ThreadMode,
+        ThreadMode, WalFile, WalFileType,
     },
     db_iterator::{
         DBIterator, DBIteratorWithThreadMode, DBRawIterator, DBRawIteratorWithThreadMode,

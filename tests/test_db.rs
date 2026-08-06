@@ -27,8 +27,8 @@ use rust_rocksdb::{
     DBCompactionStyle, DBWithThreadMode, DEFAULT_COLUMN_FAMILY_NAME, Env, Error, ErrorKind,
     FifoCompactOptions, IteratorMode, MultiThreaded, Options, PerfContext, PerfMetric,
     RateLimiterMode, ReadOptions, SingleThreaded, SliceTransform, Snapshot,
-    UniversalCompactOptions, UniversalCompactionStopStyle, WaitForCompactOptions, WriteBatch,
-    perf::get_memory_usage_stats,
+    UniversalCompactOptions, UniversalCompactionStopStyle, WaitForCompactOptions, WalFileType,
+    WriteBatch, perf::get_memory_usage_stats,
 };
 use util::{DBPath, U64Comparator, U64Timestamp, assert_iter, pair};
 
@@ -952,6 +952,54 @@ fn fifo_compaction_test() {
             assert_eq!(f.num_entries, 5);
             assert_eq!(f.num_deletions, 0);
         });
+    }
+}
+
+#[test]
+fn test_get_sorted_wal_files() {
+    let path = DBPath::new("_rust_rocksdb_get_sorted_wal_files");
+    {
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        // Retain archived WALs for the duration of the test.
+        opts.set_wal_ttl_seconds(3600);
+        let db: DB = DB::open(&opts, &path).unwrap();
+
+        // Make some archived WALs.
+        for round in 0..3 {
+            for i in 0..10 {
+                let n = round * 10 + i;
+                db.put(format!("key{n}").as_bytes(), format!("value{n}").as_bytes())
+                    .unwrap();
+            }
+            db.flush().unwrap();
+        }
+
+        // Make a live WAL.
+        for i in 30..40 {
+            db.put(format!("key{i}").as_bytes(), format!("value{i}").as_bytes())
+                .unwrap();
+        }
+
+        let wal_files = db.get_sorted_wal_files().unwrap();
+        // Assert multiple files, otherwise ordering behaviour is not tested.
+        assert!(wal_files.len() > 1);
+
+        let mut prev = 0;
+        let n = wal_files.len();
+        for f in &wal_files[0..n - 1] {
+            assert_eq!(f.file_type, WalFileType::Archived);
+            assert!(f.size_file_bytes > 0);
+            assert!(f.path_name.starts_with("/"));
+            assert!(prev < f.log_number);
+            prev = f.log_number;
+        }
+
+        let f = wal_files.last().unwrap();
+        assert_eq!(f.file_type, WalFileType::Alive);
+        assert!(f.size_file_bytes > 0);
+        assert!(f.path_name.starts_with("/"));
+        assert!(f.log_number > prev);
     }
 }
 

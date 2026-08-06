@@ -96,6 +96,46 @@ jobs:
             serde1" \
             -- -D warnings
 
+  # `rust-toolchain.toml` tracks stable, so nothing else here builds on the
+  # MSRV. This job is what makes `rust-version` in Cargo.toml a real claim
+  # rather than a number in a manifest. It reads that field instead of
+  # repeating it, so the two cannot drift.
+  #
+  # `cargo check` on the default features is deliberate. The question is
+  # whether the declared MSRV still compiles the crate, not whether the suite
+  # passes on it a second time. The explicit `+toolchain` is required because
+  # `rust-toolchain.toml` would otherwise win over the rustup default.
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Read the declared MSRV
+        id: msrv
+        run: |
+          set -euo pipefail
+          v=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
+          if [ -z "$v" ]; then
+            echo "::error::could not read rust-version from Cargo.toml"
+            exit 1
+          fi
+          echo "declared MSRV: $v"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Install rust ${{ steps.msrv.outputs.version }}
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+          cache-key: "v1-rust-msrv"
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      - name: Check on the declared MSRV
+        run: cargo +${{ steps.msrv.outputs.version }} check --all-targets
+
   # Every other job builds for the target's baseline CPU, where
   # x86_64-unknown-linux-gnu reports only fxsr, sse and sse2. `build.rs` turns
   # target features into `-march`/`-mcpu` and into RocksDB and snappy defines,

@@ -1,2 +1,7 @@
 [toolchain]
-channel = "1.91.0"
+# Track stable rather than pinning the MSRV. Pinning it here meant no job ever
+# built on current stable, so a new lint or a toolchain change that broke the
+# RocksDB build stayed invisible until the pin moved, and then arrived all at
+# once. `rust-version` in Cargo.toml is the MSRV, and the "MSRV" CI job is what
+# enforces it.
+channel = "stable"

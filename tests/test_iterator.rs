@@ -78,7 +78,7 @@ fn test_iterator() {
                 let value = it.next();
                 if valid {
                     let expect = format!("{value:?}");
-                    assert!(matches!(value, Some(Ok(_))), "{:?}", &expect);
+                    assert!(matches!(value, Some(Ok(_))), "{:?}", expect);
                 } else {
                     assert_eq!(None, value);
                     assert_eq!(None, it.next()); // Iterator is fused

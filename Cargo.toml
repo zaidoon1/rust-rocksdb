@@ -18,6 +18,20 @@ exclude = [".gitignore", ".travis.yml", "deploy.sh", "test/**/*"]
 [workspace]
 members = ["librocksdb-sys"]
 
+# Not `all-features`. That would turn on `coroutines`, which needs a folly
+# install and `ROCKSDB_FOLLY_INSTALL_PATH`, and `jemalloc`, `io-uring` and
+# `valgrind`, none of which belong in a docs build. Name the set instead, the
+# way rusqlite and git2 do.
+#
+# `--cfg docsrs` is what turns on the "available on crate feature X only"
+# badges, via `feature(doc_cfg)` in lib.rs.
+[package.metadata.docs.rs]
+features = ["serde1", "multi-threaded-cf", "raw-ptr"]
+rustdoc-args = ["--cfg", "docsrs"]
+
+[package.metadata.playground]
+features = ["serde1"]
+
 [features]
 default = ["snappy", "lz4", "zstd", "zlib", "bzip2", "bindgen-runtime"]
 jemalloc = ["rust-librocksdb-sys/jemalloc"]

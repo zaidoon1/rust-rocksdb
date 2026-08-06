@@ -1,0 +1,29 @@
+src/db.rs
+  s_4f30c5351f547f::t_4e194da225a1da 465-467,469,1639-1652,2073-2080,2551-2553,2573-2575,2584-2589,2601,3795-3803,3918-3921,4003-4006,4349-4395
+src/db_iterator.rs
+  s_82c51047d897d3::t_6100fcb7439929 22,28-59,122-125,145-148,156,161-163,167,172-178
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "13fce550bf32912e5680badbfe5c77f9783d8b9a",
+  "prompts": {},
+  "sessions": {
+    "s_4f30c5351f547f": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_02b642a33ffe94HcqLzoyfbjUE",
+        "model": "claude-opus-5"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    },
+    "s_82c51047d897d3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_02ace1a43fferpNXBVWhYXZSoF",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    }
+  }
+}

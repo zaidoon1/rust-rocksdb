@@ -172,6 +172,13 @@ jobs:
           cache-key: "v1-rust-features"
           save-if: ${{ github.ref == 'refs/heads/master' }}
 
+      # `--no-default-features` drops `bindgen-runtime`, and with neither
+      # bindgen feature `clang-sys` looks for libclang through `llvm-config`
+      # instead of loading it at runtime. The runner image has libclang but no
+      # `llvm-config` on PATH, so that configuration needs the llvm package.
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y llvm clang
+
       - name: Check ${{ matrix.name }}
         run: cargo check --all-targets ${{ matrix.features }}
 

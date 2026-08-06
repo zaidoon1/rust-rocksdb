@@ -1,9 +1,14 @@
 name: Sanitizers
 
-# These rebuild RocksDB with instrumentation, which costs far more than the
-# regular matrix, so they do not gate every pull request. AddressSanitizer and
-# LeakSanitizer still run per-PR in the main workflow. Put the
-# `run-sanitizers` label on a pull request to run these against it.
+# UBSan and TSan run on every pull request. They rebuild RocksDB
+# instrumented, but at 14 and 10 minutes they finish inside the 25 minutes the
+# coroutines build already takes, so they cost no extra wall clock.
+#
+# Valgrind takes 25 minutes on its own and is the one tool here that overlaps
+# with a per-PR job, since AddressSanitizer already covers leaks and heap
+# corruption. What it uniquely catches is reads of uninitialised memory, so it
+# still runs nightly and on master. Put the `run-sanitizers` label on a pull
+# request to get it there too.
 on:
   push:
     branches: [master]
@@ -23,7 +28,9 @@ env:
 jobs:
   ubsan:
     name: UndefinedBehaviorSanitizer
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-sanitizers')
+    # Adding the label starts a fresh run for Valgrind's benefit. Skip the two
+    # jobs that already ran when the commit was pushed.
+    if: github.event.action != 'labeled'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -67,7 +74,7 @@ jobs:
 
   tsan:
     name: ThreadSanitizer
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-sanitizers')
+    if: github.event.action != 'labeled'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -112,6 +119,7 @@ jobs:
 
   valgrind:
     name: Valgrind memcheck
+    # Nightly and on master, plus any pull request carrying the label.
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-sanitizers')
     runs-on: ubuntu-latest
     steps:

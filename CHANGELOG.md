@@ -189,9 +189,13 @@ a minor version bump.
 ### Continuous integration
 
 - ci: run the test suite under UndefinedBehaviorSanitizer,
-  ThreadSanitizer and Valgrind Memcheck, in a new `Sanitizers` workflow
-  on a nightly schedule, on pushes to master, and on pull requests
-  labelled `run-sanitizers`. All three are clean today. Two upstream
+  ThreadSanitizer and Valgrind Memcheck, in a new `Sanitizers` workflow.
+  UBSan and TSan run on every pull request; they take 14 and 10 minutes,
+  which fits inside the 25 the coroutines build already takes. Valgrind
+  needs 25 minutes by itself and only adds uninitialised-read detection
+  over the per-PR AddressSanitizer job, so it runs nightly and on master,
+  or on a pull request labelled `run-sanitizers`. All three are clean
+  today. Two upstream
   RocksDB findings are suppressed with the file and line they came from
   in `.github/tsan-suppressions.txt` and `.github/valgrind.supp`: a race
   on the non-atomic `pmull_runtime_flag` global written from every

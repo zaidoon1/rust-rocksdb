@@ -1,0 +1,172 @@
+name: Sanitizers
+
+# UBSan and TSan run on every pull request. They rebuild RocksDB
+# instrumented, but at 14 and 10 minutes they finish inside the 25 minutes the
+# coroutines build already takes, so they cost no extra wall clock.
+#
+# Valgrind takes 25 minutes on its own and is the one tool here that overlaps
+# with a per-PR job, since AddressSanitizer already covers leaks and heap
+# corruption. What it uniquely catches is reads of uninitialised memory, so it
+# still runs nightly and on master. Put the `run-sanitizers` label on a pull
+# request to get it there too.
+on:
+  push:
+    branches: [master]
+  schedule:
+    - cron: "0 3 * * *" # 3 AM UTC
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ubsan:
+    name: UndefinedBehaviorSanitizer
+    # Adding the label starts a fresh run for Valgrind's benefit. Skip the two
+    # jobs that already ran when the commit was pushed.
+    if: github.event.action != 'labeled'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-key: "v1-rust-ubsan"
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+          rustflags: ""
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y llvm clang
+
+      # rustc has no UBSan, so only the C++ is instrumented. That is where the
+      # value is anyway: RocksDB plus the hand-written extension in
+      # `librocksdb-sys/c-api-extensions/`, which does pointer and length
+      # arithmetic across the FFI boundary.
+      #
+      # ROCKSDB_UBSAN_RUN is RocksDB's own switch. It puts
+      # `no_sanitize("alignment")` on the deliberately unaligned loads in
+      # `util/coding.h`, `util/murmurhash.cc` and the crc32c sources.
+      #
+      # vptr needs RTTI and `build.rs` compiles with `-fno-rtti` unless the
+      # `rtti` feature is on, so that check has to come back out.
+      #
+      # Without `-fno-sanitize-recover=all` UBSan prints and carries on, and
+      # the job passes with undefined behaviour in the log.
+      - name: Run tests with UndefinedBehaviorSanitizer
+        env:
+          CC: clang
+          CXX: clang++
+          CFLAGS: -fsanitize=undefined -fno-sanitize=vptr -fno-sanitize-recover=all -DROCKSDB_UBSAN_RUN -fno-omit-frame-pointer
+          CXXFLAGS: -fsanitize=undefined -fno-sanitize=vptr -fno-sanitize-recover=all -DROCKSDB_UBSAN_RUN -fno-omit-frame-pointer
+          RUSTFLAGS: -Clinker=clang -Clink-arg=-fsanitize=undefined
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: cargo test --all --lib --bins --tests --jobs 2
+
+  tsan:
+    name: ThreadSanitizer
+    if: github.event.action != 'labeled'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install rust nightly
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: nightly
+          components: rust-src
+          cache-key: "v1-rust-tsan"
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+          rustflags: ""
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y llvm clang
+
+      # This crate's public contract is largely a thread-safety claim: the
+      # `Send`/`Sync` impls, the `MultiThreaded` column family map, and
+      # snapshot and iterator lifetimes against RocksDB's background threads.
+      # TSan is the only tool here that checks any of it.
+      #
+      # `-fPIC` and `FOLLY_SANITIZE_THREAD` match what RocksDB's own Makefile
+      # does under COMPILE_WITH_TSAN. jemalloc is off by default and must stay
+      # off, TSan does not work with it.
+      #
+      # Do not add `-fsanitize=thread` as a link arg. `-Zsanitizer=thread`
+      # already links rustc's TSan runtime and clang's is a duplicate of it.
+      - name: Run tests with ThreadSanitizer
+        env:
+          CC: clang
+          CXX: clang++
+          CFLAGS: -fsanitize=thread -fPIC -DFOLLY_SANITIZE_THREAD -fno-omit-frame-pointer
+          CXXFLAGS: -fsanitize=thread -fPIC -DFOLLY_SANITIZE_THREAD -fno-omit-frame-pointer
+          RUSTFLAGS: -Zsanitizer=thread
+          TSAN_OPTIONS: halt_on_error=1:suppressions=${{ github.workspace }}/.github/tsan-suppressions.txt
+        run: |
+          cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu \
+            --all --lib --bins --tests --jobs 2
+
+  valgrind:
+    name: Valgrind memcheck
+    # Nightly and on master, plus any pull request carrying the label.
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-sanitizers')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-key: "v1-rust-valgrind"
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y valgrind
+
+      - name: Build test binaries
+        run: |
+          set -euo pipefail
+          cargo test --all --lib --bins --tests --features valgrind --no-run \
+            --message-format=json > cargo-test.json
+          grep -o '"executable":"[^"]*"' cargo-test.json \
+            | cut -d'"' -f4 | sort -u > test-binaries.txt
+          count=$(wc -l < test-binaries.txt)
+          echo "found $count test binaries"
+          # Without this the loop below would find nothing and report success.
+          test "$count" -gt 0
+
+      # Memcheck is the only thing here that reports reads of uninitialised
+      # memory. MemorySanitizer would too, but it needs an instrumented libc++
+      # underneath RocksDB, which is not a reasonable amount of work for this
+      # crate. Leak checking is off because LeakSanitizer already covers it in
+      # the main workflow and is much faster at it.
+      - name: Run test binaries under memcheck
+        run: |
+          set -uo pipefail
+          failed=0
+          while read -r bin; do
+            echo "::group::$(basename "$bin")"
+            if ! valgrind --suppressions=.github/valgrind.supp \
+                          --error-exitcode=99 --leak-check=no \
+                          --errors-for-leak-kinds=none \
+                          "$bin" --test-threads=1; then
+              failed=1
+              echo "::error::valgrind reported errors in $(basename "$bin")"
+            fi
+            echo "::endgroup::"
+          done < test-binaries.txt
+          exit "$failed"

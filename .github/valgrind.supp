@@ -1,0 +1,19 @@
+# Valgrind memcheck suppressions.
+#
+# Only add an entry with the file and line it came from and a reason it is not
+# a bug worth fixing here. An unexplained entry is indistinguishable from
+# hiding a real defect.
+
+# rocksdb/util/compression.cc:515, MySink::GetAppendBuffer hands snappy the
+# sink's own output buffer, so snappy compresses straight into it and then
+# calls MySink::Append with that same pointer. Append memcpys it onto itself
+# at compression.cc:507. Nothing moves, but memcpy requires non-overlapping
+# ranges, so memcheck counts one error per compressed block. Upstream RocksDB;
+# the snappy Sink contract expects Append to skip the copy when the pointer
+# came from GetAppendBuffer.
+{
+   rocksdb-snappy-sink-self-memcpy
+   Memcheck:Overlap
+   fun:*memcpy*
+   fun:*BuiltinSnappyCompressorV2*MySink*Append*
+}

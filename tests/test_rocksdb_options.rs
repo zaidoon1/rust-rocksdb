@@ -936,14 +936,18 @@ fn test_crc32_build() {
     let log_line = log_line.unwrap();
 
     let expected_supported = if cfg!(target_arch = "x86_64") {
-        // Default Linux x86-64 (x86-64-v1) does not support CRC32. Nearly all CPUs since ~2014
-        // should support it (>= x86-64-v2), but RocksDB only does compile-time detection.
-        // Our build.rs should match the Rust target settings
-        if cfg!(target_feature = "crc") {
-            Some(true)
-        } else {
-            Some(false)
-        }
+        // RocksDB gates its x86 fast CRC32 on `__SSE4_2__` (util/crc32c.cc),
+        // and build.rs forwards `-Ctarget-cpu` to the C++ compiler as
+        // `-march`, so the C++ define tracks this Rust target feature.
+        //
+        // Baseline x86-64 (x86-64-v1) has no SSE4.2, so a default build
+        // reports "Not supported". Anything from x86-64-v2 on, including
+        // `-Ctarget-cpu=native` on essentially any CPU since ~2014, has it.
+        //
+        // This used to test `target_feature = "crc"`, which is an aarch64
+        // feature name and therefore always false here. It agreed with
+        // RocksDB only for as long as nothing built above the baseline.
+        Some(cfg!(target_feature = "sse4.2"))
     } else if cfg!(target_arch = "aarch64") {
         // On aarch64 the answer is a property of the CPU, not of the build:
         // build.rs compiles the crc32c sources with `-march=armv8-a+crc+crypto`

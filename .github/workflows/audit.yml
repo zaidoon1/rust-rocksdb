@@ -1,13 +1,16 @@
 name: Security Audit
 
+# Advisories land against dependency versions that are already pinned, so this
+# has to run on a timer as well as on change. The pull request trigger is what
+# used to be a second, separate audit job in rust.yml using a different action.
 on:
   push:
     branches:
       - master
-    paths:
-      - "**/Cargo.toml"
+  pull_request:
   schedule:
     - cron: "0 2 * * *" # run at 2 AM UTC
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,24 +18,24 @@ permissions:
 jobs:
   security-audit:
     permissions:
-      checks: write # for rustsec/audit-check to create check
+      checks: write # for the action to create a check
       contents: read # for actions/checkout to fetch code
-      issues: write # for rustsec/audit-check to create issues
+      issues: write # for the action to file advisories it finds
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: false
+          rustflags: ""
 
-      - name: use stable rust
-        run: rustup override set stable
-
+      # Cargo.lock is gitignored, so there is nothing to audit until it exists.
       - name: Generate Cargo.lock
         run: cargo generate-lockfile
 
-      - name: Audit Check
-        # https://github.com/rustsec/audit-check/issues/2
-        uses: rustsec/audit-check@master
+      - name: Audit check
+        uses: actions-rust-lang/audit@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}

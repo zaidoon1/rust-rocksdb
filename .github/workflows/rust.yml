@@ -96,12 +96,91 @@ jobs:
             serde1" \
             -- -D warnings
 
-  audit:
-    name: Security audit
-    runs-on: ubuntu-latest
+  # Every other job builds for the target's baseline CPU, where
+  # x86_64-unknown-linux-gnu reports only fxsr, sse and sse2. `build.rs` turns
+  # target features into `-march`/`-mcpu` and into RocksDB and snappy defines,
+  # so a tuned build takes entirely different code paths. A snappy build break
+  # under `-Ctarget-cpu` shipped in 0.51.0 precisely because nothing here ever
+  # left the baseline. `native` rather than a fixed level so the job keeps
+  # matching whatever the runners actually are.
+  build-tuned-cpu:
+    name: Tuned CPU build - ${{ matrix.build }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        build: [Linux, Linux-ARM]
+        include:
+          - build: Linux
+            os: ubuntu-latest
+          - build: Linux-ARM
+            os: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions-rust-lang/audit@v1
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-key: "v1-rust-tuned-cpu"
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+          rustflags: ""
+
+      - uses: taiki-e/install-action@nextest
+
+      - name: Run tests with -Ctarget-cpu=native
+        env:
+          RUSTFLAGS: -Ctarget-cpu=native
+        run: cargo nextest run --all
+
+  # Nothing else builds without the default features, so a compression backend
+  # that only compiles because a sibling feature happens to pull in its headers
+  # goes unnoticed. Check builds only; the point is that each combination
+  # compiles and links, which the default matrix already covers behaviourally.
+  build-feature-matrix:
+    name: Feature build - ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: no-default-features
+            features: "--no-default-features"
+          - name: snappy only
+            features: "--no-default-features --features snappy"
+          - name: lz4 only
+            features: "--no-default-features --features lz4"
+          - name: zstd only
+            features: "--no-default-features --features zstd"
+          - name: zlib only
+            features: "--no-default-features --features zlib"
+          - name: bzip2 only
+            features: "--no-default-features --features bzip2"
+          - name: serde1 + multi-threaded-cf
+            features: "--features serde1,multi-threaded-cf"
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-key: "v1-rust-features"
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      # `--no-default-features` drops `bindgen-runtime`, and with neither
+      # bindgen feature `clang-sys` stops loading libclang at runtime and
+      # links it instead, which needs `llvm-config` from llvm-dev to locate
+      # `libclang.so` from libclang-dev. Neither is on the runner by default.
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y llvm-dev libclang-dev clang
+
+      - name: Check ${{ matrix.name }}
+        run: cargo check --all-targets ${{ matrix.features }}
 
   test:
     name: ${{ matrix.build }}
@@ -251,8 +330,31 @@ jobs:
         if: runner.os == 'Linux'
         run: chmod -R a+w .
 
+  # Everything else runs the debug profile. Release turns on optimization and
+  # turns off debug_assertions, which changes both what the optimizer is
+  # allowed to assume about the FFI boundary and which assertions run.
+  test-release:
+    name: Test release profile
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-key: "v1-rust-release"
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      - uses: taiki-e/install-action@nextest
+
+      - name: Run rocksdb tests (release)
+        run: cargo nextest run --all --release
+
   test-sanitizers:
-    name: Test with AddressSanitizer
+    name: Test with Address/LeakSanitizer
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -281,16 +383,21 @@ jobs:
       # instrumented load to trip on. `build.rs` looks for "sanitize" in those
       # vars and keeps its dev-profile size optimizations out of the way.
       #
-      # LeakSanitizer stays off. It is the tool that would catch a leak in this
-      # crate's FFI layer, but RocksDB keeps process-lifetime singletons and
-      # background threads that it reports at exit, so turning it on needs a
-      # suppression list built from an actual run.
-      - name: Run tests with AddressSanitizer
+      # Do not add `-fsanitize=address` as a link arg. `-Zsanitizer=address`
+      # already links rustc's ASan runtime, and adding clang's on top of it
+      # gives duplicate symbol definitions for the whole runtime.
+      #
+      # `--jobs 2` because linking these binaries takes several GB each and a
+      # runner-wide parallel link gets the linker OOM-killed.
+      - name: Run tests with Address/LeakSanitizer
         env:
+          CC: clang
+          CXX: clang++
           RUSTFLAGS: -Zsanitizer=address
           RUSTDOCFLAGS: -Zsanitizer=address
           CFLAGS: -fsanitize=address -fno-omit-frame-pointer
           CXXFLAGS: -fsanitize=address -fno-omit-frame-pointer
-          ASAN_OPTIONS: detect_leaks=0:abort_on_error=1:print_stats=1
+          ASAN_OPTIONS: detect_leaks=1:detect_stack_use_after_return=1:abort_on_error=1:print_stats=1
         run: |
-          cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu --all --lib --bins --tests
+          cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu \
+            --all --lib --bins --tests --jobs 2

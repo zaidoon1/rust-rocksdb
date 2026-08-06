@@ -1073,9 +1073,12 @@ impl<T: ThreadMode> TransactionDB<T> {
     ///
     /// Deliberately does not take ownership of the handle. Callers must take
     /// the handle out of their map first, so that only one caller can ever
-    /// reach a given handle, and must put it back if this fails: destroying it
-    /// on failure would leave the column family still present in the DB with no
-    /// reachable handle.
+    /// *destroy* a given handle, and must put it back if this fails: destroying
+    /// it on failure would leave the column family still present in the DB with
+    /// no reachable handle.
+    ///
+    /// Other threads can still be holding a live `BoundColumnFamily` clone for
+    /// this handle; the `Arc` refcount keeps it alive until the last one drops.
     fn mark_column_family_dropped(
         &self,
         cf_inner: *mut ffi::rocksdb_column_family_handle_t,
@@ -1111,8 +1114,10 @@ impl TransactionDB<SingleThreaded> {
             return Err(Error::new(format!("Invalid column family: {name}")));
         };
         match self.mark_column_family_dropped(cf.inner) {
-            // `cf` is dropped here, which destroys the handle and reclaims the
-            // memory and files behind it.
+            // `cf` is dropped here. In single-threaded mode that destroys the
+            // handle; in `MultiThreaded` mode it drops one `Arc` reference and
+            // the handle is destroyed once the last `BoundColumnFamily` clone
+            // handed out by `cf_handle` is gone.
             Ok(()) => Ok(()),
             Err(e) => {
                 // The column family is still there, so put the handle back
@@ -1160,8 +1165,10 @@ impl TransactionDB<MultiThreaded> {
             return Err(Error::new(format!("Invalid column family: {name}")));
         };
         match self.mark_column_family_dropped(cf.inner) {
-            // `cf` is dropped here, which destroys the handle and reclaims the
-            // memory and files behind it.
+            // `cf` is dropped here. In single-threaded mode that destroys the
+            // handle; in `MultiThreaded` mode it drops one `Arc` reference and
+            // the handle is destroyed once the last `BoundColumnFamily` clone
+            // handed out by `cf_handle` is gone.
             Ok(()) => Ok(()),
             Err(e) => {
                 // The column family is still there, so put the handle back

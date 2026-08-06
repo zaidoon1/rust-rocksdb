@@ -661,7 +661,11 @@ impl WriteBatchWithTransaction<false> {
 
     /// Removes entries in a range whose bounds are assembled from byte slices.
     ///
-    /// The range includes `from` and excludes `to`. The two bounds must have
+    /// The range includes `from` and excludes `to`. Both bounds must be split
+    /// into the same number of parts: the System backend forwards them to
+    /// `rocksdb_writebatch_delete_rangev`, which takes one part count for the
+    /// pair. Split them differently and this returns an error.
+    ///
     /// RocksDB copies both bounds into the write batch during this call, so the
     /// slices do not need to outlive the method.
     pub fn delete_range_vectored(
@@ -712,7 +716,10 @@ impl WriteBatchWithTransaction<false> {
 
     /// Removes entries in a column family range whose bounds are assembled from byte slices.
     ///
-    /// The range includes `from` and excludes `to`. The two bounds must have
+    /// The range includes `from` and excludes `to`, and both bounds must be
+    /// split into the same number of parts. See
+    /// [`delete_range_vectored`](Self::delete_range_vectored).
+    ///
     /// RocksDB copies both bounds into the write batch during this call, so the
     /// slices do not need to outlive the method.
     pub fn delete_range_cf_vectored(

@@ -109,27 +109,45 @@ enum {
   rust_rocksdb_pinnable_batch_not_found = 0,
   rust_rocksdb_pinnable_batch_found = 1,
   rust_rocksdb_pinnable_batch_error = 2,
+  /* index outside the batch, or a batch whose internal state does not agree
+     with itself. No out-params are written. */
+  rust_rocksdb_pinnable_batch_out_of_range = 3,
 };
 
+/* A null `column_family` selects the default column family. */
 extern ROCKSDB_LIBRARY_API rust_rocksdb_pinnable_batch_t*
 rust_rocksdb_batched_multi_get_pinned(
-    rocksdb_t*, const rocksdb_readoptions_t*,
-    rocksdb_column_family_handle_t*, size_t, const rocksdb_slice_t*,
-    unsigned char, char**);
+    rocksdb_t* db, const rocksdb_readoptions_t* options,
+    rocksdb_column_family_handle_t* column_family, size_t num_keys,
+    const rocksdb_slice_t* keys, unsigned char sorted_input, char** errptr);
 extern ROCKSDB_LIBRARY_API size_t rust_rocksdb_pinnable_batch_len(
-    const rust_rocksdb_pinnable_batch_t*);
+    const rust_rocksdb_pinnable_batch_t* batch);
+/* `value` and `error` are borrowed from `batch` and dangle once it is
+   destroyed. Do not free them. */
 extern ROCKSDB_LIBRARY_API unsigned char rust_rocksdb_pinnable_batch_get(
-    const rust_rocksdb_pinnable_batch_t*, size_t, const char**, size_t*,
-    const char**, size_t*);
+    const rust_rocksdb_pinnable_batch_t* batch, size_t index,
+    const char** value, size_t* value_len, const char** error,
+    size_t* error_len);
 extern ROCKSDB_LIBRARY_API void rust_rocksdb_pinnable_batch_destroy(
-    rust_rocksdb_pinnable_batch_t*);
+    rust_rocksdb_pinnable_batch_t* batch);
+/* `column_family` must not be null, unlike
+   `rust_rocksdb_batched_multi_get_pinned` above.
+   The caller owns and must release: each non-null `values[i]` with
+   `rocksdb_pinnableslice_destroy`, each non-null per-key `errors[i]` with
+   `rocksdb_free`, and `*errptr` with `rocksdb_free`. */
 extern ROCKSDB_LIBRARY_API void rust_rocksdb_batched_multi_get_cf_slice_safe(
-    rocksdb_t*, const rocksdb_readoptions_t*,
-    rocksdb_column_family_handle_t*, size_t, const rocksdb_slice_t*,
-    rocksdb_pinnableslice_t**, char**, unsigned char, char**);
+    rocksdb_t* db, const rocksdb_readoptions_t* options,
+    rocksdb_column_family_handle_t* column_family, size_t num_keys,
+    const rocksdb_slice_t* keys, rocksdb_pinnableslice_t** values,
+    char** errors, unsigned char sorted_input, char** errptr);
+/* On success the caller owns every `iterators[i]` and must release it with
+   `rocksdb_iter_destroy`. On failure no iterator is returned and `*errptr` is
+   set. `options` must outlive the returned iterators: RocksDB keeps raw
+   pointers to its iterate bounds and timestamps. */
 extern ROCKSDB_LIBRARY_API void rust_rocksdb_create_iterators_safe(
-    rocksdb_t*, rocksdb_readoptions_t*, rocksdb_column_family_handle_t**,
-    rocksdb_iterator_t**, size_t, char**);
+    rocksdb_t* db, rocksdb_readoptions_t* options,
+    rocksdb_column_family_handle_t** column_families,
+    rocksdb_iterator_t** iterators, size_t size, char** errptr);
 
 /* -------------------------------------------------------------------------
  * Slice-based vectored WriteBatch operations

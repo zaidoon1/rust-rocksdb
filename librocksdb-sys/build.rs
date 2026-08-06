@@ -1164,8 +1164,38 @@ mod snappy {
         true
     }
 
+    /// Enable an instruction set for the snappy build, and optionally the
+    /// macro that selects the code using it.
+    ///
+    /// `define` is `None` where snappy derives the macro from a compiler
+    /// predefine on its own, so only the flag is needed.
+    ///
+    /// If the compiler rejects the flag, neither the flag nor the macro is
+    /// applied and snappy keeps its portable path. Setting the macro anyway
+    /// would break the build rather than slow it down.
+    ///
+    /// MSVC gets the macro with no flag: `cl.exe` exposes every intrinsic
+    /// regardless of `/arch:` and has no `-m` options. It also reports unknown
+    /// options as a D9002 *warning* and exits 0, so `is_flag_supported` cannot
+    /// tell an accepted flag from an ignored one there. Same reasoning as
+    /// `arm_crc32c_sources`.
+    fn enable_isa(cfg: &mut cc::Build, target: &Target, flag: &str, define: Option<&str>) {
+        if !target.is_msvc() {
+            if !cfg.is_flag_supported(flag).unwrap_or(false) {
+                return;
+            }
+            cfg.flag(flag);
+        }
+        if let Some(define) = define {
+            cfg.define(define, Some("1"));
+        }
+    }
+
     fn build_vendored(target: &Target) {
         let mut cfg = cc::Build::new();
+        // Set before any `enable_isa` call: `is_flag_supported` probes with a
+        // `.cpp` or `.c` file depending on this, and snappy is C++.
+        cfg.cpp(true);
         cfg.include("snappy/")
             .include(".")
             .define("NDEBUG", Some("1"))
@@ -1199,16 +1229,33 @@ mod snappy {
             cfg.define("HAVE_BUILTIN_PREFETCH", Some("1"));
         }
         // SNAPPY_HAVE_{SSSE3,NEON} drive SNAPPY_HAVE_VECTOR_BYTE_SHUFFLE, which
-        // selects the vectorized pattern copy in `IncrementalCopy` — the hottest
-        // loop in snappy decompression. NEON is architecturally guaranteed on
-        // aarch64, so it was being left on the table even on Apple Silicon.
-        // (SNAPPY_HAVE_BMI2 and SNAPPY_HAVE_X86_CRC32 need no help: snappy.cc
-        // derives those from __BMI2__/__SSE4_2__ itself.)
-        if target.arch == "aarch64" {
+        // selects the vectorized pattern copy in `IncrementalCopy`.
+        //
+        // A `SNAPPY_HAVE_*` macro is not an optimization hint. Setting one
+        // makes `snappy-internal.h` call the matching intrinsic from a plain
+        // inline function, so the ISA has to be enabled on the command line or
+        // the translation unit fails to compile. NEON is the exception: it is
+        // mandatory in AArch64, so the baseline already provides it.
+        //
+        // This build has its own `cc::Build` and never runs through
+        // `apply_x86`/`apply_target_cpu`, so nothing else here will supply the
+        // flag.
+        if target.has_feature("neon") {
             cfg.define("SNAPPY_HAVE_NEON", Some("1"));
         }
         if target.has_feature("ssse3") {
-            cfg.define("SNAPPY_HAVE_SSSE3", Some("1"));
+            enable_isa(&mut cfg, target, "-mssse3", Some("SNAPPY_HAVE_SSSE3"));
+        }
+        // snappy.cc derives SNAPPY_HAVE_X86_CRC32 and SNAPPY_HAVE_BMI2 from
+        // __SSE4_2__ and __BMI2__ itself, so these need the flag and no macro.
+        // Without the flag the compiler never defines either predefine, which
+        // left the CRC32 compressor hash and `_bzhi_u32` off on every x86
+        // build regardless of what the user asked for.
+        if target.has_feature("sse4.2") {
+            enable_isa(&mut cfg, target, "-msse4.2", None);
+        }
+        if target.has_feature("bmi2") {
+            enable_isa(&mut cfg, target, "-mbmi2", None);
         }
 
         for src in [
@@ -1219,7 +1266,6 @@ mod snappy {
             cfg.file(src);
         }
         apply_native_dev_defaults(&mut cfg);
-        cfg.cpp(true);
         cfg.compile("libsnappy.a");
     }
 }
@@ -1654,6 +1700,13 @@ mod extensions {
 
         cfg.file("c-api-extensions/c_api_extensions.cc");
         cfg.define("RUST_ROCKSDB_SYSTEM_BACKEND", None);
+        // `base_cfg` defines this for the vendored build, where the same
+        // source file is compiled into librocksdb.a. Without it here, one
+        // source file gets two different `assert` and `rocksdb/slice.h`
+        // inline-function semantics depending on which backend built it, and
+        // the prebuilt system librocksdb this links against was itself almost
+        // certainly built with NDEBUG.
+        cfg.define("NDEBUG", Some("1"));
         cfg.cpp(true);
         if target.is_msvc() && cfg!(feature = "mt_static") {
             cfg.static_crt(true);
@@ -1672,6 +1725,7 @@ mod extensions {
             cfg.flag("-include").flag("cstdint");
         }
 
+        apply_native_dev_defaults(&mut cfg);
         cfg.compile("rust_rocksdb_c_api_extensions");
     }
 }

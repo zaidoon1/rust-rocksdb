@@ -19,10 +19,43 @@ use crate::{
 };
 use libc::{c_char, c_uchar, size_t};
 use std::mem::ManuallyDrop;
+use std::sync::Arc;
 use std::{marker::PhantomData, ops::ControlFlow, slice};
 
 /// A type alias to keep compatibility. See [`DBRawIteratorWithThreadMode`] for details
 pub type DBRawIterator<'a> = DBRawIteratorWithThreadMode<'a, DB>;
+
+/// Keeps an iterator's [`ReadOptions`] alive for as long as the iterator is.
+///
+/// `rocksdb_create_iterators` builds N iterators from one options object, so
+/// that case needs a shared owner. Every other constructor makes one iterator
+/// from one options object and keeps it outright, which costs nothing.
+pub(crate) enum IterReadOptions {
+    Owned(ReadOptions),
+    Shared(Arc<ReadOptions>),
+}
+
+impl IterReadOptions {
+    #[inline]
+    pub(crate) fn as_ptr(&self) -> *mut ffi::rocksdb_readoptions_t {
+        match self {
+            Self::Owned(readopts) => readopts.inner,
+            Self::Shared(readopts) => readopts.inner,
+        }
+    }
+}
+
+impl From<ReadOptions> for IterReadOptions {
+    fn from(readopts: ReadOptions) -> Self {
+        Self::Owned(readopts)
+    }
+}
+
+impl From<Arc<ReadOptions>> for IterReadOptions {
+    fn from(readopts: Arc<ReadOptions>) -> Self {
+        Self::Shared(readopts)
+    }
+}
 
 /// A low-level iterator over a database or column family, created by [`DB::raw_iterator`]
 /// and other `raw_iterator_*` methods.
@@ -86,7 +119,10 @@ pub struct DBRawIteratorWithThreadMode<'a, D: DBAccess> {
     /// And yes, we need to store the entire ReadOptions structure since C++
     /// ReadOptions keep reference to C rocksdb_readoptions_t wrapper which
     /// point to vectors we own.  See issue #660.
-    readopts: Option<ReadOptions>,
+    ///
+    /// This is deliberately not an `Option`. An iterator without its options
+    /// is the bug in issue #660, so the type does not let one be built.
+    readopts: IterReadOptions,
 
     db: PhantomData<&'a D>,
 }
@@ -106,7 +142,10 @@ impl<'a, D: DBAccess> DBRawIteratorWithThreadMode<'a, D> {
         Self::from_inner(inner, readopts)
     }
 
-    pub(crate) fn from_inner(inner: *mut ffi::rocksdb_iterator_t, readopts: ReadOptions) -> Self {
+    pub(crate) fn from_inner(
+        inner: *mut ffi::rocksdb_iterator_t,
+        readopts: impl Into<IterReadOptions>,
+    ) -> Self {
         // This unwrap will never fail since rocksdb_create_iterator and
         // rocksdb_create_iterator_cf functions always return non-null. They
         // use new and deference the result so any nulls would end up with SIGSEGV
@@ -114,27 +153,27 @@ impl<'a, D: DBAccess> DBRawIteratorWithThreadMode<'a, D> {
         let inner = std::ptr::NonNull::new(inner).unwrap();
         Self {
             inner,
-            readopts: Some(readopts),
+            readopts: readopts.into(),
             db: PhantomData,
         }
     }
 
-    pub(crate) fn from_inner_without_readopts(inner: *mut ffi::rocksdb_iterator_t) -> Self {
-        let inner = std::ptr::NonNull::new(inner).expect("RocksDB returned a null iterator");
-        Self {
-            inner,
-            readopts: None,
-            db: PhantomData,
-        }
-    }
-
-    pub(crate) fn into_inner(self) -> (std::ptr::NonNull<ffi::rocksdb_iterator_t>, ReadOptions) {
+    pub(crate) fn into_inner(
+        self,
+    ) -> (std::ptr::NonNull<ffi::rocksdb_iterator_t>, IterReadOptions) {
         let value = ManuallyDrop::new(self);
         // SAFETY: value won't be used beyond this point
         let inner = unsafe { std::ptr::read(&raw const value.inner) };
-        let readopts = unsafe { std::ptr::read(&raw const value.readopts) }.unwrap_or_default();
+        let readopts = unsafe { std::ptr::read(&raw const value.readopts) };
 
         (inner, readopts)
+    }
+
+    /// The options object this iterator was created from, for tests that need
+    /// to assert which iterators share one owner.
+    #[cfg(test)]
+    pub(crate) fn readopts_ptr(&self) -> *mut ffi::rocksdb_readoptions_t {
+        self.readopts.as_ptr()
     }
 
     /// Returns `true` if the iterator is valid. An iterator is invalidated when

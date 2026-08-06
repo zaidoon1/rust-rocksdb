@@ -81,7 +81,14 @@ impl<'db> DBPinnableBatch<'db> {
                 };
                 Err(Error::new(message))
             }
-            unexpected => unreachable!("unexpected pinned batch result state {unexpected}"),
+            // `index` is bounds-checked above, so neither the out-of-range
+            // state nor an unknown one is reachable against a matching
+            // `librocksdb-sys`. Report them rather than panicking: a System
+            // backend built against a skewed extension should not be able to
+            // abort the process from a safe method.
+            unexpected => Err(Error::new(format!(
+                "unexpected pinned batch result state {unexpected} at index {index}"
+            ))),
         })
     }
 

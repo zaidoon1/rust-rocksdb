@@ -55,6 +55,10 @@ rtti = []
 malloc-usable-size = []
 zstd-static-linking-only = []
 lto = []
+# Define ROCKSDB_VALGRIND_RUN. RocksDB uses it to skip work that is only
+# correct or only finishes in reasonable time outside Valgrind. Build with
+# this before running the test suite under Memcheck.
+valgrind = []
 
 [dependencies]
 libc = "0.2"

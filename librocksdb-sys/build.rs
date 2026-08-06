@@ -632,6 +632,9 @@ mod vendor {
         if cfg!(feature = "malloc-usable-size") && target.os == "linux" {
             cfg.define("ROCKSDB_MALLOC_USABLE_SIZE", Some("1"));
         }
+        if cfg!(feature = "valgrind") {
+            cfg.define("ROCKSDB_VALGRIND_RUN", Some("1"));
+        }
     }
 
     /// Pass `-Ctarget-cpu=...` through to the C/C++ compiler as `-march=` /

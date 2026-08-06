@@ -1,0 +1,12 @@
+# ThreadSanitizer suppressions.
+#
+# Only add an entry with the file and line it came from and a reason it is not
+# a bug worth fixing here. An unexplained entry is indistinguishable from
+# hiding a real race.
+
+# rocksdb/util/crc32c.cc:380, reached from DumpSupportInfo on every DB::Open,
+# writes the plain global `pmull_runtime_flag` declared at crc32c.cc:56 and
+# read from crc32c_arm64.cc:127. Two concurrent opens race on it. Every writer
+# computes the same value from the same cpuinfo probe, so the outcome does not
+# depend on the interleaving. aarch64 only, the write is under HAVE_ARM64_CRC.
+race:rocksdb::crc32c::IsFastCrc32Supported

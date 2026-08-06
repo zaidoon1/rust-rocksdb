@@ -181,6 +181,41 @@ a minor version bump.
 
 - feat: expose `disable_file_deletions` and `enable_file_deletions` on
   `OptimisticTransactionDB`.
+- feat: the `valgrind` feature now does something. It was declared and
+  wired to nothing; it defines `ROCKSDB_VALGRIND_RUN`, which RocksDB
+  uses to skip work that does not finish in reasonable time under
+  Memcheck. Build with it before running the suite under Valgrind.
+
+### Continuous integration
+
+- ci: run the test suite under UndefinedBehaviorSanitizer,
+  ThreadSanitizer and Valgrind Memcheck, in a new `Sanitizers` workflow
+  on a nightly schedule, on pushes to master, and on pull requests
+  labelled `run-sanitizers`. All three are clean today. Two upstream
+  RocksDB findings are suppressed with the file and line they came from
+  in `.github/tsan-suppressions.txt` and `.github/valgrind.supp`: a race
+  on the non-atomic `pmull_runtime_flag` global written from every
+  `DB::Open` on aarch64, and a self-overlapping `memcpy` in the snappy
+  compression sink.
+- ci: turn LeakSanitizer on and add `detect_stack_use_after_return`. The
+  concern that RocksDB's process-lifetime singletons would swamp the
+  report was wrong, because LeakSanitizer treats globals as roots. The
+  full suite reports no leaks and needs no suppressions.
+- ci: build with `-Ctarget-cpu=native` on x86_64 and aarch64. Every
+  other job builds for the target baseline, which is why a snappy build
+  break under `-Ctarget-cpu` shipped in 0.51.0 without CI noticing.
+- ci: check the compression features individually and with
+  `--no-default-features`. Nothing built without the default feature set
+  before, so a backend that only compiled because a sibling feature
+  pulled in its headers would not have been caught.
+- ci: run the suite once in the release profile, which turns off
+  `debug_assertions` and changes what the optimizer may assume.
+- ci: limit link parallelism in the sanitizer jobs. Instrumented test
+  binaries take several GB each to link and a runner-wide parallel link
+  gets the linker OOM-killed.
+- ci: fold the two duplicate security audit jobs, which used two
+  different actions, into one that runs on pull requests, on master and
+  on a timer.
 
 ## 0.51.0 (2026-06-26)
 

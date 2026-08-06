@@ -18,7 +18,7 @@ mod util;
 use rust_rocksdb::{
     CuckooTableOptions, DB, DBAccess, Direction, Error, ErrorKind, IteratorMode,
     OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions, SingleThreaded,
-    SliceTransform, SnapshotWithThreadMode, WriteBatchWithTransaction, WriteOptions,
+    SliceTransform, SnapshotWithThreadMode, WalFileType, WriteBatchWithTransaction, WriteOptions,
 };
 use util::DBPath;
 
@@ -659,5 +659,34 @@ fn test_enable_and_disable_file_deletions() {
         db.compact_range(None::<&[u8]>, None::<&[u8]>);
 
         assert_eq!(get_sst_files().len(), 1);
+    }
+}
+
+#[test]
+fn test_get_sorted_wal_files() {
+    let path = DBPath::new("_rust_rocksdb_otxn_get_sorted_wal_files");
+    {
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        let db: OptimisticTransactionDB<SingleThreaded> =
+            OptimisticTransactionDB::open(&opts, &path).unwrap();
+
+        for i in 0..100 {
+            db.put(format!("key{i}").as_bytes(), format!("value{i}").as_bytes())
+                .unwrap();
+        }
+        db.flush_wal(false).unwrap();
+
+        let wal_files = db.get_sorted_wal_files().unwrap();
+        assert!(!wal_files.is_empty());
+
+        let mut prev = 0u64;
+        for f in &wal_files {
+            assert!(f.log_number >= prev);
+            prev = f.log_number;
+            assert!(f.path_name.ends_with(".log"));
+            assert!(f.size_file_bytes > 0);
+            assert_eq!(f.file_type, WalFileType::Alive);
+        }
     }
 }

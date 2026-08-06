@@ -3736,6 +3736,49 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         }
     }
 
+    /// Retrieve the sorted list of all WAL files, with the earliest file first.
+    pub fn get_sorted_wal_files(&self) -> Result<Vec<LiveWalFile>, Error> {
+        unsafe {
+            let ptr = ffi_try!(ffi::rust_rocksdb_get_sorted_wal_files(self.inner.inner()));
+            if ptr.is_null() {
+                return Err(Error::new("Could not get sorted WAL files".to_owned()));
+            }
+            let count = ffi::rust_rocksdb_wal_files_count(ptr);
+            let mut out = Vec::with_capacity(count as usize);
+            for i in 0..count {
+                let mut path_ptr: *const c_char = ptr::null();
+                let mut log_number: u64 = 0;
+                let mut file_type: c_int = 0;
+                let mut start_sequence: u64 = 0;
+                let mut size_file_bytes: u64 = 0;
+                let ok = ffi::rust_rocksdb_wal_files_get(
+                    ptr,
+                    i,
+                    &raw mut path_ptr,
+                    &raw mut log_number,
+                    &raw mut file_type,
+                    &raw mut start_sequence,
+                    &raw mut size_file_bytes,
+                );
+                if ok == 0 {
+                    // This should never happen... But when it does:
+                    ffi::rust_rocksdb_wal_files_destroy(ptr);
+                    return Err(Error::new("WAL file index out of range".to_owned()));
+                }
+                out.push(LiveWalFile {
+                    // `path_ptr` is owned by `ptr`, freed by the destroy below.
+                    path_name: from_cstr_without_free(path_ptr),
+                    log_number,
+                    file_type: WalFileType::from(file_type),
+                    start_sequence,
+                    size_file_bytes,
+                });
+            }
+            ffi::rust_rocksdb_wal_files_destroy(ptr);
+            Ok(out)
+        }
+    }
+
     /// Delete sst files whose keys are entirely in the given range.
     ///
     /// Could leave some keys in the range which are in files which are not
@@ -4054,6 +4097,41 @@ pub struct ColumnFamilyMetaData {
     pub name: String,
     // The number of files in this column family.
     pub file_count: usize,
+}
+
+/// Type of a WAL (write-ahead log) file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WalFileType {
+    /// Archived: moved out of the main db dir, retained per WAL ttl/size limits.
+    Archived,
+    /// Alive: resides in the main db directory.
+    Alive,
+}
+
+impl From<c_int> for WalFileType {
+    fn from(value: c_int) -> Self {
+        match value {
+            x if x == ffi::rust_rocksdb_wal_file_type_alive as c_int => WalFileType::Alive,
+            _ => WalFileType::Archived,
+        }
+    }
+}
+
+/// Metadata describing a single WAL file, as returned by
+/// [`DBCommon::get_sorted_wal_files`].
+#[derive(Debug, Clone)]
+pub struct LiveWalFile {
+    /// Path name relative to the main db dir (e.g. `/000003.log`).
+    pub path_name: String,
+    /// Primary identifier for the log file; proportional to creation time.
+    pub log_number: u64,
+    /// Whether the file is alive or archived.
+    pub file_type: WalFileType,
+    /// Starting sequence number of the first write batch in this log file.
+    pub start_sequence: u64,
+    /// Position of the last flushed write (may be less than the full file size
+    /// for recycled WAL files).
+    pub size_file_bytes: u64,
 }
 
 /// The metadata that describes a SST file

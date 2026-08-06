@@ -22,6 +22,7 @@
 #include "rocksdb/options.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/table.h"
+#include "rocksdb/transaction_log.h"
 #include "rocksdb/version.h"
 #include "rocksdb/write_batch.h"
 
@@ -45,6 +46,8 @@ using ROCKSDB_NAMESPACE::SubcompactionJobInfo;
 using ROCKSDB_NAMESPACE::WriteStallInfo;
 using ROCKSDB_NAMESPACE::WriteBatch;
 using ROCKSDB_NAMESPACE::MemTableInfo;
+using ROCKSDB_NAMESPACE::WalFile;
+using ROCKSDB_NAMESPACE::VectorWalPtr;
 
 struct rust_rocksdb_status_t {
   Status* rep;
@@ -965,4 +968,75 @@ extern "C" unsigned char rust_rocksdb_snapshot_try_get_sequence_number(
   }
   *seqno = rep->GetSequenceNumber();
   return 1;
+}
+
+// -----------------------------------------------------------------------------
+// DB::GetSortedWalFiles
+//
+// `rocksdb_t` is `struct { DB* rep; }` (db/c.cc), so a pointer to the opaque
+// handle is also a pointer to its `rep` field. See the layout note above for
+// why this file uses a reinterpret_cast rather than re-declaring the struct.
+//
+// WalFile::PathName() returns a std::string by value, so the handle eagerly
+// copies each file's fields (including the owned path string) at creation
+// time; the accessors then hand out borrows that stay valid until destroy.
+// -----------------------------------------------------------------------------
+
+struct rust_rocksdb_wal_file_t {
+  std::string path_name;
+  uint64_t log_number;
+  int type;  // WalFileType: 0 = archived, 1 = alive.
+  uint64_t start_sequence;
+  uint64_t size_file_bytes;
+};
+
+struct rust_rocksdb_wal_files_t {
+  std::vector<rust_rocksdb_wal_file_t> rep;
+};
+
+extern "C" rust_rocksdb_wal_files_t* rust_rocksdb_get_sorted_wal_files(
+    rocksdb_t* db, char** errptr) {
+  DB* db_rep = *reinterpret_cast<DB**>(db);
+  VectorWalPtr files;
+  Status s = db_rep->GetSortedWalFiles(files);
+  if (RustSaveError(errptr, s)) {
+    return nullptr;
+  }
+
+  auto* result = new rust_rocksdb_wal_files_t();
+  result->rep.reserve(files.size());
+  for (const auto& file : files) {
+    result->rep.push_back(rust_rocksdb_wal_file_t{
+        file->PathName(), file->LogNumber(), static_cast<int>(file->Type()),
+        file->StartSequence(), file->SizeFileBytes()});
+  }
+  return result;
+}
+
+extern "C" size_t rust_rocksdb_wal_files_count(
+    const rust_rocksdb_wal_files_t* files) {
+  return files->rep.size();
+}
+
+extern "C" unsigned char rust_rocksdb_wal_files_get(
+    const rust_rocksdb_wal_files_t* files, size_t index, const char** path_name,
+    uint64_t* log_number, int* type, uint64_t* start_sequence,
+    uint64_t* size_file_bytes) {
+  // Same reasoning as rust_rocksdb_pinnable_batch_get (an assert would compile
+  // away in the vendored build).
+  if (index >= files->rep.size()) {
+    return 0;
+  }
+  const rust_rocksdb_wal_file_t& file = files->rep[index];
+  *path_name = file.path_name.c_str();
+  *log_number = file.log_number;
+  *type = file.type;
+  *start_sequence = file.start_sequence;
+  *size_file_bytes = file.size_file_bytes;
+  return 1;
+}
+
+extern "C" void rust_rocksdb_wal_files_destroy(
+    rust_rocksdb_wal_files_t* files) {
+  delete files;
 }

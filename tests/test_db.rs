@@ -27,8 +27,8 @@ use rust_rocksdb::{
     DBCompactionStyle, DBWithThreadMode, DEFAULT_COLUMN_FAMILY_NAME, Env, Error, ErrorKind,
     FifoCompactOptions, IteratorMode, MultiThreaded, Options, PerfContext, PerfMetric,
     RateLimiterMode, ReadOptions, SingleThreaded, SliceTransform, Snapshot,
-    UniversalCompactOptions, UniversalCompactionStopStyle, WaitForCompactOptions, WriteBatch,
-    perf::get_memory_usage_stats,
+    UniversalCompactOptions, UniversalCompactionStopStyle, WaitForCompactOptions, WalFileType,
+    WriteBatch, perf::get_memory_usage_stats,
 };
 use util::{DBPath, U64Comparator, U64Timestamp, assert_iter, pair};
 
@@ -952,6 +952,35 @@ fn fifo_compaction_test() {
             assert_eq!(f.num_entries, 5);
             assert_eq!(f.num_deletions, 0);
         });
+    }
+}
+
+#[test]
+fn test_get_sorted_wal_files() {
+    let path = DBPath::new("_rust_rocksdb_get_sorted_wal_files");
+    {
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        let db: DB = DB::open(&opts, &path).unwrap();
+
+        for i in 0..100 {
+            db.put(format!("key{i}").as_bytes(), format!("value{i}").as_bytes())
+                .unwrap();
+        }
+        db.flush_wal(false).unwrap();
+
+        let wal_files = db.get_sorted_wal_files().unwrap();
+        assert!(!wal_files.is_empty());
+
+        let mut prev = 0u64;
+        for f in &wal_files {
+            assert!(f.log_number >= prev);
+            prev = f.log_number;
+            assert!(f.path_name.ends_with(".log"));
+            assert!(f.size_file_bytes > 0);
+            assert_eq!(f.file_type, WalFileType::Alive);
+        }
+        assert!(wal_files.last().unwrap().size_file_bytes > 0);
     }
 }
 

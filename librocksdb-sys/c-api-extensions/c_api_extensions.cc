@@ -54,17 +54,37 @@ struct rust_rocksdb_background_error_recovery_info_t {
   const BackgroundErrorRecoveryInfo* rep;
 };
 
+// Copy a message into a `malloc` block, which is what the Rust side releases
+// it with (`rocksdb_free` is plain `free`).
+//
+// Falls back to a short fixed string if the copy does not fit. Rust reads a
+// null `errptr` as success, so losing the allocation must not be allowed to
+// turn a failed operation into a silent one. A truncated reason is recoverable;
+// a missing error is not.
+static char* RustDupMessage(const char* message, size_t len) {
+  char* copy = static_cast<char*>(std::malloc(len + 1));
+  if (copy != nullptr) {
+    std::memcpy(copy, message, len);
+    copy[len] = '\0';
+    return copy;
+  }
+
+  static const char kFallback[] = "out of memory while formatting error";
+  copy = static_cast<char*>(std::malloc(sizeof(kFallback)));
+  if (copy != nullptr) {
+    std::memcpy(copy, kFallback, sizeof(kFallback));
+  }
+  return copy;
+}
+
 static bool RustSaveError(char** errptr, const Status& s) {
   assert(errptr != nullptr);
   if (s.ok()) {
     return false;
   }
 
-  std::string message = s.ToString();
-  char* copy = static_cast<char*>(std::malloc(message.size() + 1));
-  if (copy != nullptr) {
-    std::memcpy(copy, message.c_str(), message.size() + 1);
-  }
+  const std::string message = s.ToString();
+  char* copy = RustDupMessage(message.data(), message.size());
 
   if (*errptr != nullptr) {
     std::free(*errptr);
@@ -75,7 +95,8 @@ static bool RustSaveError(char** errptr, const Status& s) {
 
 static void RustSaveMessage(char** errptr, const char* message) {
   assert(errptr != nullptr);
-  char* copy = message == nullptr ? nullptr : strdup(message);
+  char* copy =
+      message == nullptr ? nullptr : RustDupMessage(message, std::strlen(message));
   if (*errptr != nullptr) {
     std::free(*errptr);
   }
@@ -463,6 +484,22 @@ rust_rocksdb_batched_multi_get_pinned(
 #ifdef RUST_ROCKSDB_SYSTEM_BACKEND
     batch->system_values.resize(num_keys, nullptr);
     std::vector<char*> errors(num_keys, nullptr);
+    // Releases every per-key error string still held in `errors`, including
+    // when the drain loop below throws partway through. Destroying the vector
+    // only reclaims the array, not the strings it points at. The loop clears
+    // each slot as it takes ownership, so nothing is freed twice.
+    struct ErrorArrayGuard {
+      std::vector<char*>& errors;
+      ~ErrorArrayGuard() {
+        for (auto*& error : errors) {
+          if (error != nullptr) {
+            rocksdb_free(error);
+            error = nullptr;
+          }
+        }
+      }
+    } error_guard{errors};
+
     using ColumnFamilyHandlePtr =
         std::unique_ptr<rocksdb_column_family_handle_t,
                         decltype(&rocksdb_column_family_handle_destroy)>;
@@ -472,22 +509,14 @@ rust_rocksdb_batched_multi_get_pinned(
       owned_default.reset(rocksdb_get_default_column_family_handle(db));
       column_family = owned_default.get();
     }
-    try {
-      rocksdb_batched_multi_get_cf_slice(
-          db, options, column_family, num_keys, keys,
-          batch->system_values.data(), errors.data(), sorted_input != 0);
-    } catch (...) {
-      for (auto* error : errors) {
-        if (error != nullptr) {
-          rocksdb_free(error);
-        }
-      }
-      throw;
-    }
+    rocksdb_batched_multi_get_cf_slice(
+        db, options, column_family, num_keys, keys,
+        batch->system_values.data(), errors.data(), sorted_input != 0);
     for (size_t i = 0; i < num_keys; ++i) {
       if (errors[i] != nullptr) {
         batch->errors.emplace(i, errors[i]);
         rocksdb_free(errors[i]);
+        errors[i] = nullptr;
       }
     }
 #else
@@ -553,8 +582,14 @@ extern "C" unsigned char rust_rocksdb_pinnable_batch_get(
   *error = nullptr;
   *error_len = 0;
 
+  // Bounds are checked here rather than asserted. The vendored build defines
+  // NDEBUG, so an assert would compile away and leave an unchecked
+  // `std::vector::operator[]` feeding a pointer and length straight into
+  // `slice::from_raw_parts` on the Rust side.
 #ifdef RUST_ROCKSDB_SYSTEM_BACKEND
-  assert(index < batch->system_values.size());
+  if (index >= batch->system_values.size()) {
+    return rust_rocksdb_pinnable_batch_out_of_range;
+  }
   const auto error_iter = batch->errors.find(index);
   if (error_iter != batch->errors.end()) {
     *error = error_iter->second.data();
@@ -568,17 +603,24 @@ extern "C" unsigned char rust_rocksdb_pinnable_batch_get(
       rocksdb_pinnableslice_value(batch->system_values[index], value_len);
   return rust_rocksdb_pinnable_batch_found;
 #else
-  assert(index < batch->result_indexes.size());
+  if (index >= batch->result_indexes.size()) {
+    return rust_rocksdb_pinnable_batch_out_of_range;
+  }
   const size_t result_index = batch->result_indexes[index];
   if (result_index == kRustRocksDbBatchNotFound) {
     return rust_rocksdb_pinnable_batch_not_found;
   }
   if (result_index == kRustRocksDbBatchError) {
     const auto error_iter = batch->errors.find(index);
-    assert(error_iter != batch->errors.end());
+    if (error_iter == batch->errors.end()) {
+      return rust_rocksdb_pinnable_batch_out_of_range;
+    }
     *error = error_iter->second.data();
     *error_len = error_iter->second.size();
     return rust_rocksdb_pinnable_batch_error;
+  }
+  if (result_index >= batch->values.size()) {
+    return rust_rocksdb_pinnable_batch_out_of_range;
   }
 
   *value = batch->values[result_index].data();

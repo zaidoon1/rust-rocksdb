@@ -419,10 +419,13 @@ impl WriteBatchWithIndex {
             ffi::rocksdb_writebatch_wi_create_iterator_with_base_readopts(
                 self.inner,
                 base_iterator_inner.as_ptr(),
-                readopts.inner,
+                readopts.as_ptr(),
             )
         };
 
+        // The delta iterator keeps its own raw pointers to the iterate bounds
+        // in these options, so it has to hold the same object the base
+        // iterator was built from, not an equivalent copy.
         DBRawIteratorWithThreadMode::from_inner(iterator, readopts)
     }
 
@@ -443,7 +446,7 @@ impl WriteBatchWithIndex {
                 self.inner,
                 base_iterator_inner.as_ptr(),
                 cf.inner(),
-                readopts.inner,
+                readopts.as_ptr(),
             )
         };
 

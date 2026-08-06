@@ -274,10 +274,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y llvm clang
 
+      # `--lib --bins` skipped `tests/`, which is where nearly all of the FFI
+      # coverage lives, so the job was running almost none of the code it was
+      # meant to check. CFLAGS/CXXFLAGS carry the sanitizer into the `cc`
+      # build, without which an overflow performed by uninstrumented C++ has no
+      # instrumented load to trip on. `build.rs` looks for "sanitize" in those
+      # vars and keeps its dev-profile size optimizations out of the way.
+      #
+      # LeakSanitizer stays off. It is the tool that would catch a leak in this
+      # crate's FFI layer, but RocksDB keeps process-lifetime singletons and
+      # background threads that it reports at exit, so turning it on needs a
+      # suppression list built from an actual run.
       - name: Run tests with AddressSanitizer
         env:
           RUSTFLAGS: -Zsanitizer=address
           RUSTDOCFLAGS: -Zsanitizer=address
+          CFLAGS: -fsanitize=address -fno-omit-frame-pointer
+          CXXFLAGS: -fsanitize=address -fno-omit-frame-pointer
           ASAN_OPTIONS: detect_leaks=0:abort_on_error=1:print_stats=1
         run: |
-          cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu --all --lib --bins
+          cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu --all --lib --bins --tests

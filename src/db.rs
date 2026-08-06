@@ -462,7 +462,11 @@ struct PinnedMultiGetOutput {
     errors: Vec<*mut c_char>,
 }
 
+/// The result of one `rocksdb_create_iterators` call: the iterator handles
+/// plus the single `ReadOptions` they were all created from, which each
+/// iterator must keep alive.
 struct CreatedIterators {
+    readopts: Arc<ReadOptions>,
     handles: Vec<*mut ffi::rocksdb_iterator_t>,
 }
 
@@ -1632,10 +1636,20 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         K: AsRef<[u8]>,
         I: IntoIterator<Item = K>,
     {
-        let owned_keys: Vec<K> = keys.into_iter().collect();
-        if owned_keys.len() == 1 {
-            return vec![self.get_pinned_opt(owned_keys[0].as_ref(), readopts)];
-        }
+        let mut keys = keys.into_iter();
+        let Some(first) = keys.next() else {
+            return Vec::new();
+        };
+        // Decide before collecting. A single key does not benefit from the
+        // native batch, and buying a key-slice vector, two result vectors and
+        // a default column family handle to do one point lookup is a loss.
+        let Some(second) = keys.next() else {
+            return vec![self.get_pinned_opt(first.as_ref(), readopts)];
+        };
+        let mut owned_keys = Vec::with_capacity(2 + keys.size_hint().0);
+        owned_keys.push(first);
+        owned_keys.push(second);
+        owned_keys.extend(keys);
         self.batched_multi_get_pinned_owned(&owned_keys, false, readopts)
     }
 
@@ -2056,6 +2070,14 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
                 c_uchar::from(sorted_input),
             ))
         };
+        if batch.is_null() {
+            // `ffi_try!` only returns early when the extension set `errptr`.
+            // A null batch with no error means the extension could not even
+            // allocate the message, so report it instead of unwrapping.
+            return Err(Error::new(
+                "rust_rocksdb_batched_multi_get_pinned returned no batch".to_owned(),
+            ));
+        }
         // SAFETY: The extension returns a uniquely owned batch.
         Ok(unsafe { DBPinnableBatch::from_c(batch) })
     }
@@ -2526,9 +2548,9 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
     /// RocksDB state.
     ///
     /// The returned iterators match the input column family order and own their
-    /// native handles. This method uses default read options because one native
-    /// `rocksdb_create_iterators` call shares its options across every iterator,
-    /// while custom bounds and timestamps require one shared Rust owner.
+    /// native handles. They share one `ReadOptions`, because one native
+    /// `rocksdb_create_iterators` call applies a single options object to every
+    /// iterator it creates.
     pub fn raw_iterators_cf<'a, 'b, W, I>(
         &'a self,
         column_families: I,
@@ -2548,7 +2570,9 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         Ok(created
             .handles
             .into_iter()
-            .map(DBRawIteratorWithThreadMode::from_inner_without_readopts)
+            .map(|handle| {
+                DBRawIteratorWithThreadMode::from_inner(handle, Arc::clone(&created.readopts))
+            })
             .collect())
     }
 
@@ -2557,7 +2581,12 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         cf_handles: &mut [*mut ffi::rocksdb_column_family_handle_t],
     ) -> Result<CreatedIterators, Error> {
         let mut iterator_handles = vec![ptr::null_mut(); cf_handles.len()];
-        let readopts = ReadOptions::default();
+        // Every iterator gets a handle on this. RocksDB's `DBIter` stores raw
+        // `Slice*` into the options for iterate_lower_bound, iterate_upper_bound
+        // and the read timestamps, and `ArenaWrappedDBIter::Refresh` re-reads
+        // them, so the options have to outlive the last iterator rather than
+        // this function. See issue #660.
+        let readopts = Arc::new(ReadOptions::default());
         unsafe {
             ffi_try!(ffi::rust_rocksdb_create_iterators_safe(
                 self.inner.inner(),
@@ -2569,6 +2598,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         }
         Self::validate_created_iterators(&iterator_handles)?;
         Ok(CreatedIterators {
+            readopts,
             handles: iterator_handles,
         })
     }
@@ -3762,10 +3792,15 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
     ///
     /// Deliberately does not take ownership of the handle. Callers must take
     /// the handle out of their map first, so that only one caller can ever
-    /// reach a given handle, and must put it back if this fails: destroying it
-    /// on failure would leave the column family still present in the DB with no
-    /// reachable handle, so the only way to touch it again would be to reopen
-    /// the database.
+    /// *destroy* a given handle, and must put it back if this fails: destroying
+    /// it on failure would leave the column family still present in the DB with
+    /// no reachable handle, so the only way to touch it again would be to
+    /// reopen the database.
+    ///
+    /// Taking it out of the map does not make the caller the only *reader*. In
+    /// `MultiThreaded` mode `cf_handle` clones the same `Arc`, so other threads
+    /// can still hold a live `BoundColumnFamily` for this handle. That is fine:
+    /// the refcount keeps the handle alive until the last of them is gone.
     fn mark_column_family_dropped(
         &self,
         cf_inner: *mut ffi::rocksdb_column_family_handle_t,
@@ -3880,8 +3915,10 @@ impl<I: DBInner> DBCommon<SingleThreaded, I> {
             return Err(Error::new(format!("Invalid column family: {name}")));
         };
         match self.mark_column_family_dropped(cf.inner) {
-            // `cf` is dropped here, which destroys the handle and reclaims the
-            // memory and files behind it.
+            // `cf` is dropped here. In single-threaded mode that destroys the
+            // handle; in `MultiThreaded` mode it drops one `Arc` reference and
+            // the handle is destroyed once the last `BoundColumnFamily` clone
+            // handed out by `cf_handle` is gone.
             Ok(()) => Ok(()),
             Err(e) => {
                 // The column family is still there, so put the handle back
@@ -3963,8 +4000,10 @@ impl<I: DBInner> DBCommon<MultiThreaded, I> {
             return Err(Error::new(format!("Invalid column family: {name}")));
         };
         match self.mark_column_family_dropped(cf.inner) {
-            // `cf` is dropped here, which destroys the handle and reclaims the
-            // memory and files behind it.
+            // `cf` is dropped here. In single-threaded mode that destroys the
+            // handle; in `MultiThreaded` mode it drops one `Arc` reference and
+            // the handle is destroyed once the last `BoundColumnFamily` clone
+            // handed out by `cf_handle` is gone.
             Ok(()) => Ok(()),
             Err(e) => {
                 // The column family is still there, so put the handle back
@@ -4306,4 +4345,51 @@ pub(crate) fn convert_values(
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{ColumnFamilyDescriptor, DB, Options};
+
+    /// One `rocksdb_create_iterators` call applies a single `ReadOptions` to
+    /// every iterator it builds, and RocksDB's `DBIter` keeps raw `Slice*`
+    /// into that object for the iterate bounds and read timestamps. So all the
+    /// returned iterators have to keep the *same* options object alive, not a
+    /// copy each and not none at all. Dropping it at the end of
+    /// `create_iterators_cf` left those pointers dangling. See issue #660.
+    #[test]
+    fn raw_iterators_cf_share_one_live_readopts() {
+        let dir = tempfile::Builder::new()
+            .prefix("rocksdb-raw-iterators-cf-readopts")
+            .tempdir()
+            .unwrap();
+
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        opts.create_missing_column_families(true);
+        let db = DB::open_cf_descriptors(
+            &opts,
+            dir.path(),
+            [
+                ColumnFamilyDescriptor::new("first", Options::default()),
+                ColumnFamilyDescriptor::new("second", Options::default()),
+            ],
+        )
+        .unwrap();
+
+        let first = db.cf_handle("first").unwrap();
+        let second = db.cf_handle("second").unwrap();
+        let iterators = db.raw_iterators_cf([&first, &second]).unwrap();
+        assert_eq!(iterators.len(), 2);
+
+        let shared = iterators[0].readopts_ptr();
+        assert!(!shared.is_null());
+        for iterator in &iterators {
+            assert_eq!(
+                iterator.readopts_ptr(),
+                shared,
+                "each iterator must hold the options object it was created from"
+            );
+        }
+    }
 }

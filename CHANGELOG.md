@@ -40,6 +40,28 @@ a minor version bump.
 - fix: `prefix_exists` held a `RefCell` borrow across an FFI call that
   can re-enter through a user comparator, so a re-entrant probe hit
   `BorrowMutError` and aborted from an `extern "C"` frame.
+- fix!: `SnapshotWithThreadMode`'s `Send`/`Sync` impls now require
+  `D: Sync`. `Transaction` is `Send` but not `Sync`, so a
+  transaction-backed snapshot was `Send + Sync` when it had no right to
+  be. Source-breaking for code that moved one across threads.
+- fix: `DB::raw_iterators_cf` dropped the `ReadOptions` the iterators
+  were created from before returning them. RocksDB's `DBIter` keeps raw
+  `Slice*` into that object for the iterate bounds and read timestamps,
+  and `Refresh` re-reads them. Harmless as shipped, because the options
+  were always the default and those pointers were null, but the next
+  caller to pass a bound would have read freed memory. All the iterators
+  from one call now share the options object through an `Arc`, and the
+  iterator type no longer allows one without options.
+- fix: bounds-check `rust_rocksdb_pinnable_batch_get` instead of
+  asserting. The vendored build defines `NDEBUG`, so the asserts
+  compiled away and left an unchecked `std::vector` index feeding a
+  pointer and length into `slice::from_raw_parts`.
+- fix: report an error rather than silent success when the C extension
+  cannot allocate an error string. It left `errptr` null, which Rust
+  reads as ok, so a failed vectored `WriteBatch` operation looked like it
+  had been applied.
+- fix: release the per-key error strings from a System-backend batched
+  MultiGet if draining them into the batch throws partway through.
 
 ### Correctness
 
@@ -78,6 +100,20 @@ a minor version bump.
   `HAVE_CONFIG_H`, so every `#if HAVE_*` was 0 and the NEON/SSSE3
   `IncrementalCopy`, `__builtin_expect`, `__builtin_ctz` and
   `__builtin_prefetch` were all disabled. snappy is a default feature.
+  `SNAPPY_HAVE_SSSE3` now carries `-mssse3` with it. Defining it alone
+  made `snappy-internal.h` call `_mm_shuffle_epi8` from a function
+  compiled without the ISA, which is a compile error, not a slow path, so
+  x86_64 builds with `-Ctarget-cpu=native` (or `haswell`, or
+  `x86-64-v2` and newer) failed. The snappy build has its own
+  `cc::Build` and never went through `apply_x86`, so nothing else
+  supplied the flag. `SNAPPY_HAVE_NEON` is now gated on the `neon`
+  target feature rather than on the architecture, for the few aarch64
+  targets that build without SIMD.
+- perf: pass `-msse4.2` and `-mbmi2` to the vendored snappy build when
+  the target has them. snappy derives `SNAPPY_HAVE_X86_CRC32` and
+  `SNAPPY_HAVE_BMI2` from `__SSE4_2__`/`__BMI2__`, and nothing was
+  passing the flags that define those, so the CRC32 compressor hash and
+  `_bzhi_u32` were off on every x86 build.
 - perf: pass `-fno-builtin-memcmp` on non-MSVC, as upstream does, so key
   comparisons use glibc's SIMD `memcmp` rather than GCC's inline
   expansion.
@@ -91,6 +127,15 @@ a minor version bump.
   whole `perf` API silently returned zeros. Upstream defaults both on.
 - fix: define `ROCKSDB_AUXV_GETAUXVAL_PRESENT` on Android, without which
   the aarch64 CRC32 runtime check always fails.
+- fix: define `NDEBUG` when compiling `c_api_extensions.cc` for the
+  System backend, and give it the same dev-profile defaults as the rest
+  of the native build. One source file was getting two different
+  `assert` and `rocksdb/slice.h` inline-function semantics depending on
+  which backend built it, against a prebuilt librocksdb that was itself
+  built with `NDEBUG`.
+- fix: allow `ROCKSDB_COMPILE=1` on FreeBSD instead of rejecting it up
+  front, and skip jemalloc there. This reverses the FreeBSD note in
+  0.51.0.
 
 ### Performance
 
@@ -107,6 +152,9 @@ a minor version bump.
   `TransactionDB::transaction` and
   `OptimisticTransactionDB::transaction`, which each built a fresh C++
   options object per call.
+- perf: `multi_get_pinned{,_opt}` no longer collects the keys before
+  deciding whether the batch is worth it. A single key was paying for a
+  key vector on top of the point lookup it falls back to.
 - perf: `#[inline]` on the non-generic accessors a downstream crate
   can't inline without LTO: `AsColumnFamilyRef::inner`, `DBInner::inner`,
   the `DBPinnableSlice`/`DBPinnableBatch` accessors, `MergeOperands` and
@@ -123,8 +171,11 @@ a minor version bump.
 - feat: expose `open_files_async`, cache occupancy metrics, and detailed
   write buffer manager memory accounting.
 - fix: align `PerfStatsLevel` values and RTTI build flags with RocksDB
-  11.1.2, and prevent transaction-backed snapshots from being shared
-  across threads.
+  11.1.2. The enum was missing `EnableWait`, so every level above it was
+  off by one and RocksDB was given a different level than the caller
+  asked for. Callers now get the level they named, which for
+  `EnableTimeAndCPUTimeExceptForMutex` means the per-operation CPU-time
+  clock reads it always implied.
 
 ### Features
 

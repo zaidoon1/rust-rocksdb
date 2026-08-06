@@ -1,6 +1,5 @@
 *.swo
 target
-Cargo.lock
 *.orig
 *.bk
 *rlib

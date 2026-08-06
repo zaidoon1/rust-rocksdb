@@ -17,6 +17,10 @@ permissions:
 
 jobs:
   security-audit:
+    # Branch protection requires this exact check name. Renaming it silently
+    # blocks every pull request, because a required check that never reports
+    # never passes.
+    name: Security audit
     permissions:
       checks: write # for the action to create a check
       contents: read # for actions/checkout to fetch code

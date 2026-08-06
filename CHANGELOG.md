@@ -185,9 +185,40 @@ a minor version bump.
   wired to nothing; it defines `ROCKSDB_VALGRIND_RUN`, which RocksDB
   uses to skip work that does not finish in reasonable time under
   Memcheck. Build with it before running the suite under Valgrind.
+- feat: re-export the sys crate as `ffi_raw` under the `raw-ptr` feature.
+  `AsRawPtr` hands out `ffi::rocksdb_t` and friends, but the sys crate was
+  only imported privately, so callers had to add `rust-librocksdb-sys` as a
+  direct dependency and keep its version in lockstep by hand. Nothing in
+  `ffi_raw` is covered by semver.
+
+### Documentation
+
+- fix: stop rebuilding RocksDB on docs.rs. `build.rs` now honours the
+  `DOCS_RS` environment variable and skips the C++ compile, since rustdoc
+  never links and only needs `bindings.rs` to exist. Documenting the sys
+  crate goes from 83 seconds to 6 locally, against a docs.rs budget of 15
+  minutes and no network, and a docs.rs failure is only visible after
+  publishing.
+- docs: declare the docs.rs feature set explicitly and pass `--cfg docsrs`,
+  so gated items carry "available on crate feature" badges. Not
+  `all-features`, which would pull in `coroutines` and need a folly install.
 
 ### Continuous integration
 
+- fix: restore the `Security audit` check name. Folding the two audit jobs
+  together in the previous release renamed the check that branch protection
+  requires, and a required check that never reports never passes, so every
+  pull request needed an admin override to merge.
+- ci: track stable in `rust-toolchain.toml` instead of pinning it to the
+  MSRV, and add an `MSRV` job that reads `rust-version` from Cargo.toml so
+  the two cannot drift. Pinning meant no job ever built on current stable,
+  so new lints and toolchain breakage stayed invisible until the pin moved
+  and then arrived together. Moving to 1.97.1 surfaced three clippy
+  findings, now fixed: `libc::strlen` on a `CStr`, a reference cast to a raw
+  pointer, and a redundant reference in an `assert!`.
+- ci: commit `Cargo.lock`. It was ignored, so the audit job had to run
+  `cargo generate-lockfile` first and was auditing whatever resolved that
+  day rather than anything anyone builds.
 - ci: run the test suite under UndefinedBehaviorSanitizer,
   ThreadSanitizer and Valgrind Memcheck, in a new `Sanitizers` workflow.
   UBSan and TSan run on every pull request; they take 14 and 10 minutes,

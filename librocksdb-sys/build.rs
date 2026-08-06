@@ -217,6 +217,8 @@ fn main() {
         "DEP_JEMALLOC_ROOT",
         // coroutines
         "ROCKSDB_FOLLY_INSTALL_PATH",
+        // Set by docs.rs; skips the C++ compile. See `docs_rs_build`.
+        "DOCS_RS",
     ]);
 
     let target = Target::from_env();
@@ -234,6 +236,18 @@ fn main() {
     println!("cargo::rerun-if-changed=c-api-extensions/");
 
     match &backend {
+        // docs.rs builds every release in a sandbox with a 15 minute rustdoc
+        // budget and no network. Compiling RocksDB there is both the slowest
+        // thing in the build and pointless: rustdoc never links, it only needs
+        // `bindings.rs` to exist so the crate's items resolve. Skip the C++ and
+        // let `bindings::generate` below run bindgen over `rocksdb/include`,
+        // which is seconds.
+        //
+        // A docs.rs failure is only visible after publishing, and cannot be
+        // fixed without a new version, so this is worth the branch.
+        Backend::Vendored { .. } if docs_rs_build() => {
+            ensure_submodule_present("rocksdb");
+        }
         Backend::Vendored { .. } => {
             println!("cargo::rerun-if-changed=rocksdb/");
             ensure_submodule_present("rocksdb");
@@ -261,7 +275,9 @@ fn main() {
         coroutines::link();
     }
 
-    if cfg!(feature = "snappy") {
+    // Same reasoning as the docs.rs arm above: snappy is another C++ compile
+    // that rustdoc has no use for.
+    if cfg!(feature = "snappy") && !docs_rs_build() {
         snappy::ensure(&target, &backend);
     }
 
@@ -1640,6 +1656,12 @@ fn rerun_if_env_changed(vars: &[&str]) {
 
 fn out_dir() -> PathBuf {
     PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR"))
+}
+
+/// Whether this is a docs.rs build. docs.rs sets `DOCS_RS` for build scripts
+/// so they can skip work that only a real link needs.
+fn docs_rs_build() -> bool {
+    env::var_os("DOCS_RS").is_some()
 }
 
 fn manifest_dir() -> PathBuf {

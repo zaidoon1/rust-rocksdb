@@ -1,0 +1,55 @@
+CHANGELOG.md
+  s_ef4397a36e0e4f::t_7ca56f62509b59 139-151,195-199
+Cargo.lock
+  s_ef4397a36e0e4f::t_5d82520cc493fc 651
+README.md
+  s_ef4397a36e0e4f::t_f2fa3ce873b63d 332
+librocksdb-sys/build.rs
+  s_ef4397a36e0e4f::t_2410e41c64f7d3 1691,1699-1700
+librocksdb-sys/c-api-extensions/c_api_extensions.cc
+  s_ef4397a36e0e4f::t_b40978ba2ba33d 320,331-337
+librocksdb-sys/rocksdb
+  s_aa5348e1af4d7b::t_6db1f3bfdd938f 1
+librocksdb-sys/rocksdb_lib_sources.txt
+  s_244df9c413abde::t_8b259973b92932 21,26,31,103,248,283,285
+src/perf_enum.rs
+  s_aa5348e1af4d7b::t_4e21d274c22064 92-93,101
+src/statistics_enum_histogram.rs
+  s_aa5348e1af4d7b::t_25427e6eec1f92 75-77,79-87
+src/statistics_enum_ticker.rs
+  s_aa5348e1af4d7b::t_68d4cae1b8f02c 94-98,133-140,256-270
+tests/test_db.rs
+  s_ef4397a36e0e4f::t_526d6d9be4eadf 435-439,441-444,454,459,1863
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "cc72bc050ae5ea3364d0a6043bc915c43c3775de",
+  "prompts": {},
+  "sessions": {
+    "s_244df9c413abde": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0221835d9ffezQ6o5zLB0X4HHz",
+        "model": "claude-opus-5"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    },
+    "s_aa5348e1af4d7b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_024c47fa6ffeAoozO7B3U55VAT",
+        "model": "claude-opus-5"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    },
+    "s_ef4397a36e0e4f": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_025853e7dffezJ3nj0qeCze8Oy",
+        "model": "claude-opus-5"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    }
+  }
+}

@@ -274,6 +274,48 @@ extern ROCKSDB_LIBRARY_API unsigned char
 rust_rocksdb_snapshot_try_get_sequence_number(const rocksdb_snapshot_t*,
                                              uint64_t* seqno);
 
+/* -------------------------------------------------------------------------
+ * DB::GetSortedWalFiles
+ *
+ * Retrieves the sorted list of WAL files (earliest first).
+ *
+ * The returned handle owns an eagerly-materialized copy of each WAL file's
+ * metadata (including its path string), so the accessors below stay valid
+ * until `rust_rocksdb_wal_files_destroy`. On error the getter sets `*errptr`
+ * and returns NULL.
+ * ------------------------------------------------------------------------- */
+typedef struct rust_rocksdb_wal_files_t rust_rocksdb_wal_files_t;
+
+/* WalFileType values, mirroring rocksdb/transaction_log.h. */
+enum {
+  rust_rocksdb_wal_file_type_archived = 0,
+  rust_rocksdb_wal_file_type_alive = 1,
+};
+
+extern ROCKSDB_LIBRARY_API rust_rocksdb_wal_files_t*
+rust_rocksdb_get_sorted_wal_files(rocksdb_t* db, char** errptr);
+
+extern ROCKSDB_LIBRARY_API size_t
+rust_rocksdb_wal_files_count(const rust_rocksdb_wal_files_t*);
+
+/* Reads the WAL file at `index` into the out-params and returns 1. If `index`
+ * is out of range (>= rust_rocksdb_wal_files_count) it returns 0 and leaves
+ * every out-param untouched.
+ * All out-params must be non-NULL.
+ *
+ * `*path_name` receives the WAL file's NUL-terminated path name, relative to
+ * the main db dir (e.g. "/000003.log"). The pointer is owned by the handle and
+ * valid until rust_rocksdb_wal_files_destroy. `*type` is one of the
+ * rust_rocksdb_wal_file_type_* values. */
+extern ROCKSDB_LIBRARY_API unsigned char
+rust_rocksdb_wal_files_get(const rust_rocksdb_wal_files_t* files, size_t index,
+                           const char** path_name, uint64_t* log_number,
+                           int* type, uint64_t* start_sequence,
+                           uint64_t* size_file_bytes);
+
+extern ROCKSDB_LIBRARY_API void
+rust_rocksdb_wal_files_destroy(rust_rocksdb_wal_files_t*);
+
 #ifdef __cplusplus
 }
 #endif

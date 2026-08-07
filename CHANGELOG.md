@@ -190,6 +190,7 @@ a minor version bump.
   only imported privately, so callers had to add `rust-librocksdb-sys` as a
   direct dependency and keep its version in lockstep by hand. Nothing in
   `ffi_raw` is covered by semver.
+- feat: expose `DB::GetSortedWalFiles` as `DBCommon::get_sorted_wal_files`.
 
 ### Documentation
 

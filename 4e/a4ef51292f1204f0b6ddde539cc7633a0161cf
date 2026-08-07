@@ -1,0 +1,31 @@
+.github/workflows/coroutines.yml
+  s_d8a7bcd5dd3e3a::t_a6db0cc4a02ecf 98
+.github/workflows/rust.yml
+  s_13d8fc3c74096a::t_e653c975db7a5d 46,62-63,81,138,171-184,229,259,339,392,443,478,500
+.github/workflows/sanitizers.yml
+  s_d8a7bcd5dd3e3a::t_dc321076f82cdc 45,91,135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4ea4ef51292f1204f0b6ddde539cc7633a0161cf",
+  "prompts": {},
+  "sessions": {
+    "s_13d8fc3c74096a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_025d69c08ffej0IyuKxWyFWlHh",
+        "model": "claude-opus-5"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    },
+    "s_d8a7bcd5dd3e3a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_025e924f4ffe27NywlA5lmAvVO",
+        "model": "claude-opus-5"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    }
+  }
+}

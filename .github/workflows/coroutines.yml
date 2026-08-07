@@ -95,8 +95,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           cache-key: "v1-rust-coroutines"
-          # The correct input name on this action is `cache-save-if`. We only
-          # want to populate the cache from master runs, not from PR runs.
+          # Populate the cache from master runs only, not from PR runs.
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
       # The folly build's correctness depends on three independent inputs:

@@ -43,6 +43,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rust-docs
+          cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Run cargo rustdoc
         run: cargo rustdoc -- -D warnings
@@ -58,6 +59,8 @@ jobs:
 
       - name: Install rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Run doctests
         run: cargo test --doc
@@ -75,6 +78,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: clippy
+          cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y liburing-dev pkg-config
@@ -131,7 +135,7 @@ jobs:
         with:
           toolchain: ${{ steps.msrv.outputs.version }}
           cache-key: "v1-rust-msrv"
-          save-if: ${{ github.ref == 'refs/heads/master' }}
+          cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Check on the declared MSRV
         run: cargo +${{ steps.msrv.outputs.version }} check --all-targets
@@ -164,8 +168,20 @@ jobs:
       - name: Install rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          cache-key: "v1-rust-tuned-cpu"
-          save-if: ${{ github.ref == 'refs/heads/master' }}
+          # Nothing this job caches may contain machine code. `native` bakes
+          # whatever the saving runner supported into every host artifact,
+          # including the dependency rlibs that get linked into `build.rs`, and
+          # the hosted fleet spans CPU generations, so restoring those onto a
+          # narrower machine kills the build script with SIGILL. That rules out
+          # `target` and `~/.cargo/bin`, leaving the registry and git checkouts,
+          # which are only sources. Costs about two minutes, 8m09s cold against
+          # 6m05s warm, because the cache never covered the RocksDB build in the
+          # first place: `librocksdb-sys` is a workspace member, and it was 5m17s
+          # of that warm run.
+          cache-key: "v2-rust-tuned-cpu"
+          cache-targets: false
+          cache-bin: false
+          cache-save-if: ${{ github.ref == 'refs/heads/master' }}
           rustflags: ""
 
       - uses: taiki-e/install-action@nextest
@@ -210,7 +226,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           cache-key: "v1-rust-features"
-          save-if: ${{ github.ref == 'refs/heads/master' }}
+          cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
       # `--no-default-features` drops `bindgen-runtime`, and with neither
       # bindgen feature `clang-sys` stops loading libclang at runtime and
@@ -240,7 +256,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           cache-key: "v1-rust-package"
-          save-if: ${{ github.ref == 'refs/heads/master' }}
+          cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
       # No `--no-verify`: the point of this job is that cargo unpacks the
       # tarball into `target/package` and compiles RocksDB from it, which is
@@ -320,7 +336,7 @@ jobs:
       - name: Install rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          save-if: ${{ github.ref == 'refs/heads/master' }}
+          cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - uses: taiki-e/install-action@nextest
 
@@ -373,7 +389,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           cache-key: "v1-rust-multi-threaded-cf"
-          save-if: ${{ github.ref == 'refs/heads/master' }}
+          cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - uses: taiki-e/install-action@nextest
 
@@ -424,7 +440,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           cache-key: "v1-rust-jemalloc"
-          save-if: ${{ github.ref == 'refs/heads/master' }}
+          cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - uses: taiki-e/install-action@nextest
 
@@ -459,7 +475,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           cache-key: "v1-rust-release"
-          save-if: ${{ github.ref == 'refs/heads/master' }}
+          cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - uses: taiki-e/install-action@nextest
 
@@ -481,7 +497,7 @@ jobs:
           toolchain: nightly
           components: rust-src
           cache-key: "v1-rust-asan"
-          save-if: ${{ github.ref == 'refs/heads/master' }}
+          cache-save-if: ${{ github.ref == 'refs/heads/master' }}
           rustflags: ""
 
       - name: Install dependencies

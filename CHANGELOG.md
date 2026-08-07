@@ -203,12 +203,33 @@ a minor version bump.
   so gated items carry "available on crate feature" badges. Not
   `all-features`, which would pull in `coroutines` and need a folly install.
 
+### Packaging
+
+- fix: stop publishing files that nothing compiles. The `exclude` list in
+  `rust-librocksdb-sys` relied on `*/tests`, but RocksDB keeps its tests in
+  `*_test.cc` next to the sources, so that pattern matched none of them.
+  0.47.0 shipped 1879 files against the 336 the build actually compiles:
+  222 test files, the 444-file Java binding tree, db_stress_tool,
+  buckifier, microbench, fuzz, build_tools, cmake, and all of `tools` bar
+  the one file that is built. Also dropped snappy's googletest and
+  benchmark submodules, which only appear in a recursive clone and would
+  have added another 398. Now 1039 files and 3.4 MiB compressed, down from
+  6.1 MiB, which every downstream build unpacks and hashes.
+
 ### Continuous integration
 
 - fix: restore the `Security audit` check name. Folding the two audit jobs
   together in the previous release renamed the check that branch protection
   requires, and a required check that never reports never passes, so every
   pull request needed an admin override to merge.
+- ci: verify the published tarball. `cargo package` now runs in CI and
+  compiles RocksDB from the unpacked archive, because no other job builds
+  what users actually download. It also asserts the tarball stays trimmed
+  and that the pieces the build needs, gtest's fused source and
+  `test_util`, are still in it. Trimming one glob too far breaks every
+  downstream build and cannot be undone without publishing a new version.
+  The job checks out submodules recursively, which is how it caught snappy's
+  nested test dependencies that a shallow clone hides.
 - ci: track stable in `rust-toolchain.toml` instead of pinning it to the
   MSRV, and add an `MSRV` job that reads `rust-version` from Cargo.toml so
   the two cannot drift. Pinning meant no job ever built on current stable,

@@ -222,6 +222,79 @@ jobs:
       - name: Check ${{ matrix.name }}
         run: cargo check --all-targets ${{ matrix.features }}
 
+  # What we publish is not what we test. Every other job builds from the git
+  # checkout; users build from a tarball assembled by the `exclude` list in
+  # `librocksdb-sys/Cargo.toml`. Trimming one glob too far breaks every
+  # downstream build and cannot be fixed without publishing a new version, so
+  # verify the tarball itself.
+  package:
+    name: Package verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-key: "v1-rust-package"
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      # No `--no-verify`: the point of this job is that cargo unpacks the
+      # tarball into `target/package` and compiles RocksDB from it, which is
+      # what proves the exclude list did not drop a header.
+      - name: Package and build from the tarball
+        run: cargo package -p rust-librocksdb-sys
+
+      # An exclude list silently admits whatever upstream adds next, so assert
+      # the result instead of trusting the patterns. RocksDB keeps tests in
+      # `*_test.cc` beside the sources, which is how 222 test files, the Java
+      # bindings and db_stress_tool were being published in the first place.
+      #
+      # This job runs with `submodules: recursive`, which is the point: snappy's
+      # googletest and benchmark submodules are absent from a shallow clone, so
+      # a local `cargo package` will not show them.
+      - name: Assert the tarball stays trimmed
+        run: |
+          set -euo pipefail
+          cargo package --list -p rust-librocksdb-sys > /tmp/pkg.txt
+          total=$(wc -l < /tmp/pkg.txt)
+          echo "packaged files: $total"
+
+          fail=0
+          for pat in '_test\.cc$' '^rocksdb/java/' '^rocksdb/db_stress_tool/' \
+                     '^rocksdb/microbench/' '^rocksdb/fuzz/' '^rocksdb/buckifier/' \
+                     '^snappy/third_party/'; do
+            n=$(grep -cE "$pat" /tmp/pkg.txt || true)
+            if [ "$n" -ne 0 ]; then
+              echo "::error::$n packaged files match $pat, which nothing compiles"
+              fail=1
+            fi
+          done
+
+          # Ceiling with room for ordinary upstream growth. A jump past this
+          # means a new directory started riding along; extend the exclude list
+          # rather than raising the number.
+          if [ "$total" -gt 1200 ]; then
+            echo "::error::$total packaged files exceeds the 1200 ceiling"
+            fail=1
+          fi
+
+          # The other direction: these are load-bearing and easy to strip by
+          # accident. gtest is on the include path and three test_util files
+          # are compiled.
+          for pat in '^rocksdb/third-party/gtest-1.8.1/fused-src/' '^rocksdb/test_util/' \
+                     '^rocksdb/tools/dump/db_dump_tool\.cc$'; do
+            if ! grep -qE "$pat" /tmp/pkg.txt; then
+              echo "::error::nothing matches $pat, but the build needs it"
+              fail=1
+            fi
+          done
+
+          exit $fail
+
   test:
     name: ${{ matrix.build }}
     runs-on: ${{ matrix.os }}

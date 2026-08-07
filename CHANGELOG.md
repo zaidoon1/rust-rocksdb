@@ -149,6 +149,20 @@ a minor version bump.
   backend, which links a user-supplied prebuilt librocksdb. The local
   copies let it work against 11.1 through 11.7; it now needs 11.8 or
   newer, and fails at compile time rather than silently if it is older.
+- build: the `coroutines` feature now needs liburing 2.15. RocksDB 11.8
+  pins a folly commit whose `IoUringZeroCopyBufferPool.cpp` expects the
+  system headers to declare the io_uring zero-copy receive UAPI instead
+  of declaring it itself, and 2.15 is the first release with the zcrx
+  control structs and `io_uring_zcrx_ifq_reg::rx_buf_len`. No distro
+  ships it yet, so `scripts/build_folly.sh` builds it from source and
+  puts it on the include and link paths, which keeps RocksDB's io_uring
+  code and the prebuilt libfolly on one liburing.
+- build: link fast_float instead of double-conversion under
+  `coroutines`. The folly commit RocksDB 11.8 pins swapped the two in
+  its getdeps dependency list, so the build looked for a directory folly
+  no longer installs. fast_float is header-only and needs no link
+  directives, and `libdouble-conversion-dev` is no longer a build
+  dependency.
 
 ### Performance
 

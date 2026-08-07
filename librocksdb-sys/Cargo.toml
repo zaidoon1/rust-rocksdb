@@ -19,15 +19,49 @@ exclude = [
     ".gitignore",
     "*.yml",
     "snappy/testdata",
+    # googletest and google benchmark, snappy's own test dependencies. They are
+    # nested submodules, so they are only present once someone clones with
+    # `--recursive`, which is why this is easy to miss locally and not in CI.
+    # `build.rs` compiles three files out of snappy and never looks here.
+    "snappy/third_party",
     "*/doc",
     "*/docs",
     "*/examples",
     "*/tests",
     "tests",
-    # Strip the (large) vendored RocksDB documentation but KEEP
-    # `librocksdb-sys/patches/README.md`, which is referenced from the
-    # build-script panic that fires when a patch fails to apply.
+    # Strip the large vendored RocksDB documentation.
     "rocksdb/**/*.md",
+
+    # Everything below is vendored RocksDB that `build.rs` never compiles.
+    # `rocksdb_lib_sources.txt` plus `c-api-extensions/` is the whole build,
+    # and none of these paths appear in it. `*/tests` above does not catch any
+    # of it, because RocksDB keeps its tests in `*_test.cc` next to the
+    # sources rather than in a tests directory, so before this the published
+    # crate carried roughly four files for every one it built.
+    #
+    # Do not add `rocksdb/third-party` here: `build.rs` puts
+    # `rocksdb/third-party/gtest-1.8.1/fused-src/` on the include path.
+    #
+    # `rocksdb/test_util` also has to stay. Three of its files are compiled.
+    "rocksdb/**/*_test.cc",
+    "rocksdb/java",
+    "rocksdb/db_stress_tool",
+    "rocksdb/microbench",
+    "rocksdb/fuzz",
+    "rocksdb/buckifier",
+    "rocksdb/build_tools",
+    "rocksdb/cmake",
+    "rocksdb/unreleased_history",
+
+    # `tools/dump/db_dump_tool.cc` is the one compiled file under `tools`, and
+    # it includes nothing else from there, so keep that directory and drop the
+    # rest.
+    "rocksdb/tools/advisor",
+    "rocksdb/tools/block_cache_analyzer",
+    "rocksdb/tools/*.cc",
+    "rocksdb/tools/*.h",
+    "rocksdb/tools/*.py",
+    "rocksdb/tools/*.sh",
 ]
 
 [features]

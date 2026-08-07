@@ -136,6 +136,19 @@ a minor version bump.
 - fix: allow `ROCKSDB_COMPILE=1` on FreeBSD instead of rejecting it up
   front, and skip jemalloc there. This reverses the FreeBSD note in
   0.51.0.
+- fix: drop the local C-API extensions that RocksDB 11.8 provides
+  itself. `rocksdb_readoptions_{set,get}_optimize_multiget_for_io`,
+  `rocksdb_block_based_options_set_uniform_cv_threshold`, the
+  `rocksdb_block_based_table_index_block_search_type_auto` enum value,
+  `rocksdb_options_{set,get}_memtable_batch_lookup_optimization` and
+  `rocksdb_compactoptions_{set,get}_blob_garbage_collection_age_cutoff`
+  all landed upstream with the same signatures. Keeping our copies made
+  the enum a redefinition against `c.h` and the functions duplicate
+  definitions against `db/c.cc`. The Rust side is unchanged: the same
+  symbol names now resolve to upstream. This does narrow the System
+  backend, which links a user-supplied prebuilt librocksdb. The local
+  copies let it work against 11.1 through 11.7; it now needs 11.8 or
+  newer, and fails at compile time rather than silently if it is older.
 
 ### Performance
 
@@ -179,6 +192,11 @@ a minor version bump.
 
 ### Features
 
+- feat(librocksdb-sys): upgrade the bundled RocksDB submodule to 11.8.1.
+  Adds 28 tickers, 12 histograms and the `BlobCacheReadByte` perf metric
+  to the generated enums. Upstream's `v11.8.0` and `v11.8.1` tags both
+  point at this commit, whose `version.h` reads 11.8.1, so that is what
+  the library reports.
 - feat: expose `disable_file_deletions` and `enable_file_deletions` on
   `OptimisticTransactionDB`.
 - feat: the `valgrind` feature now does something. It was declared and

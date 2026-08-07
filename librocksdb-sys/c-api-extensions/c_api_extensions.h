@@ -36,47 +36,6 @@
 extern "C" {
 #endif
 
-/* -------------------------------------------------------------------------
- * ReadOptions::optimize_multiget_for_io
- *
- * Selects between the multi-level and single-level parallel MultiGet paths
- * in USE_COROUTINES builds. Mirrors the existing async_io setter/getter
- * pair. Matches upstream PR facebook/rocksdb#14752.
- * ------------------------------------------------------------------------- */
-extern ROCKSDB_LIBRARY_API void rocksdb_readoptions_set_optimize_multiget_for_io(
-    rocksdb_readoptions_t*, unsigned char);
-extern ROCKSDB_LIBRARY_API unsigned char rocksdb_readoptions_get_optimize_multiget_for_io(
-    rocksdb_readoptions_t*);
-
-/* -------------------------------------------------------------------------
- * BlockBasedTableOptions::uniform_cv_threshold +
- * BlockSearchType::kAuto enum value
- *
- * The "auto" index-block search type was added to BlockBasedTableOptions
- * but upstream's enum in c.h only declares the binary and interpolation
- * values. The underlying C setter accepts any int via static_cast, so the
- * kAuto value (2) is reachable today by passing the raw int; only the
- * named constant was missing. The uniform_cv_threshold setter that gates
- * kAuto's behaviour at write time also has no upstream C wrapper.
- * ------------------------------------------------------------------------- */
-enum {
-  rocksdb_block_based_table_index_block_search_type_auto = 2,
-};
-extern ROCKSDB_LIBRARY_API void rocksdb_block_based_options_set_uniform_cv_threshold(
-    rocksdb_block_based_table_options_t*, double);
-
-/* -------------------------------------------------------------------------
- * AdvancedColumnFamilyOptions::memtable_batch_lookup_optimization
- *
- * Enables the skip-list memtable's batch-lookup optimization for MultiGet.
- * Immutable on the C++ side. Mirrors the existing memtable_huge_page_size
- * setter/getter pair.
- * ------------------------------------------------------------------------- */
-extern ROCKSDB_LIBRARY_API void rocksdb_options_set_memtable_batch_lookup_optimization(
-    rocksdb_options_t*, unsigned char);
-extern ROCKSDB_LIBRARY_API unsigned char rocksdb_options_get_memtable_batch_lookup_optimization(
-    rocksdb_options_t*);
-
 /* Options::open_files_async compatibility wrapper. */
 extern ROCKSDB_LIBRARY_API unsigned char
 rust_rocksdb_options_open_files_async_supported(void);
@@ -84,17 +43,6 @@ extern ROCKSDB_LIBRARY_API unsigned char
 rust_rocksdb_options_set_open_files_async(rocksdb_options_t*, unsigned char);
 extern ROCKSDB_LIBRARY_API unsigned char
 rust_rocksdb_options_get_open_files_async(rocksdb_options_t*);
-
-/* -------------------------------------------------------------------------
- * CompactOptions::blob_garbage_collection_age_cutoff
- *
- * Sets the blob_garbage_collection_age_cutoff parameters on manual
- * compactions. Matches upstream PR facebook/rocksdb#14768.
- * ------------------------------------------------------------------------- */
-extern ROCKSDB_LIBRARY_API void rocksdb_compactoptions_set_blob_garbage_collection_age_cutoff(
-    rocksdb_compactoptions_t*, double);
-extern ROCKSDB_LIBRARY_API double rocksdb_compactoptions_get_blob_garbage_collection_age_cutoff(
-    rocksdb_compactoptions_t*);
 
 /* -------------------------------------------------------------------------
  * Batch-owned pinned MultiGet results

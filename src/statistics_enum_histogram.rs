@@ -72,6 +72,18 @@ iterable_named_enum! {
         MultiscanPrepareIterators("rocksdb.multiscan.op.prepare.iterators.micros"),
         MultiscanPrepareMicros("rocksdb.multiscan.prepare.micros"),
         MultiscanBlocksPerPrepare("rocksdb.multiscan.blocks.per.prepare"),
+        IoDispatcherAsyncReadObservedCompletionMicros("rocksdb.iodispatcher.async.read.observed.completion.micros"),
+        IoDispatcherAsyncReadPollWaitMicros("rocksdb.iodispatcher.async.read.poll.wait.micros"),
+        IoDispatcherAsyncReadPrefetchLeadMicros("rocksdb.iodispatcher.async.read.prefetch.lead.micros"),
         BlockKeyDistributionCv("rocksdb.block.key.distribution.cv"),
+        IngestExternalFilePrepareTime("rocksdb.ingest.external.file.prepare.micros"),
+        IngestExternalFileRunTime("rocksdb.ingest.external.file.run.micros"),
+        RateLimiterWaitMicrosRead("rocksdb.rate.limiter.wait.micros.read"),
+        RateLimiterWaitMicrosWrite("rocksdb.rate.limiter.wait.micros.write"),
+        FlushMemtableMemoryBytes("rocksdb.flush.memtable.memory.bytes"),
+        FlushMemtableTotalDataSize("rocksdb.flush.memtable.total.data.size.bytes"),
+        FlushWriteBufferFullMemtableMemoryBytes("rocksdb.flush.write_buffer_full.memtable.memory.bytes"),
+        FlushWriteBufferManagerMemtableMemoryBytes("rocksdb.flush.write_buffer_manager.memtable.memory.bytes"),
+        OpenAndCompactDbOpenMicros("rocksdb.open.and.compact.db.open.micros"),
     }
 }

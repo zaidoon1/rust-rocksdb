@@ -1688,7 +1688,7 @@ fn env_truthy(name: &str) -> bool {
 // Local C-API extensions
 // =========================================================================
 
-/// Local additions to the RocksDB C API for C++ options that have no
+/// Local additions to the RocksDB C API for C++ features that have no
 /// upstream C wrapper yet. The actual sources live in
 /// `librocksdb-sys/c-api-extensions/`:
 ///
@@ -1696,7 +1696,8 @@ fn env_truthy(name: &str) -> bool {
 ///   `rocksdb/c.h`, making it a clean superset of the upstream C API
 ///   header that bindgen scans as its primary input.
 /// - `c_api_extensions.cc` defines the new symbols by reaching into the
-///   relevant C++ types (`ReadOptions`, `Options`, `BlockBasedTableOptions`).
+///   relevant C++ types (`DB`, `ColumnFamilyHandle`, `Options`,
+///   `ReadOptions`, `WriteBatch`, `Snapshot`).
 ///
 /// For the Vendored backend, `vendor::build()` already adds the extension
 /// `.cc` to its `cc::Build` source list — there's nothing extra to do.

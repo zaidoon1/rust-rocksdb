@@ -432,10 +432,16 @@ fn set_column_family_metadata_test() {
         let cf1 = db.cf_handle(DEFAULT_COLUMN_FAMILY_NAME).unwrap();
         db.put_cf(&cf1, b"key1", b"value").unwrap();
 
+        // Write enough to cf2 that the payload dominates. Every SST carries
+        // a few hundred bytes of table properties, and some of that varies
+        // with the column family name and with which optional properties
+        // apply, so a three-key file is not reliably larger than a one-key
+        // file.
         let cf2 = db.cf_handle("cf2").unwrap();
-        db.put_cf(&cf2, b"key1", b"value").unwrap();
-        db.put_cf(&cf2, b"key2", b"value").unwrap();
-        db.put_cf(&cf2, b"key3", b"value").unwrap();
+        for i in 0..1000u32 {
+            db.put_cf(&cf2, format!("key{i:04}").as_bytes(), b"value")
+                .unwrap();
+        }
 
         db.flush_cf(&cf1).unwrap();
         db.flush_cf(&cf2).unwrap();
@@ -445,10 +451,12 @@ fn set_column_family_metadata_test() {
         // zaidoon1/rust-rocksdb#224). A regression where the re-export is
         // dropped would fail to compile here.
         let default_cf_metadata: ColumnFamilyMetaData = db.get_column_family_metadata();
+        assert_eq!(default_cf_metadata.name, DEFAULT_COLUMN_FAMILY_NAME);
         assert!(default_cf_metadata.size > 150);
         assert_eq!(default_cf_metadata.file_count, 1);
 
         let cf2_metadata: ColumnFamilyMetaData = db.get_column_family_metadata_cf(&cf2);
+        assert_eq!(cf2_metadata.name, "cf2");
         assert!(cf2_metadata.size > default_cf_metadata.size);
         assert_eq!(cf2_metadata.file_count, 1);
     }
@@ -1852,7 +1860,7 @@ fn test_db_version() {
         .expect("can read the LOG file");
 
     // Make sure to update this test when upgrading to a new version!
-    assert!(settings.contains("RocksDB version: 11.1.2"));
+    assert!(settings.contains("RocksDB version: 11.8.1"));
 }
 
 #[test]

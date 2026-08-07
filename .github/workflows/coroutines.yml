@@ -33,12 +33,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     container:
       # The pinned folly commit (see librocksdb-sys/rocksdb/folly.mk) requires
-      # liburing >= 2.7 for the io_uring_zcrx_* zero-copy receive APIs used
-      # in folly/io/async/IoUringZeroCopyBufferPool.cpp. Ubuntu 24.04 LTS
-      # only ships liburing 2.5, which fails to compile folly with errors
-      # about `io_uring_zcrx_*` being incomplete types. Ubuntu 25.10 ships
-      # liburing 2.11, which is sufficient. The cache key below encodes the
-      # image so changing this invalidates the folly cache.
+      # liburing >= 2.15 for the io_uring_zcrx_* zero-copy receive APIs used
+      # in folly/io/async/IoUringZeroCopyBufferPool.cpp. No distro packages
+      # that yet, so `build_folly.sh` builds it from source into the folly
+      # scratch dir and the step below puts it on the include and link paths
+      # for the cargo builds. The image still matters for the toolchain, and
+      # the cache key below encodes it so changing this invalidates the folly
+      # cache.
       image: ubuntu:25.10
     # Folly's getdeps build can take 30-60+ minutes on a cold cache on
     # standard GHA runners (small core count, no parallelism flags). 90
@@ -135,6 +136,21 @@ jobs:
 
       - name: Export ROCKSDB_FOLLY_INSTALL_PATH and LD_LIBRARY_PATH
         run: |
+          # folly is compiled against the liburing `build_folly.sh` picked,
+          # which is usually one it built from source because no distro
+          # packages a new enough release. Put that same copy ahead of the
+          # system one here so RocksDB's io_uring code and libfolly.a agree
+          # on the headers and the runtime library. The file is absent when
+          # the system liburing was already good enough.
+          LIBURING_PREFIX_FILE="$PWD/librocksdb-sys/folly-build/liburing-prefix.txt"
+          if [ -f "$LIBURING_PREFIX_FILE" ]; then
+            LIBURING_PREFIX=$(cat "$LIBURING_PREFIX_FILE")
+            echo "Using liburing from $LIBURING_PREFIX"
+            echo "PKG_CONFIG_PATH=$LIBURING_PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
+            echo "CPATH=$LIBURING_PREFIX/include${CPATH:+:$CPATH}" >> "$GITHUB_ENV"
+            echo "LIBRARY_PATH=$LIBURING_PREFIX/lib${LIBRARY_PATH:+:$LIBRARY_PATH}" >> "$GITHUB_ENV"
+          fi
+
           INSTALL_ROOT="$PWD/librocksdb-sys/folly-build/installed"
           if [ ! -d "$INSTALL_ROOT" ]; then
             echo "Error: $INSTALL_ROOT does not exist after cache restore." >&2
@@ -168,7 +184,11 @@ jobs:
           }
           GLOG_LIBDIR=$(locate_libdir glog)
           GFLAGS_LIBDIR=$(locate_libdir gflags)
-          echo "LD_LIBRARY_PATH=$GLOG_LIBDIR:$GFLAGS_LIBDIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+          RUNTIME_LIBDIRS="$GLOG_LIBDIR:$GFLAGS_LIBDIR"
+          if [ -n "${LIBURING_PREFIX:-}" ]; then
+            RUNTIME_LIBDIRS="$RUNTIME_LIBDIRS:$LIBURING_PREFIX/lib"
+          fi
+          echo "LD_LIBRARY_PATH=$RUNTIME_LIBDIRS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
 
       - uses: taiki-e/install-action@nextest
 

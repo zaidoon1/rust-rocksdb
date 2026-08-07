@@ -64,17 +64,28 @@ FOLLY_DIR="$ROCKSDB_DIR/third-party/folly"
 mkdir -p "$ROCKSDB_DIR/third-party"
 mkdir -p "$SCRATCH_DIR"
 
-# The pinned folly commit needs liburing >= 2.7 - it references the
-# `io_uring_zcrx_*` zero-copy receive API in
-# `folly/io/async/IoUringZeroCopyBufferPool.cpp`, plus `IOU_PBUF_RING_INC` and
-# `io_uring_buf_ring_head` from liburing 2.6 in `IoUringProvidedBufferRing.cpp`.
-# folly's getdeps does not fetch liburing as a managed dep, so we must ensure
-# a sufficiently new version is on the system include/lib paths before
-# invoking it.
+# Written below if we end up building liburing ourselves. Cleared first so a
+# re-run on a warm scratch dir cannot leave a stale prefix behind.
+LIBURING_PREFIX_FILE="$SCRATCH_DIR/liburing-prefix.txt"
+rm -f "$LIBURING_PREFIX_FILE"
+
+# The pinned folly commit needs liburing >= 2.15. folly's getdeps does not
+# fetch liburing as a managed dep, so we must put a new enough one on the
+# include/lib paths before invoking it.
 #
-# Ubuntu 25.10+ and Debian trixie+ already package liburing >= 2.11 via apt.
-# Older distros (notably Ubuntu 24.04 LTS, which ships 2.5) need a manual
-# build. The check below is a no-op on hosts that are already up to date.
+# 2.15 is the first release carrying every io_uring UAPI symbol that
+# `folly/io/async/IoUringZeroCopyBufferPool.cpp` expects the system headers to
+# provide. RocksDB 11.8 moved FOLLY_COMMIT_HASH to a folly that stopped
+# declaring those itself: the older pin defined `zcrx_ctrl`, `ZCRX_REG_IMPORT`
+# and friends locally, and the current one assumes the UAPI has caught up.
+# 2.13 added `liburing/io_uring/query.h` (`io_uring_query_hdr`,
+# `IO_URING_QUERY_ZCRX`) and 2.15 added the zcrx control structs and
+# `io_uring_zcrx_ifq_reg::rx_buf_len`.
+#
+# No distro packages 2.15 yet, so in practice this always builds from source.
+# The check stays version-based rather than unconditional so it becomes a
+# no-op once distros catch up.
+LIBURING_MIN_MINOR=15
 need_liburing_build=yes
 if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists liburing; then
     sys_version="$(pkg-config --modversion liburing)"
@@ -82,11 +93,12 @@ if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists liburing; then
     sys_rest="${sys_version#*.}"
     sys_minor="${sys_rest%%.*}"
     if [ "${sys_major:-0}" -gt 2 ] \
-       || { [ "${sys_major:-0}" -eq 2 ] && [ "${sys_minor:-0}" -ge 7 ]; }; then
-        echo ">>> System liburing $sys_version is sufficient (need >= 2.7); skipping source build."
+       || { [ "${sys_major:-0}" -eq 2 ] \
+            && [ "${sys_minor:-0}" -ge "$LIBURING_MIN_MINOR" ]; }; then
+        echo ">>> System liburing $sys_version is sufficient (need >= 2.$LIBURING_MIN_MINOR); skipping source build."
         need_liburing_build=no
     else
-        echo ">>> System liburing $sys_version is too old (need >= 2.7)."
+        echo ">>> System liburing $sys_version is too old (need >= 2.$LIBURING_MIN_MINOR)."
     fi
 else
     echo ">>> liburing not found via pkg-config."
@@ -95,11 +107,10 @@ fi
 if [ "$need_liburing_build" = "yes" ]; then
     if ! command -v make >/dev/null 2>&1 || ! command -v cc >/dev/null 2>&1; then
         echo "Error: liburing source build requires 'make' and a C compiler." >&2
-        echo "Either install them, or upgrade your system liburing to 2.7+" >&2
-        echo "(Ubuntu 25.10+, Debian trixie+, etc)." >&2
+        echo "Install them, or install liburing 2.$LIBURING_MIN_MINOR or newer." >&2
         exit 1
     fi
-    liburing_version="2.9"
+    liburing_version="2.15"
     liburing_prefix="$SCRATCH_DIR/liburing-$liburing_version"
     if [ ! -f "$liburing_prefix/lib/pkgconfig/liburing.pc" ]; then
         echo ">>> Building liburing $liburing_version from source..."
@@ -122,6 +133,10 @@ if [ "$need_liburing_build" = "yes" ]; then
     export CPATH="$liburing_prefix/include:${CPATH:-}"
     export LIBRARY_PATH="$liburing_prefix/lib:${LIBRARY_PATH:-}"
     export LD_LIBRARY_PATH="$liburing_prefix/lib:${LD_LIBRARY_PATH:-}"
+    # These exports die with this process, so record the prefix for callers
+    # that build against folly later in a separate step. It lives in the
+    # scratch dir, which CI caches alongside the folly install.
+    echo "$liburing_prefix" > "$LIBURING_PREFIX_FILE"
 fi
 
 echo ">>> Cloning folly @ $FOLLY_COMMIT_HASH..."
@@ -140,6 +155,20 @@ perl -pi -e 's/(#include <atomic>)/$1\n#include <cstring>/ unless /#include <cst
     "$FOLLY_DIR/folly/lang/Exception.h"
 perl -pi -e 's/: environ/: (const char**)(environ)/ unless /\(const char\*\*\)\(environ\)/' \
     "$FOLLY_DIR/folly/Subprocess.cpp"
+
+# getdeps pulls autoconf/automake/libtool from ftpmirror.gnu.org, which
+# intermittently serves an empty archive. getdeps checks the sha256 and dies
+# on the mismatch, but it only ever tries the one URL, so a single bad
+# response fails the whole build. RocksDB ships a helper that fetches those
+# few archives up front, tries several mirrors, and keeps verified copies in
+# a cache dir. `make build_folly` runs it; we drive getdeps directly, so we
+# have to run it ourselves. It only warns on failure, which leaves getdeps to
+# fetch and report as before.
+echo ">>> Pre-fetching mirror-flaky getdeps archives..."
+python3 "$ROCKSDB_DIR/build_tools/getdeps_fallback_mirror.py" \
+    "$SCRATCH_DIR/downloads" \
+    "$SCRATCH_DIR/getdeps-cache" \
+    "$FOLLY_DIR/build/fbcode_builder/manifests"
 
 echo ">>> Building folly + dependencies into $SCRATCH_DIR..."
 echo "    (allow 15-30 minutes on a cold cache)"

@@ -1431,7 +1431,7 @@ mod coroutines {
             "fmt",
             "glog",
             "gflags",
-            "double-conversion",
+            "fast_float",
             "libevent",
             "libsodium",
         ] {
@@ -1471,7 +1471,6 @@ mod coroutines {
         let fmt = resolve_dep(&install_root, "fmt");
         let glog = resolve_dep(&install_root, "glog");
         let gflags = resolve_dep(&install_root, "gflags");
-        let dbl_conv = resolve_dep(&install_root, "double-conversion");
         let libevent = resolve_dep(&install_root, "libevent");
         let libsodium = resolve_dep(&install_root, "libsodium");
 
@@ -1502,11 +1501,8 @@ mod coroutines {
             println!("cargo::rustc-link-lib=static=boost_{c}");
         }
 
-        println!(
-            "cargo::rustc-link-search=native={}",
-            dbl_conv.join("lib").display()
-        );
-        println!("cargo::rustc-link-lib=static=double-conversion");
+        // fast_float is header-only, so it contributes an include path in
+        // `apply_compile_config` and nothing here.
 
         println!(
             "cargo::rustc-link-search=native={}",

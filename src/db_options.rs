@@ -690,10 +690,11 @@ impl BlockBasedOptions {
 
     /// Format version, reserved for backward compatibility.
     ///
-    /// See full [list](https://github.com/facebook/rocksdb/blob/v8.6.7/include/rocksdb/table.h#L493-L521)
+    /// See full [list](https://github.com/facebook/rocksdb/blob/v11.8.1/include/rocksdb/table.h#L702-L731)
     /// of the supported versions.
     ///
-    /// Default: 6.
+    /// Default: 7, which needs RocksDB 10.4.0 or newer to read. Lower it if
+    /// older readers have to open the files.
     pub fn set_format_version(&mut self, version: i32) {
         unsafe {
             ffi::rocksdb_block_based_options_set_format_version(self.inner, version);
@@ -1251,7 +1252,7 @@ impl Options {
     /// the database will switch to read-only mode and fail all other
     /// Write operations.
     ///
-    /// Default: false
+    /// Default: true
     pub fn set_paranoid_checks(&mut self, enabled: bool) {
         unsafe {
             ffi::rocksdb_options_set_paranoid_checks(self.inner, c_uchar::from(enabled));
@@ -1306,8 +1307,12 @@ impl Options {
 
     /// Sets the compression algorithm that will be used for compressing blocks.
     ///
-    /// Default: `DBCompressionType::Snappy` (`DBCompressionType::None` if
-    /// snappy feature is not enabled).
+    /// Default: `DBCompressionType::Lz4`, falling back to
+    /// `DBCompressionType::Snappy` and then `DBCompressionType::None` when the
+    /// preceding one is not compiled in. RocksDB 11.5.0 changed this from
+    /// Snappy; it affects only column families that never set `compression`,
+    /// and only newly written SST files. Existing data stays readable, since
+    /// the decompressor is selected per block.
     ///
     /// # Examples
     ///
@@ -1553,7 +1558,7 @@ impl Options {
     /// With this feature turned on, RocksDB will automatically adjust max bytes for each level.
     /// The goal of this feature is to have lower bound on size amplification.
     ///
-    /// Default: false.
+    /// Default: true.
     pub fn set_level_compaction_dynamic_level_bytes(&mut self, v: bool) {
         unsafe {
             ffi::rocksdb_options_set_level_compaction_dynamic_level_bytes(
@@ -2414,9 +2419,14 @@ impl Options {
         }
     }
 
-    /// The manifest file is rolled over on reaching this limit.
-    /// The older manifest file be deleted.
-    /// The default value is MAX_INT so that roll-over does not take place.
+    /// Sets a lower bound on the auto-tuned MANIFEST size limit. The MANIFEST
+    /// is rolled over on reaching the limit and the older one is deleted.
+    ///
+    /// This used to be a hard limit. RocksDB now auto-tunes the real limit and
+    /// treats this as a minimum, so setting it small does not keep the MANIFEST
+    /// small. Batches written in the foreground get a 25% higher limit.
+    ///
+    /// Default: 1 GiB.
     ///
     /// # Examples
     ///
@@ -2528,7 +2538,7 @@ impl Options {
 
     /// Sets the maximum number of level-0 files.  We stop writes at this point.
     ///
-    /// Default: `24`
+    /// Default: `36`
     ///
     /// Dynamically changeable through SetOptions() API
     ///
@@ -2642,7 +2652,9 @@ impl Options {
     /// LOW priority thread pool. For more information, see
     /// Env::SetBackgroundThreads
     ///
-    /// Default: `1`
+    /// Default: `-1`, meaning RocksDB derives it from `max_background_jobs`.
+    /// Setting either this or `max_background_flushes` opts into the old
+    /// behaviour, where the unset one of the pair counts as `1`.
     ///
     /// # Examples
     ///
@@ -2678,7 +2690,9 @@ impl Options {
     /// HIGH priority thread pool. For more information, see
     /// Env::SetBackgroundThreads
     ///
-    /// Default: `1`
+    /// Default: `-1`, meaning RocksDB derives it from `max_background_jobs`.
+    /// Setting either this or `max_background_compactions` opts into the old
+    /// behaviour, where the unset one of the pair counts as `1`.
     ///
     /// # Examples
     ///

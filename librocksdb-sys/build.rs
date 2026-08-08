@@ -1256,10 +1256,16 @@ mod snappy {
         // the translation unit fails to compile. NEON is the exception: it is
         // mandatory in AArch64, so the baseline already provides it.
         //
+        // The arch check is load-bearing. snappy's NEON path calls
+        // `vqtbl1q_u8`, `vminvq_u8` and `vmaxvq_u8`, which only exist in
+        // AArch64, but `neon` is also a target feature on 32-bit ARM, and the
+        // `thumbv7neon-*` targets enable it by default. The feature check
+        // narrows within AArch64 for the targets that build without SIMD.
+        //
         // This build has its own `cc::Build` and never runs through
         // `apply_x86`/`apply_target_cpu`, so nothing else here will supply the
         // flag.
-        if target.has_feature("neon") {
+        if target.arch == "aarch64" && target.has_feature("neon") {
             cfg.define("SNAPPY_HAVE_NEON", Some("1"));
         }
         if target.has_feature("ssse3") {

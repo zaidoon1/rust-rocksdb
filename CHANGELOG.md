@@ -106,9 +106,11 @@ a minor version bump.
   x86_64 builds with `-Ctarget-cpu=native` (or `haswell`, or
   `x86-64-v2` and newer) failed. The snappy build has its own
   `cc::Build` and never went through `apply_x86`, so nothing else
-  supplied the flag. `SNAPPY_HAVE_NEON` is now gated on the `neon`
-  target feature rather than on the architecture, for the few aarch64
-  targets that build without SIMD.
+  supplied the flag. `SNAPPY_HAVE_NEON` now also requires the `neon`
+  target feature on top of the aarch64 check, for the few aarch64
+  targets that build without SIMD. It stays gated on the architecture
+  too, because snappy's NEON path uses AArch64-only intrinsics and
+  `neon` is a target feature on 32-bit ARM as well.
 - perf: pass `-msse4.2` and `-mbmi2` to the vendored snappy build when
   the target has them. snappy derives `SNAPPY_HAVE_X86_CRC32` and
   `SNAPPY_HAVE_BMI2` from `__SSE4_2__`/`__BMI2__`, and nothing was

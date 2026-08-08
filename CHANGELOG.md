@@ -1,9 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.52.0 (2026-08-08)
 
-This release contains breaking API changes (marked `fix!` below) and needs
-a minor version bump.
+This release contains breaking API changes, marked `fix!` and `feat!`
+below, and needs a minor version bump. The two most likely to reach you
+without a compiler error: the default column-family compression is now
+LZ4 rather than Snappy, and `Ticker`/`Histogram` discriminants have
+shifted.
 
 ### Memory safety
 
@@ -32,11 +35,18 @@ a minor version bump.
 - fix: the callback logger ran `str::from_utf8_unchecked` over RocksDB
   log text and transmuted the level into a `#[repr(i32)]` enum. Paths
   reach RocksDB through `OsStr::as_bytes` and are not UTF-8 validated.
+  It also took a `&mut` to the shared callback on every line. RocksDB
+  logs from several background threads at once, so that minted aliasing
+  `&mut`s to one object, which is undefined behaviour on its own.
+  Both loggers now map an unrecognised level to `Info` instead of
+  panicking out of an `extern "C"` frame, which aborts the process.
 - fix!: `SstFileWriter::open` took `&self` while mutating the writer,
   which combined with the `Sync` impl let two threads race on it. It now
   takes `&mut self`, so callers need a `mut` binding.
 - fix: guard `slice::from_raw_parts` on zero-length keys and values in
-  the iterator accessors, `DBPinnableSlice::deref` and `CSlice::as_ref`.
+  the iterator accessors, `DBPinnableSlice::deref`, `CSlice::as_ref`,
+  the `prefix_exists{,_cf}_opt` key reads and both logger callbacks.
+  Empty keys are legal in RocksDB.
 - fix: `prefix_exists` held a `RefCell` borrow across an FFI call that
   can re-enter through a user comparator, so a re-entrant probe hit
   `BorrowMutError` and aborted from an `extern "C"` frame.
@@ -44,18 +54,15 @@ a minor version bump.
   `D: Sync`. `Transaction` is `Send` but not `Sync`, so a
   transaction-backed snapshot was `Send + Sync` when it had no right to
   be. Source-breaking for code that moved one across threads.
-- fix: `DB::raw_iterators_cf` dropped the `ReadOptions` the iterators
-  were created from before returning them. RocksDB's `DBIter` keeps raw
-  `Slice*` into that object for the iterate bounds and read timestamps,
-  and `Refresh` re-reads them. Harmless as shipped, because the options
-  were always the default and those pointers were null, but the next
-  caller to pass a bound would have read freed memory. All the iterators
-  from one call now share the options object through an `Arc`, and the
-  iterator type no longer allows one without options.
 - fix: bounds-check `rust_rocksdb_pinnable_batch_get` instead of
   asserting. The vendored build defines `NDEBUG`, so the asserts
   compiled away and left an unchecked `std::vector` index feeding a
-  pointer and length into `slice::from_raw_parts`.
+  pointer and length into `slice::from_raw_parts`. It reports the new
+  `rust_rocksdb_pinnable_batch_out_of_range` status, and the Rust side
+  turns an unexpected status into an `Error` rather than panicking, so
+  a System backend built against a skewed extension cannot abort the
+  process. `multi_get_pinned` likewise returns an `Error` instead of
+  panicking when RocksDB hands back a null pinned batch.
 - fix: report an error rather than silent success when the C extension
   cannot allocate an error string. It left `errptr` null, which Rust
   reads as ok, so a failed vectored `WriteBatch` operation looked like it
@@ -85,12 +92,13 @@ a minor version bump.
 
 - perf: enable hardware CRC32C on aarch64. The `-march=...+crc` flag was
   gated on `CARGO_CFG_TARGET_FEATURE`, which is only `neon` on stock
-  `aarch64-unknown-linux-gnu` and `aarch64-linux-android`, so
-  `HAVE_ARM64_CRC` was never defined,
-  `util/crc32c_arm64.cc` compiled to an empty object, and every block
-  read and write used the software CRC table. RocksDB picks the ARM path
-  at runtime via `getauxval(AT_HWCAP)`, so the flag is now gated on the
-  compiler accepting it, as upstream does. Scoped to the two crc32c
+  `aarch64-unknown-linux-gnu` and `aarch64-linux-android`. On those
+  targets `HAVE_ARM64_CRC` went undefined, `util/crc32c_arm64.cc`
+  compiled to an empty object, and every block read and write used the
+  software CRC table. `aarch64-apple-darwin` lists `crc` and was
+  unaffected. RocksDB picks the ARM path at runtime via
+  `getauxval(AT_HWCAP)`, so the flag is now gated on the compiler
+  accepting it, as upstream does. Scoped to the two crc32c
   translation units so folly's `F14IntrinsicsMode` stays consistent with
   the prebuilt libfolly in coroutines builds, and applied regardless of
   `-Ctarget-cpu`. MSVC is excluded: it has no `-march` and would need
@@ -121,6 +129,17 @@ a minor version bump.
   expansion.
 - perf: forward the `bmi2` and `popcnt` target features to the C++
   build; `-Ctarget-feature=+bmi2` previously had no effect on it.
+- fix: make the `rtti` feature work, and turn RTTI off when it is not
+  asked for. The build defined `USE_RTTI`, which is the CMake option
+  name; RocksDB's sources test `ROCKSDB_USE_RTTI`, so the feature did
+  nothing. Builds without it now pass `-fno-rtti` (`/GR-` on MSVC)
+  instead of leaving the compiler default of RTTI on, which changes the
+  object code every default build produces. `coroutines` implies RTTI,
+  because folly needs it.
+- fix: pass `/MT` to the System-backend extension build under
+  `mt_static`. The rest of the native build honoured the feature, so
+  that one translation unit was compiled against a different CRT than
+  everything it links with.
 - fix: don't define `HAVE_UINT128_EXTENSION` on 32-bit targets. GCC and
   Clang only provide `__int128` on 64-bit, and `util/math128.h` aliases
   it directly, so `i686` and `armv7` could not compile.
@@ -137,8 +156,8 @@ a minor version bump.
   built with `NDEBUG`.
 - fix: allow `ROCKSDB_COMPILE=1` on FreeBSD instead of rejecting it up
   front, and skip jemalloc there. This reverses the FreeBSD note in
-  0.51.0.
-- fix: drop the local C-API extensions that RocksDB 11.8 provides
+  0.49.0.
+- fix: drop the local C-API extensions that upstream now provides
   itself. `rocksdb_readoptions_{set,get}_optimize_multiget_for_io`,
   `rocksdb_block_based_options_set_uniform_cv_threshold`, the
   `rocksdb_block_based_table_index_block_search_type_auto` enum value,
@@ -148,9 +167,11 @@ a minor version bump.
   the enum a redefinition against `c.h` and the functions duplicate
   definitions against `db/c.cc`. The Rust side is unchanged: the same
   symbol names now resolve to upstream. This does narrow the System
-  backend, which links a user-supplied prebuilt librocksdb. The local
-  copies let it work against 11.1 through 11.7; it now needs 11.8 or
-  newer, and fails at compile time rather than silently if it is older.
+  backend, which links a user-supplied prebuilt librocksdb. Our copies
+  stood in for these on builds that predate them; upstream added three
+  in 11.4.0 and the last in 11.6.0, so the System backend now needs
+  11.6 or newer. An older one fails at link time with undefined
+  symbols, not silently.
 - build: the `coroutines` feature now needs liburing 2.15. RocksDB 11.8
   pins a folly commit whose `IoUringZeroCopyBufferPool.cpp` expects the
   system headers to declare the io_uring zero-copy receive UAPI instead
@@ -159,6 +180,11 @@ a minor version bump.
   ships it yet, so `scripts/build_folly.sh` builds it from source and
   puts it on the include and link paths, which keeps RocksDB's io_uring
   code and the prebuilt libfolly on one liburing.
+- build: move `tikv-jemalloc-sys` from 0.6 to 0.7, which carries
+  jemalloc 5.3.0 to 5.3.1. The crate sets `links = "jemalloc"`, so Cargo
+  permits only one version of it in a dependency graph. A downstream
+  still on 0.6 through another crate has to move too; there is no
+  version of this that resolves.
 - build: link fast_float instead of double-conversion under
   `coroutines`. The folly commit RocksDB 11.8 pins swapped the two in
   its getdeps dependency list, so the build looked for a directory folly
@@ -199,12 +225,14 @@ a minor version bump.
   families.
 - feat: expose `open_files_async`, cache occupancy metrics, and detailed
   write buffer manager memory accounting.
-- fix: align `PerfStatsLevel` values and RTTI build flags with RocksDB
-  11.1.2. The enum was missing `EnableWait`, so every level above it was
-  off by one and RocksDB was given a different level than the caller
-  asked for. Callers now get the level they named, which for
-  `EnableTimeAndCPUTimeExceptForMutex` means the per-operation CPU-time
-  clock reads it always implied.
+- fix!: align `PerfStatsLevel` with RocksDB. The enum was missing
+  `EnableWait`, so every level above it was off by one and RocksDB was
+  given a different level than the caller asked for. Callers now get the
+  level they named, which for `EnableTimeAndCPUTimeExceptForMutex` means
+  the per-operation CPU-time clock reads it always implied. Adding the
+  variant in the middle renumbers `EnableTimeExceptForMutex` and
+  everything above it, so a stored or transmitted numeric level from an
+  older version now means something else.
 
 ### Features
 
@@ -213,6 +241,45 @@ a minor version bump.
   to the generated enums. Upstream's `v11.8.0` and `v11.8.1` tags both
   point at this commit, whose `version.h` reads 11.8.1, so that is what
   the library reports.
+- feat!: the default compression for column families that never call
+  `set_compression_type` is now LZ4 rather than Snappy, an upstream
+  change in 11.5.0. It affects newly written SST files only; existing
+  data stays readable, since RocksDB picks the decompressor per block.
+  If LZ4 is not compiled in, the fallback order is LZ4, Snappy, then no
+  compression, so a `--no-default-features` build without `lz4` writes
+  uncompressed rather than falling over. Other upstream behaviour
+  changes worth reading before upgrading:
+  `CompressionOptions::parallel_threads` is now ignored for the fast
+  built-in compressors, and a non-default `compression_opts.level` now
+  selects between the LZ4 and LZ4HC variants.
+- feat!: `Ticker` and `Histogram` gained variants in the middle, not
+  just at the end. `Ticker` goes from 235 to 263 and `Histogram` from
+  68 to 80, which shifts the discriminant of 149 existing `Ticker`
+  variants and 1 `Histogram` variant. Nothing is removed or renamed.
+  Neither enum is `#[non_exhaustive]`, so an exhaustive `match` on
+  either, or on `PerfMetric`, stops compiling until the new variants
+  are handled. Anything that persisted or wire-encoded the numeric
+  value of a ticker will not line up with the new numbering.
+- feat!: `set_open_files_async` returns `Result<(), Error>`. It has to
+  report that the linked RocksDB does not support the option, which it
+  previously had no way to say.
+- feat: new public API, all covered by semver: `batched_multi_get_pinned`
+  and `batched_multi_get_pinned_opt` for one native `MultiGet` over the
+  default column family, returning the batch-owned `DBPinnableBatch`
+  and its iterator; `SnapshotReadOptions` and `Snapshot::read_options`
+  for reusing one snapshot-pinned `ReadOptions` across reads;
+  `try_for_each_ref` on the iterators, which hands out borrowed key and
+  value slices instead of allocating a pair of `Box<[u8]>` per row;
+  `perf::with_thread_local` for a reused `PerfContext`; and
+  `raw_iterators_cf` for creating iterators over several column
+  families off one `ReadOptions`, which they share through an `Arc`
+  because RocksDB's `DBIter` keeps raw `Slice*` into it for the iterate
+  bounds and re-reads them on `Refresh`.
+- feat: `multi_get_pinned{,_opt}` now issues a single native `MultiGet`
+  for two or more keys instead of a sequential `get_pinned` each. The
+  results and their order are unchanged. `multi_get_pinned_cf{,_opt}`
+  still reads key by key, because the batched C API takes one column
+  family for the whole call.
 - feat: expose `disable_file_deletions` and `enable_file_deletions` on
   `OptimisticTransactionDB`.
 - feat: the `valgrind` feature now does something. It was declared and
@@ -253,20 +320,30 @@ a minor version bump.
 - fix: stop publishing files that nothing compiles. The `exclude` list in
   `rust-librocksdb-sys` relied on `*/tests`, but RocksDB keeps its tests in
   `*_test.cc` next to the sources, so that pattern matched none of them.
-  0.47.0 shipped 1879 files against the 336 the build actually compiles:
+  0.47.0 shipped 1879 files against the 343 the build actually compiles:
   222 test files, the 444-file Java binding tree, db_stress_tool,
   buckifier, microbench, fuzz, build_tools, cmake, and all of `tools` bar
   the one file that is built. Also dropped snappy's googletest and
   benchmark submodules, which only appear in a recursive clone and would
-  have added another 398. Now 1039 files and 3.4 MiB compressed, down from
-  6.1 MiB, which every downstream build unpacks and hashes.
+  have added another 398. This release ships 1125 files and 3.7 MiB
+  compressed, down from 6.1 MiB, which every downstream build unpacks and
+  hashes.
 
 ### Continuous integration
 
-- fix: restore the `Security audit` check name. Folding the two audit jobs
-  together in the previous release renamed the check that branch protection
-  requires, and a required check that never reports never passes, so every
-  pull request needed an admin override to merge.
+- fix: the `-Ctarget-cpu=native` job cached `target/` and `~/.cargo/bin`
+  across the hosted runner fleet, so dependency rlibs compiled under one
+  machine's `native` were restored onto a narrower one and the
+  `librocksdb-sys` build script died with SIGILL. It now caches only the
+  registry and git checkouts, nothing holding machine code. Keying on the
+  detected CPU instead would fragment the cache across the fleet to save a
+  job that barely benefits, since the uncached RocksDB C++ build dominates
+  its runtime.
+- fix: `save-if` is not an input to `setup-rust-toolchain`, so every run
+  printed `Unexpected input(s) 'save-if'` and saved a cache from every pull
+  request, which is how the poisoned tuned-CPU entry was written. Renamed
+  to `cache-save-if` at all 12 sites, and added to the doc-check, doctest
+  and clippy jobs, which had no gating at all.
 - ci: verify the published tarball. `cargo package` now runs in CI and
   compiles RocksDB from the unpacked archive, because no other job builds
   what users actually download. It also asserts the tarball stays trimmed
@@ -305,8 +382,9 @@ a minor version bump.
   report was wrong, because LeakSanitizer treats globals as roots. The
   full suite reports no leaks and needs no suppressions.
 - ci: build with `-Ctarget-cpu=native` on x86_64 and aarch64. Every
-  other job builds for the target baseline, which is why a snappy build
-  break under `-Ctarget-cpu` shipped in 0.51.0 without CI noticing.
+  other job builds for the target baseline, so nothing was exercising
+  the ISA-gated paths; it caught the snappy SSSE3 break above before it
+  shipped.
 - ci: check the compression features individually and with
   `--no-default-features`. Nothing built without the default feature set
   before, so a backend that only compiled because a sibling feature
@@ -318,7 +396,8 @@ a minor version bump.
   gets the linker OOM-killed.
 - ci: fold the two duplicate security audit jobs, which used two
   different actions, into one that runs on pull requests, on master and
-  on a timer.
+  on a timer. It keeps the `Security audit` check name, which branch
+  protection requires; a required check that never reports never passes.
 
 ## 0.51.0 (2026-06-26)
 

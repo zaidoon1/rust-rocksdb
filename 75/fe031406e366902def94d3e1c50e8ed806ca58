@@ -1,0 +1,21 @@
+.github/workflows/audit.yml
+  s_aa5348e1af4d7b::t_dff49f6dd33983 38-41
+CHANGELOG.md
+  s_aa5348e1af4d7b::t_0092d1321d5cd6 285-289
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "75fe031406e366902def94d3e1c50e8ed806ca58",
+  "prompts": {},
+  "sessions": {
+    "s_aa5348e1af4d7b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_024c47fa6ffeAoozO7B3U55VAT",
+        "model": "claude-opus-5"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    }
+  }
+}

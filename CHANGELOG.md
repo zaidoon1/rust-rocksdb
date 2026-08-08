@@ -236,6 +236,17 @@ a minor version bump.
 - docs: declare the docs.rs feature set explicitly and pass `--cfg docsrs`,
   so gated items carry "available on crate feature" badges. Not
   `all-features`, which would pull in `coroutines` and need a folly install.
+- docs: correct seven documented option defaults that disagreed with the
+  bundled RocksDB. `set_compression_type` is LZ4, not Snappy, as of RocksDB
+  11.5.0. `set_paranoid_checks` and `set_level_compaction_dynamic_level_bytes`
+  are on, not off. `set_level_zero_stop_writes_trigger` is 36, not 24.
+  `set_format_version` is 7, not 6, and the linked version list pointed at
+  RocksDB 8.6.7, which predates format 7. `set_max_manifest_file_size` is a
+  1 GiB floor under an auto-tuned limit, not a hard MAX_INT that disables
+  rollover. The deprecated `set_max_background_compactions` and
+  `set_max_background_flushes` are -1, derived from `max_background_jobs`,
+  not 1. `Options::default()` is RocksDB's own defaults, so these were wrong
+  about shipped behaviour rather than about a crate-level override.
 
 ### Packaging
 

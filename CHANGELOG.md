@@ -282,9 +282,11 @@ a minor version bump.
   and then arrived together. Moving to 1.97.1 surfaced three clippy
   findings, now fixed: `libc::strlen` on a `CStr`, a reference cast to a raw
   pointer, and a redundant reference in an `assert!`.
-- ci: commit `Cargo.lock`. It was ignored, so the audit job had to run
-  `cargo generate-lockfile` first and was auditing whatever resolved that
-  day rather than anything anyone builds.
+- ci: audit the committed `Cargo.lock`. It used to be gitignored, so the
+  audit job ran `cargo generate-lockfile` first and checked whatever
+  resolved that day rather than anything anyone builds. The lockfile is
+  committed now and that step is gone, so a vulnerable pin in it gets
+  reported instead of quietly resolved away.
 - ci: run the test suite under UndefinedBehaviorSanitizer,
   ThreadSanitizer and Valgrind Memcheck, in a new `Sanitizers` workflow.
   UBSan and TSan run on every pull request; they take 14 and 10 minutes,

@@ -35,10 +35,10 @@ jobs:
           cache: false
           rustflags: ""
 
-      # Cargo.lock is gitignored, so there is nothing to audit until it exists.
-      - name: Generate Cargo.lock
-        run: cargo generate-lockfile
-
+      # No `cargo generate-lockfile` here. Cargo.lock is committed, and
+      # regenerating it re-resolves every dependency to the newest compatible
+      # version, so the audit would cover versions nobody builds and would miss
+      # a vulnerable pin that is actually in the lockfile.
       - name: Audit check
         uses: actions-rust-lang/audit@v1
         with:

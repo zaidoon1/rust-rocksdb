@@ -276,20 +276,17 @@ The RocksDB team **has not published** an equivalent benchmark for local NVMe. T
 This feature is harder to build than the rest of the crate. Read all of the constraints below before starting.
 
 1. **Linux only.** macOS and Windows are not supported. Folly's build (`getdeps.py`) doesn't reliably work on macOS, and RocksDB's coroutine code path needs `io_uring`.
-2. **liburing ≥ 2.7.** The pinned folly commit references `io_uring_zcrx_*` symbols from liburing 2.7 (`IoUringZeroCopyBufferPool.cpp`) and `IOU_PBUF_RING_INC` / `io_uring_buf_ring_head` from liburing 2.6 (`IoUringProvidedBufferRing.cpp`). Distro coverage:
-   - Ubuntu 25.10+ (`liburing-dev` 2.11): works out of the box.
-   - Ubuntu 24.04 LTS (`liburing-dev` 2.5): too old. `scripts/build_folly.sh` auto-detects this and builds liburing 2.9 from source under the scratch directory, then exports `PKG_CONFIG_PATH` so folly and rust-rocksdb's `io-uring` feature both pick it up.
-   - Debian, RHEL, etc.: check `pkg-config --modversion liburing`; the script handles either case.
+2. **liburing ≥ 2.15.** `IoUringZeroCopyBufferPool.cpp` in the pinned folly commit expects the system headers to declare the io_uring zero-copy receive UAPI, and 2.15 is the first release with the zcrx control structs and `io_uring_zcrx_ifq_reg::rx_buf_len`. No distro packages that yet (Ubuntu 25.10 is on 2.11), so in practice `scripts/build_folly.sh` always builds it: it checks `pkg-config --modversion liburing`, and when the system copy is too old it builds 2.15 from source under the scratch directory and exports `PKG_CONFIG_PATH` so folly and rust-rocksdb's `io-uring` feature both pick it up. The version check means this becomes a no-op once distros catch up.
 3. **A C/C++ compiler that is not GCC 15.** Folly's pinned libunwind dependency contains test code using legacy K&R-style empty parameter lists, which GCC 15 rejects under its default `-std=gnu23`. GCC 11–14 and Clang ≥ 14 all work. On Ubuntu 25.10 you can install `gcc-14`/`g++-14` from apt and switch via `update-alternatives` (see the CI workflow at `.github/workflows/coroutines.yml` for the exact commands).
 4. **Build dependencies.** On Ubuntu / Debian:
    ```bash
    apt-get install -y build-essential cmake ninja-build python3 python3-pip \
      pkg-config patchelf wget \
-     libdouble-conversion-dev libssl-dev liburing-dev \
+     libssl-dev liburing-dev \
      zlib1g-dev libbz2-dev autoconf automake libtool
    ```
    `wget` is needed because folly's getdeps shells out to it (`GETDEPS_USE_WGET=1`, inherited from RocksDB's own `folly.mk`).
-5. **Build folly + its 8 transitive deps** (boost, fmt, glog, gflags, double-conversion, libevent, libsodium, fast_float, xz, lz4, zstd, snappy, libdwarf, libiberty, ...):
+5. **Build folly + its transitive deps** (boost, fmt, glog, gflags, fast_float, libevent, libsodium, xz, lz4, zstd, snappy, libdwarf, libiberty, ...):
    ```bash
    ./scripts/build_folly.sh
    ```
@@ -329,7 +326,7 @@ This feature is harder to build than the rest of the crate. Read all of the cons
   - **System-install the `.so` files** (copy them into `/usr/local/lib` and run `ldconfig`).
 
 - **Not compatible with `mt_static`.** Folly's build precludes producing a fully static link.
-- **`optimize_multiget_for_io` is a tuning knob within the coroutine-enabled space, not an on/off switch for coroutines.** The flag controls whether `MultiGet` parallelizes reads *across* LSM levels (`true`, default) or only *within* a single level (`false`). Both rely on the coroutine machinery this feature compiles in; without the `coroutines` feature, neither path runs and `MultiGet` falls back to the synchronous one-file-at-a-time loop. Per the performance table above, turning it off keeps ~40% of the latency reduction (1292→775 μs/op) at lower CPU cost than the multi-level path (1292→508). The flag currently cannot be set from Rust until [facebook/rocksdb#14752](https://github.com/facebook/rocksdb/pull/14752) merges and we bump the submodule; the C++ default of `true` is the right starting point for most workloads.
+- **`optimize_multiget_for_io` is a tuning knob within the coroutine-enabled space, not an on/off switch for coroutines.** The flag controls whether `MultiGet` parallelizes reads *across* LSM levels (`true`, default) or only *within* a single level (`false`). Both rely on the coroutine machinery this feature compiles in; without the `coroutines` feature, neither path runs and `MultiGet` falls back to the synchronous one-file-at-a-time loop. Per the performance table above, turning it off keeps ~40% of the latency reduction (1292→775 μs/op) at lower CPU cost than the multi-level path (1292→508). Set it with `ReadOptions::set_optimize_multiget_for_io`; the C++ default of `true` is the right starting point for most workloads.
 - **The folly install is large and slow to rebuild.** ~2 GB on disk. Cache `librocksdb-sys/folly-build/` between CI runs (see `.github/workflows/coroutines.yml` for an `actions/cache` example with a cache key that pins the OS image, arch, and `FOLLY_COMMIT_HASH`).
 
 ##### Verifying the feature is active

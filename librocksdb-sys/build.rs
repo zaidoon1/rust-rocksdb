@@ -1431,7 +1431,7 @@ mod coroutines {
             "fmt",
             "glog",
             "gflags",
-            "double-conversion",
+            "fast_float",
             "libevent",
             "libsodium",
         ] {
@@ -1471,7 +1471,6 @@ mod coroutines {
         let fmt = resolve_dep(&install_root, "fmt");
         let glog = resolve_dep(&install_root, "glog");
         let gflags = resolve_dep(&install_root, "gflags");
-        let dbl_conv = resolve_dep(&install_root, "double-conversion");
         let libevent = resolve_dep(&install_root, "libevent");
         let libsodium = resolve_dep(&install_root, "libsodium");
 
@@ -1502,11 +1501,8 @@ mod coroutines {
             println!("cargo::rustc-link-lib=static=boost_{c}");
         }
 
-        println!(
-            "cargo::rustc-link-search=native={}",
-            dbl_conv.join("lib").display()
-        );
-        println!("cargo::rustc-link-lib=static=double-conversion");
+        // fast_float is header-only, so it contributes an include path in
+        // `apply_compile_config` and nothing here.
 
         println!(
             "cargo::rustc-link-search=native={}",
@@ -1688,7 +1684,7 @@ fn env_truthy(name: &str) -> bool {
 // Local C-API extensions
 // =========================================================================
 
-/// Local additions to the RocksDB C API for C++ options that have no
+/// Local additions to the RocksDB C API for C++ features that have no
 /// upstream C wrapper yet. The actual sources live in
 /// `librocksdb-sys/c-api-extensions/`:
 ///
@@ -1696,7 +1692,8 @@ fn env_truthy(name: &str) -> bool {
 ///   `rocksdb/c.h`, making it a clean superset of the upstream C API
 ///   header that bindgen scans as its primary input.
 /// - `c_api_extensions.cc` defines the new symbols by reaching into the
-///   relevant C++ types (`ReadOptions`, `Options`, `BlockBasedTableOptions`).
+///   relevant C++ types (`DB`, `ColumnFamilyHandle`, `Options`,
+///   `ReadOptions`, `WriteBatch`, `Snapshot`).
 ///
 /// For the Vendored backend, `vendor::build()` already adds the extension
 /// `.cc` to its `cc::Build` source list — there's nothing extra to do.

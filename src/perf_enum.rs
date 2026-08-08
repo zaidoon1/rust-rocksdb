@@ -89,7 +89,8 @@ pub enum PerfMetric {
     FilterBlockReadByte = 80,
     CompressionDictBlockReadByte = 81,
     MetadataBlockReadByte = 82,
-    TotalMetricCount = 85,
+    BlobCacheReadByte = 83,
+    TotalMetricCount = 86,
 }
 
 impl PerfMetric {
@@ -97,6 +98,7 @@ impl PerfMetric {
     pub const fn name(&self) -> &'static str {
         match self {
             PerfMetric::BlobCacheHitCount => "blob_cache_hit_count",
+            PerfMetric::BlobCacheReadByte => "blob_cache_read_byte",
             PerfMetric::BlobChecksumTime => "blob_checksum_time",
             PerfMetric::BlobDecompressTime => "blob_decompress_time",
             PerfMetric::BlobReadByte => "blob_read_byte",

@@ -21,13 +21,10 @@
 #include "rocksdb/listener.h"
 #include "rocksdb/options.h"
 #include "rocksdb/slice.h"
-#include "rocksdb/table.h"
 #include "rocksdb/version.h"
 #include "rocksdb/write_batch.h"
 
 using ROCKSDB_NAMESPACE::BackgroundErrorRecoveryInfo;
-using ROCKSDB_NAMESPACE::BlockBasedTableOptions;
-using ROCKSDB_NAMESPACE::CompactRangeOptions;
 using ROCKSDB_NAMESPACE::CompactionJobInfo;
 using ROCKSDB_NAMESPACE::ColumnFamilyHandle;
 using ROCKSDB_NAMESPACE::DB;
@@ -320,7 +317,7 @@ extern "C" void rust_rocksdb_options_add_eventlistener(
 //
 //   struct rocksdb_readoptions_t { ReadOptions rep; /* trailing Slices */ };
 //   struct rocksdb_options_t { Options rep; };
-//   struct rocksdb_block_based_table_options_t { BlockBasedTableOptions rep; };
+//   struct rocksdb_writebatch_t { WriteBatch rep; };
 //
 // In every case the `rep` field is the FIRST member, so a pointer to the
 // opaque C type also points at the start of its embedded C++ `rep` field.
@@ -331,56 +328,13 @@ extern "C" void rust_rocksdb_options_add_eventlistener(
 // c.h's `typedef struct rocksdb_readoptions_t rocksdb_readoptions_t;`.
 //
 // If upstream ever adds a field BEFORE `rep` in any of these wrappers,
-// every test that round-trips a value through one of our setters will
-// fail loudly: the setter would write to one offset and rocksdb's
-// internal code would read from another. The integration tests in
-// `tests/test_rocksdb_options.rs` cover the options this file exposes,
-// and `transaction_snapshot_sequence_number_without_set_snapshot` in
-// `tests/test_transaction_db.rs` covers the `rocksdb_snapshot_t` cast
-// below, so a layout regression is detectable.
-
-// -----------------------------------------------------------------------------
-// ReadOptions::optimize_multiget_for_io
-// -----------------------------------------------------------------------------
-
-extern "C" void rocksdb_readoptions_set_optimize_multiget_for_io(
-    rocksdb_readoptions_t* opt, unsigned char v) {
-  reinterpret_cast<ReadOptions*>(opt)->optimize_multiget_for_io = v;
-}
-
-extern "C" unsigned char rocksdb_readoptions_get_optimize_multiget_for_io(
-    rocksdb_readoptions_t* opt) {
-  return reinterpret_cast<ReadOptions*>(opt)->optimize_multiget_for_io;
-}
-
-// -----------------------------------------------------------------------------
-// BlockBasedTableOptions::uniform_cv_threshold
-//
-// The corresponding `kAuto` enum value is declared in c_api_extensions.h
-// — no C-side definition is needed because the existing
-// `rocksdb_block_based_options_set_index_block_search_type` setter in
-// upstream `c.cc` already does `static_cast<BlockSearchType>(int)` and
-// accepts any value the caller passes.
-// -----------------------------------------------------------------------------
-
-extern "C" void rocksdb_block_based_options_set_uniform_cv_threshold(
-    rocksdb_block_based_table_options_t* opt, double v) {
-  reinterpret_cast<BlockBasedTableOptions*>(opt)->uniform_cv_threshold = v;
-}
-
-// -----------------------------------------------------------------------------
-// AdvancedColumnFamilyOptions::memtable_batch_lookup_optimization
-// -----------------------------------------------------------------------------
-
-extern "C" void rocksdb_options_set_memtable_batch_lookup_optimization(
-    rocksdb_options_t* opt, unsigned char v) {
-  reinterpret_cast<Options*>(opt)->memtable_batch_lookup_optimization = v;
-}
-
-extern "C" unsigned char rocksdb_options_get_memtable_batch_lookup_optimization(
-    rocksdb_options_t* opt) {
-  return reinterpret_cast<Options*>(opt)->memtable_batch_lookup_optimization;
-}
+// every path through one of these casts writes to one offset while
+// rocksdb's internal code reads from another, so the value never makes it
+// across. `tests/test_event_listener.rs`, `tests/test_multiget_pinned.rs`,
+// `tests/test_batched_pinned_multiget.rs` and, for the `rocksdb_snapshot_t`
+// cast below, `transaction_snapshot_sequence_number_without_set_snapshot`
+// in `tests/test_transaction_db.rs` each exercise one of these casts, so a
+// layout regression is detectable.
 
 // -----------------------------------------------------------------------------
 // Options::open_files_async
@@ -416,20 +370,6 @@ extern "C" unsigned char rust_rocksdb_options_get_open_files_async(
   (void)opt;
   return 0;
 #endif
-}
-
-// -----------------------------------------------------------------------------
-// CompactOptions::blob_garbage_collection_age_cutoff
-// -----------------------------------------------------------------------------
-
-extern "C" void rocksdb_compactoptions_set_blob_garbage_collection_age_cutoff(
-    rocksdb_compactoptions_t* opt, double v) {
-  reinterpret_cast<CompactRangeOptions*>(opt)->blob_garbage_collection_age_cutoff = v;
-}
-
-extern "C" double rocksdb_compactoptions_get_blob_garbage_collection_age_cutoff(
-    rocksdb_compactoptions_t* opt) {
-  return reinterpret_cast<CompactRangeOptions*>(opt)->blob_garbage_collection_age_cutoff;
 }
 
 // -----------------------------------------------------------------------------

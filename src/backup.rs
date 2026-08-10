@@ -16,7 +16,7 @@
 use crate::env::Env;
 use crate::{DBCommon, Error, ThreadMode, db::DBInner, ffi, ffi_util::to_cpath};
 
-use libc::c_uchar;
+use libc::{c_int, c_uchar};
 use std::ffi::CString;
 use std::path::Path;
 
@@ -279,6 +279,83 @@ impl BackupEngineOptions {
         let val_u8 = unsafe { ffi::rocksdb_backup_engine_options_get_sync(self.inner) };
         val_u8 != 0
     }
+
+    /// (Experimental - subject to change or removal) When taking a backup and saving file
+    /// temperature info (minimum schema_version is 2), there are two potential sources of
+    /// truth for the placement of files into temperature tiers: (a) the current file
+    /// temperature reported by the FileSystem or (b) the expected file temperature recorded
+    /// in DB manifest. When this option is false (default), (b) overrides (a) if both are not
+    /// UNKNOWN. When true, (a) overrides (b) if both are not UNKNOWN. Regardless of this
+    /// setting, a known temperature overrides UNKNOWN.
+    pub fn set_current_temperatures_override_manifest(&mut self, val: bool) {
+        unsafe {
+            ffi::rocksdb_backup_engine_options_set_current_temperatures_override_manifest(
+                self.inner,
+                c_uchar::from(val),
+            );
+        }
+    }
+
+    /// Returns the value of the `current_temperatures_override_manifest` option.
+    pub fn get_current_temperatures_override_manifest(&self) -> bool {
+        unsafe {
+            ffi::rocksdb_backup_engine_options_get_current_temperatures_override_manifest(
+                self.inner,
+            ) != 0
+        }
+    }
+
+    /// Sets the `io_buffer_size` option.
+    pub fn set_io_buffer_size(&mut self, val: u64) {
+        unsafe {
+            ffi::rocksdb_backup_engine_options_set_io_buffer_size(self.inner, val);
+        }
+    }
+
+    /// Returns the value of the `io_buffer_size` option.
+    pub fn get_io_buffer_size(&self) -> u64 {
+        unsafe { ffi::rocksdb_backup_engine_options_get_io_buffer_size(self.inner) }
+    }
+
+    /// Major schema version to use when writing backup meta files 1 (default) - compatible
+    /// with very old versions of RocksDB. 2 - can be read by RocksDB versions >= 6.19.0.
+    /// Minimum schema version for
+    /// - (Experimental) saving and restoring file temperature metadata
+    pub fn set_schema_version(&mut self, val: c_int) {
+        unsafe {
+            ffi::rocksdb_backup_engine_options_set_schema_version(self.inner, val);
+        }
+    }
+
+    /// Returns the value of the `schema_version` option.
+    pub fn get_schema_version(&self) -> c_int {
+        unsafe { ffi::rocksdb_backup_engine_options_get_schema_version(self.inner) }
+    }
+
+    /// share_files_with_checksum supports table and blob files.
+    ///
+    /// Only used if share_table_files is set to true. Setting to false is DEPRECATED and
+    /// potentially dangerous because in that case BackupEngine can lose data if backing up
+    /// databases with distinct or divergent history, for example if restoring from a backup
+    /// other than the latest, writing to the DB, and creating another backup. Setting to true
+    /// (default) prevents these issues by ensuring that different table files (SSTs) and blob
+    /// files with the same number are treated as distinct. See
+    /// share_files_with_checksum_naming and ShareFilesNaming.
+    ///
+    /// Default: true
+    pub fn set_share_files_with_checksum(&mut self, val: bool) {
+        unsafe {
+            ffi::rocksdb_backup_engine_options_set_share_files_with_checksum(
+                self.inner,
+                c_uchar::from(val),
+            );
+        }
+    }
+
+    /// Returns the value of the `share_files_with_checksum` option.
+    pub fn get_share_files_with_checksum(&self) -> bool {
+        unsafe { ffi::rocksdb_backup_engine_options_get_share_files_with_checksum(self.inner) != 0 }
+    }
 }
 
 impl RestoreOptions {
@@ -292,6 +369,14 @@ impl RestoreOptions {
         unsafe {
             ffi::rocksdb_restore_options_set_keep_log_files(self.inner, i32::from(keep_log_files));
         }
+    }
+
+    /// If true, restore won't overwrite the existing log files in wal_dir. It will also move
+    /// all log files from archive directory to wal_dir. Use this option in combination with
+    /// BackupEngineOptions::backup_log_files = false for persisting in-memory databases.
+    /// Default: false
+    pub fn get_keep_log_files(&self) -> bool {
+        unsafe { ffi::rocksdb_restore_options_get_keep_log_files(self.inner) != 0 }
     }
 }
 

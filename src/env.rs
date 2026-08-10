@@ -139,6 +139,34 @@ impl Env {
             ffi::rocksdb_env_lower_high_priority_thread_pool_cpu_priority(self.0.inner);
         }
     }
+
+    /// Returns the current `background_threads` setting.
+    ///
+    /// See [`Self::set_background_threads`] for what this controls.
+    pub fn get_background_threads(&self) -> c_int {
+        unsafe { ffi::rocksdb_env_get_background_threads(self.0.inner) }
+    }
+
+    /// Returns the current `bottom_priority_background_threads` setting.
+    ///
+    /// See [`Self::set_bottom_priority_background_threads`] for what this controls.
+    pub fn get_bottom_priority_background_threads(&self) -> c_int {
+        unsafe { ffi::rocksdb_env_get_bottom_priority_background_threads(self.0.inner) }
+    }
+
+    /// Returns the current `high_priority_background_threads` setting.
+    ///
+    /// See [`Self::set_high_priority_background_threads`] for what this controls.
+    pub fn get_high_priority_background_threads(&self) -> c_int {
+        unsafe { ffi::rocksdb_env_get_high_priority_background_threads(self.0.inner) }
+    }
+
+    /// Returns the current `low_priority_background_threads` setting.
+    ///
+    /// See [`Self::set_low_priority_background_threads`] for what this controls.
+    pub fn get_low_priority_background_threads(&self) -> c_int {
+        unsafe { ffi::rocksdb_env_get_low_priority_background_threads(self.0.inner) }
+    }
 }
 
 unsafe impl Send for EnvWrapper {}

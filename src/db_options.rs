@@ -1513,6 +1513,39 @@ impl BlockBasedOptions {
     pub fn get_whole_key_filtering(&self) -> bool {
         unsafe { ffi::rocksdb_block_based_options_get_whole_key_filtering(self.inner) != 0 }
     }
+
+    /// Align data blocks on lesser of page size and block size.
+    pub fn set_block_align(&mut self, val: bool) {
+        unsafe {
+            ffi::rocksdb_block_based_options_set_block_align(self.inner, c_uchar::from(val));
+        }
+    }
+
+    /// This is used to close a block before it reaches the configured 'block_size'. If the
+    /// percentage of free space in the current block is less than this specified number and
+    /// adding a new record to the block will exceed the configured block size, then this
+    /// block will be closed and the new record will be written to the next block.
+    pub fn set_block_size_deviation(&mut self, val: c_int) {
+        unsafe {
+            ffi::rocksdb_block_based_options_set_block_size_deviation(self.inner, val);
+        }
+    }
+
+    /// When true, data blocks store keys and values separately. Keys are stored at the
+    /// beginning of the block, followed by values at the end. This can improve read
+    /// performance at a cost of a varint per restart interval (~1 bit per key by default), in
+    /// addition to improving compression. Small values or low block_restart_interval may
+    /// prefer to set this as false.
+    ///
+    /// Default: false.
+    pub fn set_separate_key_value_in_data_block(&mut self, val: bool) {
+        unsafe {
+            ffi::rocksdb_block_based_options_set_separate_key_value_in_data_block(
+                self.inner,
+                c_uchar::from(val),
+            );
+        }
+    }
 }
 
 impl Default for BlockBasedOptions {
@@ -6280,6 +6313,758 @@ impl Options {
     pub fn get_write_thread_slow_yield_usec(&self) -> u64 {
         unsafe { ffi::rocksdb_options_get_write_thread_slow_yield_usec(self.inner) }
     }
+
+    /// Returns the current `advise_random_on_open` setting.
+    ///
+    /// See [`Self::set_advise_random_on_open`] for what this controls.
+    pub fn get_advise_random_on_open(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_advise_random_on_open(self.inner) != 0 }
+    }
+
+    /// Returns the current `allow_concurrent_memtable_write` setting.
+    ///
+    /// See [`Self::set_allow_concurrent_memtable_write`] for what this controls.
+    pub fn get_allow_concurrent_memtable_write(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_allow_concurrent_memtable_write(self.inner) != 0 }
+    }
+
+    /// Returns the current `allow_ingest_behind` setting.
+    ///
+    /// See [`Self::set_allow_ingest_behind`] for what this controls.
+    pub fn get_allow_ingest_behind(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_allow_ingest_behind(self.inner) != 0 }
+    }
+
+    /// Returns the current `allow_mmap_reads` setting.
+    ///
+    /// See [`Self::set_allow_mmap_reads`] for what this controls.
+    pub fn get_allow_mmap_reads(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_allow_mmap_reads(self.inner) != 0 }
+    }
+
+    /// Returns the current `allow_mmap_writes` setting.
+    ///
+    /// See [`Self::set_allow_mmap_writes`] for what this controls.
+    pub fn get_allow_mmap_writes(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_allow_mmap_writes(self.inner) != 0 }
+    }
+
+    /// Returns the current `arena_block_size` setting.
+    ///
+    /// See [`Self::set_arena_block_size`] for what this controls.
+    pub fn get_arena_block_size(&self) -> usize {
+        unsafe { ffi::rocksdb_options_get_arena_block_size(self.inner) }
+    }
+
+    /// Returns the current `atomic_flush` setting.
+    ///
+    /// See [`Self::set_atomic_flush`] for what this controls.
+    pub fn get_atomic_flush(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_atomic_flush(self.inner) != 0 }
+    }
+
+    /// Returns the current `avoid_unnecessary_blocking_io` setting.
+    ///
+    /// See [`Self::set_avoid_unnecessary_blocking_io`] for what this controls.
+    pub fn get_avoid_unnecessary_blocking_io(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_avoid_unnecessary_blocking_io(self.inner) != 0 }
+    }
+
+    /// Returns the current `blob_compaction_readahead_size` setting.
+    ///
+    /// See [`Self::set_blob_compaction_readahead_size`] for what this controls.
+    pub fn get_blob_compaction_readahead_size(&self) -> u64 {
+        unsafe { ffi::rocksdb_options_get_blob_compaction_readahead_size(self.inner) }
+    }
+
+    /// Returns the current `blob_file_size` setting.
+    ///
+    /// See [`Self::set_blob_file_size`] for what this controls.
+    pub fn get_blob_file_size(&self) -> u64 {
+        unsafe { ffi::rocksdb_options_get_blob_file_size(self.inner) }
+    }
+
+    /// Returns the current `blob_file_starting_level` setting.
+    ///
+    /// See [`Self::set_blob_file_starting_level`] for what this controls.
+    pub fn get_blob_file_starting_level(&self) -> c_int {
+        unsafe { ffi::rocksdb_options_get_blob_file_starting_level(self.inner) }
+    }
+
+    /// Returns the current `blob_gc_age_cutoff` setting.
+    ///
+    /// See [`Self::set_blob_gc_age_cutoff`] for what this controls.
+    pub fn get_blob_gc_age_cutoff(&self) -> f64 {
+        unsafe { ffi::rocksdb_options_get_blob_gc_age_cutoff(self.inner) }
+    }
+
+    /// Returns the current `blob_gc_force_threshold` setting.
+    ///
+    /// See [`Self::set_blob_gc_force_threshold`] for what this controls.
+    pub fn get_blob_gc_force_threshold(&self) -> f64 {
+        unsafe { ffi::rocksdb_options_get_blob_gc_force_threshold(self.inner) }
+    }
+
+    /// Returns the current `bloom_locality` setting.
+    ///
+    /// See [`Self::set_bloom_locality`] for what this controls.
+    pub fn get_bloom_locality(&self) -> u32 {
+        unsafe { ffi::rocksdb_options_get_bloom_locality(self.inner) }
+    }
+
+    /// Returns the current `bottommost_compression_options_use_zstd_dict_trainer` setting.
+    ///
+    /// See [`Self::set_bottommost_compression_options_use_zstd_dict_trainer`] for what this controls.
+    pub fn get_bottommost_compression_options_use_zstd_dict_trainer(&self) -> bool {
+        unsafe {
+            ffi::rocksdb_options_get_bottommost_compression_options_use_zstd_dict_trainer(
+                self.inner,
+            ) != 0
+        }
+    }
+
+    /// Returns the current `bytes_per_sync` setting.
+    ///
+    /// See [`Self::set_bytes_per_sync`] for what this controls.
+    pub fn get_bytes_per_sync(&self) -> u64 {
+        unsafe { ffi::rocksdb_options_get_bytes_per_sync(self.inner) }
+    }
+
+    /// Returns the current `compaction_readahead_size` setting.
+    ///
+    /// See [`Self::set_compaction_readahead_size`] for what this controls.
+    pub fn get_compaction_readahead_size(&self) -> usize {
+        unsafe { ffi::rocksdb_options_get_compaction_readahead_size(self.inner) }
+    }
+
+    /// Returns the current `compression_options_max_dict_buffer_bytes` setting.
+    ///
+    /// See [`Self::set_compression_options_max_dict_buffer_bytes`] for what this controls.
+    pub fn get_compression_options_max_dict_buffer_bytes(&self) -> u64 {
+        unsafe { ffi::rocksdb_options_get_compression_options_max_dict_buffer_bytes(self.inner) }
+    }
+
+    /// Returns the current `compression_options_parallel_threads` setting.
+    ///
+    /// See [`Self::set_compression_options_parallel_threads`] for what this controls.
+    pub fn get_compression_options_parallel_threads(&self) -> c_int {
+        unsafe { ffi::rocksdb_options_get_compression_options_parallel_threads(self.inner) }
+    }
+
+    /// Returns the current `compression_options_use_zstd_dict_trainer` setting.
+    ///
+    /// See [`Self::set_compression_options_use_zstd_dict_trainer`] for what this controls.
+    pub fn get_compression_options_use_zstd_dict_trainer(&self) -> bool {
+        unsafe {
+            ffi::rocksdb_options_get_compression_options_use_zstd_dict_trainer(self.inner) != 0
+        }
+    }
+
+    /// Returns the maximum size of training data passed to zstd's dictionary trainer.
+    pub fn get_compression_options_zstd_max_train_bytes(&self) -> c_int {
+        unsafe { ffi::rocksdb_options_get_compression_options_zstd_max_train_bytes(self.inner) }
+    }
+
+    /// Returns the current `create_if_missing` setting.
+    ///
+    /// See [`Self::create_if_missing`] for what this controls.
+    pub fn get_create_if_missing(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_create_if_missing(self.inner) != 0 }
+    }
+
+    /// Returns the current `create_missing_column_families` setting.
+    ///
+    /// See [`Self::create_missing_column_families`] for what this controls.
+    pub fn get_create_missing_column_families(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_create_missing_column_families(self.inner) != 0 }
+    }
+
+    /// Returns the current `db_write_buffer_size` setting.
+    ///
+    /// See [`Self::set_db_write_buffer_size`] for what this controls.
+    pub fn get_db_write_buffer_size(&self) -> usize {
+        unsafe { ffi::rocksdb_options_get_db_write_buffer_size(self.inner) }
+    }
+
+    /// Returns the current `delete_obsolete_files_period_micros` setting.
+    ///
+    /// See [`Self::set_delete_obsolete_files_period_micros`] for what this controls.
+    pub fn get_delete_obsolete_files_period_micros(&self) -> u64 {
+        unsafe { ffi::rocksdb_options_get_delete_obsolete_files_period_micros(self.inner) }
+    }
+
+    /// Returns the current `disable_auto_compactions` setting.
+    ///
+    /// See [`Self::set_disable_auto_compactions`] for what this controls.
+    pub fn get_disable_auto_compactions(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_disable_auto_compactions(self.inner) != 0 }
+    }
+
+    /// Returns the current `enable_blob_files` setting.
+    ///
+    /// See [`Self::set_enable_blob_files`] for what this controls.
+    pub fn get_enable_blob_files(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_enable_blob_files(self.inner) != 0 }
+    }
+
+    /// Returns the current `enable_blob_gc` setting.
+    ///
+    /// See [`Self::set_enable_blob_gc`] for what this controls.
+    pub fn get_enable_blob_gc(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_enable_blob_gc(self.inner) != 0 }
+    }
+
+    /// Returns the current `enable_pipelined_write` setting.
+    ///
+    /// See [`Self::set_enable_pipelined_write`] for what this controls.
+    pub fn get_enable_pipelined_write(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_enable_pipelined_write(self.inner) != 0 }
+    }
+
+    /// Returns the current `enable_write_thread_adaptive_yield` setting.
+    ///
+    /// See [`Self::set_enable_write_thread_adaptive_yield`] for what this controls.
+    pub fn get_enable_write_thread_adaptive_yield(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_enable_write_thread_adaptive_yield(self.inner) != 0 }
+    }
+
+    /// Returns the current `error_if_exists` setting.
+    ///
+    /// See [`Self::set_error_if_exists`] for what this controls.
+    pub fn get_error_if_exists(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_error_if_exists(self.inner) != 0 }
+    }
+
+    /// Returns the current `experimental_mempurge_threshold` setting.
+    ///
+    /// See [`Self::set_experimental_mempurge_threshold`] for what this controls.
+    pub fn get_experimental_mempurge_threshold(&self) -> f64 {
+        unsafe { ffi::rocksdb_options_get_experimental_mempurge_threshold(self.inner) }
+    }
+
+    /// Returns the current `hard_pending_compaction_bytes_limit` setting.
+    ///
+    /// See [`Self::set_hard_pending_compaction_bytes_limit`] for what this controls.
+    pub fn get_hard_pending_compaction_bytes_limit(&self) -> usize {
+        unsafe { ffi::rocksdb_options_get_hard_pending_compaction_bytes_limit(self.inner) }
+    }
+
+    /// Number of locks used for inplace update Default: 10000, if inplace_update_support =
+    /// true, else 0.
+    ///
+    /// Dynamically changeable through SetOptions() API.
+    pub fn get_inplace_update_num_locks(&self) -> usize {
+        unsafe { ffi::rocksdb_options_get_inplace_update_num_locks(self.inner) }
+    }
+
+    /// Returns the current `inplace_update_support` setting.
+    ///
+    /// See [`Self::set_inplace_update_support`] for what this controls.
+    pub fn get_inplace_update_support(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_inplace_update_support(self.inner) != 0 }
+    }
+
+    /// Returns the current `is_fd_close_on_exec` setting.
+    ///
+    /// See [`Self::set_is_fd_close_on_exec`] for what this controls.
+    pub fn get_is_fd_close_on_exec(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_is_fd_close_on_exec(self.inner) != 0 }
+    }
+
+    /// Returns the current `keep_log_file_num` setting.
+    ///
+    /// See [`Self::set_keep_log_file_num`] for what this controls.
+    pub fn get_keep_log_file_num(&self) -> usize {
+        unsafe { ffi::rocksdb_options_get_keep_log_file_num(self.inner) }
+    }
+
+    /// Number of files to trigger level-0 compaction. A value <0 means that level-0
+    /// compaction will not be triggered by number of files at all.
+    ///
+    /// Universal compaction: RocksDB will try to keep the number of sorted runs no more than
+    /// this number. If CompactionOptionsUniversal::max_read_amp is set, then this option will
+    /// be used only as a trigger to look for compaction.
+    /// CompactionOptionsUniversal::max_read_amp will be the limit on the number of sorted
+    /// runs.
+    ///
+    /// Default: 4
+    ///
+    /// Dynamically changeable through SetOptions() API.
+    pub fn get_level0_file_num_compaction_trigger(&self) -> c_int {
+        unsafe { ffi::rocksdb_options_get_level0_file_num_compaction_trigger(self.inner) }
+    }
+
+    /// Soft limit on number of level-0 files. We start slowing down writes at this point. A
+    /// value <0 means that no writing slow down will be triggered by number of files in
+    /// level-0.
+    ///
+    /// Default: 20
+    ///
+    /// Dynamically changeable through SetOptions() API.
+    pub fn get_level0_slowdown_writes_trigger(&self) -> c_int {
+        unsafe { ffi::rocksdb_options_get_level0_slowdown_writes_trigger(self.inner) }
+    }
+
+    /// Maximum number of level-0 files.  We stop writes at this point.
+    ///
+    /// Default: 36
+    ///
+    /// Dynamically changeable through SetOptions() API.
+    pub fn get_level0_stop_writes_trigger(&self) -> c_int {
+        unsafe { ffi::rocksdb_options_get_level0_stop_writes_trigger(self.inner) }
+    }
+
+    /// Returns the current `level_compaction_dynamic_level_bytes` setting.
+    ///
+    /// See [`Self::set_level_compaction_dynamic_level_bytes`] for what this controls.
+    pub fn get_level_compaction_dynamic_level_bytes(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_level_compaction_dynamic_level_bytes(self.inner) != 0 }
+    }
+
+    /// Returns the current `log_file_time_to_roll` setting.
+    ///
+    /// See [`Self::set_log_file_time_to_roll`] for what this controls.
+    pub fn get_log_file_time_to_roll(&self) -> usize {
+        unsafe { ffi::rocksdb_options_get_log_file_time_to_roll(self.inner) }
+    }
+
+    /// Returns the current `manifest_preallocation_size` setting.
+    ///
+    /// See [`Self::set_manifest_preallocation_size`] for what this controls.
+    pub fn get_manifest_preallocation_size(&self) -> usize {
+        unsafe { ffi::rocksdb_options_get_manifest_preallocation_size(self.inner) }
+    }
+
+    /// Returns the current `manual_wal_flush` setting.
+    ///
+    /// See [`Self::set_manual_wal_flush`] for what this controls.
+    pub fn get_manual_wal_flush(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_manual_wal_flush(self.inner) != 0 }
+    }
+
+    /// Returns the current `max_background_jobs` setting.
+    ///
+    /// See [`Self::set_max_background_jobs`] for what this controls.
+    pub fn get_max_background_jobs(&self) -> c_int {
+        unsafe { ffi::rocksdb_options_get_max_background_jobs(self.inner) }
+    }
+
+    /// Returns the current `max_bytes_for_level_base` setting.
+    ///
+    /// See [`Self::set_max_bytes_for_level_base`] for what this controls.
+    pub fn get_max_bytes_for_level_base(&self) -> u64 {
+        unsafe { ffi::rocksdb_options_get_max_bytes_for_level_base(self.inner) }
+    }
+
+    /// Returns the current `max_bytes_for_level_multiplier` setting.
+    ///
+    /// See [`Self::set_max_bytes_for_level_multiplier`] for what this controls.
+    pub fn get_max_bytes_for_level_multiplier(&self) -> f64 {
+        unsafe { ffi::rocksdb_options_get_max_bytes_for_level_multiplier(self.inner) }
+    }
+
+    /// Returns the current `max_compaction_bytes` setting.
+    ///
+    /// See [`Self::set_max_compaction_bytes`] for what this controls.
+    pub fn get_max_compaction_bytes(&self) -> u64 {
+        unsafe { ffi::rocksdb_options_get_max_compaction_bytes(self.inner) }
+    }
+
+    /// Returns the current `max_file_opening_threads` setting.
+    ///
+    /// See [`Self::set_max_file_opening_threads`] for what this controls.
+    pub fn get_max_file_opening_threads(&self) -> c_int {
+        unsafe { ffi::rocksdb_options_get_max_file_opening_threads(self.inner) }
+    }
+
+    /// Returns the current `max_log_file_size` setting.
+    ///
+    /// See [`Self::set_max_log_file_size`] for what this controls.
+    pub fn get_max_log_file_size(&self) -> usize {
+        unsafe { ffi::rocksdb_options_get_max_log_file_size(self.inner) }
+    }
+
+    /// Returns the current `max_manifest_file_size` setting.
+    ///
+    /// See [`Self::set_max_manifest_file_size`] for what this controls.
+    pub fn get_max_manifest_file_size(&self) -> usize {
+        unsafe { ffi::rocksdb_options_get_max_manifest_file_size(self.inner) }
+    }
+
+    /// Returns the current `max_open_files` setting.
+    ///
+    /// See [`Self::set_max_open_files`] for what this controls.
+    pub fn get_max_open_files(&self) -> c_int {
+        unsafe { ffi::rocksdb_options_get_max_open_files(self.inner) }
+    }
+
+    /// Returns the current `max_sequential_skip_in_iterations` setting.
+    ///
+    /// See [`Self::set_max_sequential_skip_in_iterations`] for what this controls.
+    pub fn get_max_sequential_skip_in_iterations(&self) -> u64 {
+        unsafe { ffi::rocksdb_options_get_max_sequential_skip_in_iterations(self.inner) }
+    }
+
+    /// Returns the current `max_subcompactions` setting.
+    ///
+    /// See [`Self::set_max_subcompactions`] for what this controls.
+    pub fn get_max_subcompactions(&self) -> u32 {
+        unsafe { ffi::rocksdb_options_get_max_subcompactions(self.inner) }
+    }
+
+    /// Returns the current `max_successive_merges` setting.
+    ///
+    /// See [`Self::set_max_successive_merges`] for what this controls.
+    pub fn get_max_successive_merges(&self) -> usize {
+        unsafe { ffi::rocksdb_options_get_max_successive_merges(self.inner) }
+    }
+
+    /// Returns the current `max_total_wal_size` setting.
+    ///
+    /// See [`Self::set_max_total_wal_size`] for what this controls.
+    pub fn get_max_total_wal_size(&self) -> u64 {
+        unsafe { ffi::rocksdb_options_get_max_total_wal_size(self.inner) }
+    }
+
+    /// Returns the current `max_write_buffer_number` setting.
+    ///
+    /// See [`Self::set_max_write_buffer_number`] for what this controls.
+    pub fn get_max_write_buffer_number(&self) -> c_int {
+        unsafe { ffi::rocksdb_options_get_max_write_buffer_number(self.inner) }
+    }
+
+    /// Returns the current `max_write_buffer_size_to_maintain` setting.
+    ///
+    /// See [`Self::set_max_write_buffer_size_to_maintain`] for what this controls.
+    pub fn get_max_write_buffer_size_to_maintain(&self) -> i64 {
+        unsafe { ffi::rocksdb_options_get_max_write_buffer_size_to_maintain(self.inner) }
+    }
+
+    /// Returns the current `memtable_avg_op_scan_flush_trigger` setting.
+    ///
+    /// See [`Self::set_memtable_avg_op_scan_flush_trigger`] for what this controls.
+    pub fn get_memtable_avg_op_scan_flush_trigger(&self) -> u32 {
+        unsafe { ffi::rocksdb_options_get_memtable_avg_op_scan_flush_trigger(self.inner) }
+    }
+
+    /// Returns the current `memtable_huge_page_size` setting.
+    ///
+    /// See [`Self::set_memtable_huge_page_size`] for what this controls.
+    pub fn get_memtable_huge_page_size(&self) -> usize {
+        unsafe { ffi::rocksdb_options_get_memtable_huge_page_size(self.inner) }
+    }
+
+    /// Returns the current `memtable_op_scan_flush_trigger` setting.
+    ///
+    /// See [`Self::set_memtable_op_scan_flush_trigger`] for what this controls.
+    pub fn get_memtable_op_scan_flush_trigger(&self) -> u32 {
+        unsafe { ffi::rocksdb_options_get_memtable_op_scan_flush_trigger(self.inner) }
+    }
+
+    /// Should really be called `memtable_bloom_size_ratio`. Enables a dynamic Bloom filter in
+    /// memtable to optimize many queries that must go beyond the memtable. The size in bytes
+    /// of the filter is write_buffer_size * memtable_prefix_bloom_size_ratio.
+    /// - If prefix_extractor is set, the filter includes prefixes.
+    /// - If memtable_whole_key_filtering, the filter includes whole keys.
+    /// - If both, the filter includes both.
+    /// - If neither, the feature is disabled.
+    ///
+    /// If this value is larger than 0.25, it is sanitized to 0.25.
+    ///
+    /// Default: 0 (disabled)
+    ///
+    /// Dynamically changeable through SetOptions() API.
+    pub fn get_memtable_prefix_bloom_size_ratio(&self) -> f64 {
+        unsafe { ffi::rocksdb_options_get_memtable_prefix_bloom_size_ratio(self.inner) }
+    }
+
+    /// Returns the current `min_blob_size` setting.
+    ///
+    /// See [`Self::set_min_blob_size`] for what this controls.
+    pub fn get_min_blob_size(&self) -> u64 {
+        unsafe { ffi::rocksdb_options_get_min_blob_size(self.inner) }
+    }
+
+    /// Returns the current `min_write_buffer_number_to_merge` setting.
+    ///
+    /// See [`Self::set_min_write_buffer_number_to_merge`] for what this controls.
+    pub fn get_min_write_buffer_number_to_merge(&self) -> c_int {
+        unsafe { ffi::rocksdb_options_get_min_write_buffer_number_to_merge(self.inner) }
+    }
+
+    /// Returns the current `num_levels` setting.
+    ///
+    /// See [`Self::set_num_levels`] for what this controls.
+    pub fn get_num_levels(&self) -> c_int {
+        unsafe { ffi::rocksdb_options_get_num_levels(self.inner) }
+    }
+
+    /// Returns the current `optimize_filters_for_hits` setting.
+    ///
+    /// See [`Self::set_optimize_filters_for_hits`] for what this controls.
+    pub fn get_optimize_filters_for_hits(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_optimize_filters_for_hits(self.inner) != 0 }
+    }
+
+    /// Returns the current `paranoid_checks` setting.
+    ///
+    /// See [`Self::set_paranoid_checks`] for what this controls.
+    pub fn get_paranoid_checks(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_paranoid_checks(self.inner) != 0 }
+    }
+
+    /// Returns the current `periodic_compaction_seconds` setting.
+    ///
+    /// See [`Self::set_periodic_compaction_seconds`] for what this controls.
+    pub fn get_periodic_compaction_seconds(&self) -> u64 {
+        unsafe { ffi::rocksdb_options_get_periodic_compaction_seconds(self.inner) }
+    }
+
+    /// Returns the current `recycle_log_file_num` setting.
+    ///
+    /// See [`Self::set_recycle_log_file_num`] for what this controls.
+    pub fn get_recycle_log_file_num(&self) -> usize {
+        unsafe { ffi::rocksdb_options_get_recycle_log_file_num(self.inner) }
+    }
+
+    /// Returns the current `report_bg_io_stats` setting.
+    ///
+    /// See [`Self::set_report_bg_io_stats`] for what this controls.
+    pub fn get_report_bg_io_stats(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_report_bg_io_stats(self.inner) != 0 }
+    }
+
+    /// Returns the current `skip_stats_update_on_db_open` setting.
+    ///
+    /// See [`Self::set_skip_stats_update_on_db_open`] for what this controls.
+    pub fn get_skip_stats_update_on_db_open(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_skip_stats_update_on_db_open(self.inner) != 0 }
+    }
+
+    /// Returns the current `soft_pending_compaction_bytes_limit` setting.
+    ///
+    /// See [`Self::set_soft_pending_compaction_bytes_limit`] for what this controls.
+    pub fn get_soft_pending_compaction_bytes_limit(&self) -> usize {
+        unsafe { ffi::rocksdb_options_get_soft_pending_compaction_bytes_limit(self.inner) }
+    }
+
+    /// Returns the current `stats_dump_period_sec` setting.
+    ///
+    /// See [`Self::set_stats_dump_period_sec`] for what this controls.
+    pub fn get_stats_dump_period_sec(&self) -> u32 {
+        unsafe { ffi::rocksdb_options_get_stats_dump_period_sec(self.inner) }
+    }
+
+    /// Returns the current `stats_persist_period_sec` setting.
+    ///
+    /// See [`Self::set_stats_persist_period_sec`] for what this controls.
+    pub fn get_stats_persist_period_sec(&self) -> u32 {
+        unsafe { ffi::rocksdb_options_get_stats_persist_period_sec(self.inner) }
+    }
+
+    /// Number of shards used for table cache.
+    pub fn get_table_cache_numshardbits(&self) -> c_int {
+        unsafe { ffi::rocksdb_options_get_table_cache_numshardbits(self.inner) }
+    }
+
+    /// Returns the current `target_file_size_base` setting.
+    ///
+    /// See [`Self::set_target_file_size_base`] for what this controls.
+    pub fn get_target_file_size_base(&self) -> u64 {
+        unsafe { ffi::rocksdb_options_get_target_file_size_base(self.inner) }
+    }
+
+    /// Returns the current `target_file_size_multiplier` setting.
+    ///
+    /// See [`Self::set_target_file_size_multiplier`] for what this controls.
+    pub fn get_target_file_size_multiplier(&self) -> c_int {
+        unsafe { ffi::rocksdb_options_get_target_file_size_multiplier(self.inner) }
+    }
+
+    /// Returns the current `ttl` setting.
+    ///
+    /// See [`Self::set_ttl`] for what this controls.
+    pub fn get_ttl(&self) -> u64 {
+        unsafe { ffi::rocksdb_options_get_ttl(self.inner) }
+    }
+
+    /// Returns the current `unordered_write` setting.
+    ///
+    /// See [`Self::set_unordered_write`] for what this controls.
+    pub fn get_unordered_write(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_unordered_write(self.inner) != 0 }
+    }
+
+    /// Returns the current `use_adaptive_mutex` setting.
+    ///
+    /// See [`Self::set_use_adaptive_mutex`] for what this controls.
+    pub fn get_use_adaptive_mutex(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_use_adaptive_mutex(self.inner) != 0 }
+    }
+
+    /// Returns the current `use_direct_io_for_flush_and_compaction` setting.
+    ///
+    /// See [`Self::set_use_direct_io_for_flush_and_compaction`] for what this controls.
+    pub fn get_use_direct_io_for_flush_and_compaction(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_use_direct_io_for_flush_and_compaction(self.inner) != 0 }
+    }
+
+    /// Returns the current `use_direct_reads` setting.
+    ///
+    /// See [`Self::set_use_direct_reads`] for what this controls.
+    pub fn get_use_direct_reads(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_use_direct_reads(self.inner) != 0 }
+    }
+
+    /// Returns the current `wal_bytes_per_sync` setting.
+    ///
+    /// See [`Self::set_wal_bytes_per_sync`] for what this controls.
+    pub fn get_wal_bytes_per_sync(&self) -> u64 {
+        unsafe { ffi::rocksdb_options_get_wal_bytes_per_sync(self.inner) }
+    }
+
+    /// Returns the current `wal_size_limit_mb` setting.
+    ///
+    /// See [`Self::set_wal_size_limit_mb`] for what this controls.
+    pub fn get_wal_size_limit_mb(&self) -> u64 {
+        unsafe { ffi::rocksdb_options_get_WAL_size_limit_MB(self.inner) }
+    }
+
+    /// Returns the current `wal_ttl_seconds` setting.
+    ///
+    /// See [`Self::set_wal_ttl_seconds`] for what this controls.
+    pub fn get_wal_ttl_seconds(&self) -> u64 {
+        unsafe { ffi::rocksdb_options_get_WAL_ttl_seconds(self.inner) }
+    }
+
+    /// Returns the current `writable_file_max_buffer_size` setting.
+    ///
+    /// See [`Self::set_writable_file_max_buffer_size`] for what this controls.
+    pub fn get_writable_file_max_buffer_size(&self) -> u64 {
+        unsafe { ffi::rocksdb_options_get_writable_file_max_buffer_size(self.inner) }
+    }
+
+    /// Returns the current `write_buffer_size` setting.
+    ///
+    /// See [`Self::set_write_buffer_size`] for what this controls.
+    pub fn get_write_buffer_size(&self) -> usize {
+        unsafe { ffi::rocksdb_options_get_write_buffer_size(self.inner) }
+    }
+
+    /// Returns the current `write_identity_file` setting.
+    ///
+    /// See [`Self::set_write_identity_file`] for what this controls.
+    pub fn get_write_identity_file(&self) -> bool {
+        unsafe { ffi::rocksdb_options_get_write_identity_file(self.inner) != 0 }
+    }
+
+    /// Enable blob files starting from a certain LSM tree level.
+    ///
+    /// For certain use cases that have a mix of short-lived and long-lived values, it might
+    /// make sense to support extracting large values only during compactions whose output
+    /// level is greater than or equal to a specified LSM tree level (e.g. compactions into
+    /// L1/L2/... or above). This could reduce the space amplification caused by large values
+    /// that are turned into garbage shortly after being written at the price of some write
+    /// amplification incurred by long-lived values whose extraction to blob files is delayed.
+    ///
+    /// Default: 0
+    ///
+    /// Dynamically changeable through the SetOptions() API.
+    pub fn set_blob_file_starting_level(&mut self, val: c_int) {
+        unsafe {
+            ffi::rocksdb_options_set_blob_file_starting_level(self.inner, val);
+        }
+    }
+
+    /// Bottommost-level counterpart of
+    /// [`Self::set_compression_options_max_dict_buffer_bytes`].
+    ///
+    /// `enabled` must be true for the bottommost setting to take effect; otherwise
+    /// the non-bottommost compression options apply.
+    pub fn set_bottommost_compression_options_max_dict_buffer_bytes(
+        &mut self,
+        max_dict_buffer_bytes: u64,
+        enabled: bool,
+    ) {
+        unsafe {
+            ffi::rocksdb_options_set_bottommost_compression_options_max_dict_buffer_bytes(
+                self.inner,
+                max_dict_buffer_bytes,
+                c_uchar::from(enabled),
+            );
+        }
+    }
+
+    /// Bottommost-level counterpart of
+    /// [`Self::set_compression_options_use_zstd_dict_trainer`].
+    ///
+    /// `enabled` must be true for the bottommost setting to take effect; otherwise
+    /// the non-bottommost compression options apply.
+    pub fn set_bottommost_compression_options_use_zstd_dict_trainer(
+        &mut self,
+        use_zstd_dict_trainer: bool,
+        enabled: bool,
+    ) {
+        unsafe {
+            ffi::rocksdb_options_set_bottommost_compression_options_use_zstd_dict_trainer(
+                self.inner,
+                c_uchar::from(use_zstd_dict_trainer),
+                c_uchar::from(enabled),
+            );
+        }
+    }
+
+    /// Limits the max buffered data used to build the compression dictionary.
+    ///
+    /// Limiting too strictly may harm dictionary effectiveness, because it forces
+    /// RocksDB to pick samples from the start of the output SST, which may not
+    /// represent the whole file. Setting it below `zstd_max_train_bytes` restricts
+    /// how many samples reach the dictionary trainer, and setting it below
+    /// `max_dict_bytes` restricts the size of the final dictionary.
+    ///
+    /// Default: `0`
+    pub fn set_compression_options_max_dict_buffer_bytes(&mut self, val: u64) {
+        unsafe {
+            ffi::rocksdb_options_set_compression_options_max_dict_buffer_bytes(self.inner, val);
+        }
+    }
+
+    /// Selects how zstd dictionaries are generated.
+    ///
+    /// When true, buffered data is passed to zstd's dictionary trainer. When false,
+    /// zstd's `ZDICT_finalizeDictionary()` is called instead, which saves CPU during
+    /// training but usually gives a worse compression ratio.
+    ///
+    /// Default: `true`
+    pub fn set_compression_options_use_zstd_dict_trainer(&mut self, val: bool) {
+        unsafe {
+            ffi::rocksdb_options_set_compression_options_use_zstd_dict_trainer(
+                self.inner,
+                c_uchar::from(val),
+            );
+        }
+    }
+
+    /// Installs the built-in merge operator that adds 64-bit counters.
+    ///
+    /// Values are RocksDB fixed-width 64-bit integers, and a value that is not
+    /// exactly that width is treated as 0 rather than failing the merge.
+    pub fn set_uint64add_merge_operator(&mut self) {
+        unsafe {
+            ffi::rocksdb_options_set_uint64add_merge_operator(self.inner);
+        }
+    }
+
+    /// It is expected that the Identity file will be obsoleted by recording DB ID in the
+    /// manifest (see write_dbid_to_manifest). Setting this to true maintains the historical
+    /// behavior of writing an Identity file, while setting to false is expected to be the
+    /// future default. This option might eventually be obsolete and removed as Identity files
+    /// are phased out.
+    pub fn set_write_identity_file(&mut self, val: bool) {
+        unsafe {
+            ffi::rocksdb_options_set_write_identity_file(self.inner, c_uchar::from(val));
+        }
+    }
 }
 
 impl Default for Options {
@@ -6365,6 +7150,13 @@ impl FlushOptions {
     /// Returns the value of the `listener_wait` option.
     pub fn get_listener_wait(&self) -> bool {
         unsafe { ffi::rocksdb_flushoptions_get_listener_wait(self.inner) != 0 }
+    }
+
+    /// Returns the current `wait` setting.
+    ///
+    /// See [`Self::set_wait`] for what this controls.
+    pub fn get_wait(&self) -> bool {
+        unsafe { ffi::rocksdb_flushoptions_get_wait(self.inner) != 0 }
     }
 }
 
@@ -6508,6 +7300,48 @@ impl WriteOptions {
     /// Returns the value of the `rate_limiter_priority` option.
     pub fn get_rate_limiter_priority(&self) -> c_int {
         unsafe { ffi::rocksdb_writeoptions_get_rate_limiter_priority(self.inner) }
+    }
+
+    /// Returns the current `disable_wal` setting.
+    ///
+    /// See [`Self::disable_wal`] for what this controls.
+    pub fn get_disable_wal(&self) -> bool {
+        unsafe { ffi::rocksdb_writeoptions_get_disable_WAL(self.inner) != 0 }
+    }
+
+    /// Returns the current `ignore_missing_column_families` setting.
+    ///
+    /// See [`Self::set_ignore_missing_column_families`] for what this controls.
+    pub fn get_ignore_missing_column_families(&self) -> bool {
+        unsafe { ffi::rocksdb_writeoptions_get_ignore_missing_column_families(self.inner) != 0 }
+    }
+
+    /// Returns the current `low_pri` setting.
+    ///
+    /// See [`Self::set_low_pri`] for what this controls.
+    pub fn get_low_pri(&self) -> bool {
+        unsafe { ffi::rocksdb_writeoptions_get_low_pri(self.inner) != 0 }
+    }
+
+    /// Returns the current `memtable_insert_hint_per_batch` setting.
+    ///
+    /// See [`Self::set_memtable_insert_hint_per_batch`] for what this controls.
+    pub fn get_memtable_insert_hint_per_batch(&self) -> bool {
+        unsafe { ffi::rocksdb_writeoptions_get_memtable_insert_hint_per_batch(self.inner) != 0 }
+    }
+
+    /// Returns the current `no_slowdown` setting.
+    ///
+    /// See [`Self::set_no_slowdown`] for what this controls.
+    pub fn get_no_slowdown(&self) -> bool {
+        unsafe { ffi::rocksdb_writeoptions_get_no_slowdown(self.inner) != 0 }
+    }
+
+    /// Returns the current `sync` setting.
+    ///
+    /// See [`Self::set_sync`] for what this controls.
+    pub fn get_sync(&self) -> bool {
+        unsafe { ffi::rocksdb_writeoptions_get_sync(self.inner) != 0 }
     }
 }
 
@@ -7181,6 +8015,108 @@ impl ReadOptions {
     pub fn get_value_size_soft_limit(&self) -> u64 {
         unsafe { ffi::rocksdb_readoptions_get_value_size_soft_limit(self.inner) }
     }
+
+    /// Clears the merge operand count threshold, restoring the default of no limit.
+    ///
+    /// See [`Self::set_merge_operand_count_threshold`].
+    pub fn clear_merge_operand_count_threshold(&mut self) {
+        unsafe {
+            ffi::rocksdb_readoptions_clear_merge_operand_count_threshold(self.inner);
+        }
+    }
+
+    /// Returns the current `async_io` setting.
+    ///
+    /// See [`Self::set_async_io`] for what this controls.
+    pub fn get_async_io(&self) -> bool {
+        unsafe { ffi::rocksdb_readoptions_get_async_io(self.inner) != 0 }
+    }
+
+    /// Returns the current `background_purge_on_iterator_cleanup` setting.
+    ///
+    /// See [`Self::set_background_purge_on_iterator_cleanup`] for what this controls.
+    pub fn get_background_purge_on_iterator_cleanup(&self) -> bool {
+        unsafe {
+            ffi::rocksdb_readoptions_get_background_purge_on_iterator_cleanup(self.inner) != 0
+        }
+    }
+
+    /// Returns the current `deadline` setting.
+    ///
+    /// See [`Self::set_deadline`] for what this controls.
+    pub fn get_deadline(&self) -> u64 {
+        unsafe { ffi::rocksdb_readoptions_get_deadline(self.inner) }
+    }
+
+    /// Returns the current `fill_cache` setting.
+    ///
+    /// See [`Self::fill_cache`] for what this controls.
+    pub fn get_fill_cache(&self) -> bool {
+        unsafe { ffi::rocksdb_readoptions_get_fill_cache(self.inner) != 0 }
+    }
+
+    /// Returns the current `io_timeout` setting.
+    ///
+    /// See [`Self::set_io_timeout`] for what this controls.
+    pub fn get_io_timeout(&self) -> u64 {
+        unsafe { ffi::rocksdb_readoptions_get_io_timeout(self.inner) }
+    }
+
+    /// Returns the current `max_skippable_internal_keys` setting.
+    ///
+    /// See [`Self::set_max_skippable_internal_keys`] for what this controls.
+    pub fn get_max_skippable_internal_keys(&self) -> u64 {
+        unsafe { ffi::rocksdb_readoptions_get_max_skippable_internal_keys(self.inner) }
+    }
+
+    /// Returns the current `pin_data` setting.
+    ///
+    /// See [`Self::set_pin_data`] for what this controls.
+    pub fn get_pin_data(&self) -> bool {
+        unsafe { ffi::rocksdb_readoptions_get_pin_data(self.inner) != 0 }
+    }
+
+    /// Returns the current `prefix_same_as_start` setting.
+    ///
+    /// See [`Self::set_prefix_same_as_start`] for what this controls.
+    pub fn get_prefix_same_as_start(&self) -> bool {
+        unsafe { ffi::rocksdb_readoptions_get_prefix_same_as_start(self.inner) != 0 }
+    }
+
+    /// Returns the current `readahead_size` setting.
+    ///
+    /// See [`Self::set_readahead_size`] for what this controls.
+    pub fn get_readahead_size(&self) -> usize {
+        unsafe { ffi::rocksdb_readoptions_get_readahead_size(self.inner) }
+    }
+
+    /// Returns the current `tailing` setting.
+    ///
+    /// See [`Self::set_tailing`] for what this controls.
+    pub fn get_tailing(&self) -> bool {
+        unsafe { ffi::rocksdb_readoptions_get_tailing(self.inner) != 0 }
+    }
+
+    /// Returns the current `total_order_seek` setting.
+    ///
+    /// See [`Self::set_total_order_seek`] for what this controls.
+    pub fn get_total_order_seek(&self) -> bool {
+        unsafe { ffi::rocksdb_readoptions_get_total_order_seek(self.inner) != 0 }
+    }
+
+    /// Returns the current `verify_checksums` setting.
+    ///
+    /// See [`Self::set_verify_checksums`] for what this controls.
+    pub fn get_verify_checksums(&self) -> bool {
+        unsafe { ffi::rocksdb_readoptions_get_verify_checksums(self.inner) != 0 }
+    }
+
+    /// Returns whether a merge operand count threshold is set.
+    ///
+    /// See [`Self::set_merge_operand_count_threshold`].
+    pub fn has_merge_operand_count_threshold(&self) -> bool {
+        unsafe { ffi::rocksdb_readoptions_has_merge_operand_count_threshold(self.inner) != 0 }
+    }
 }
 
 impl Default for ReadOptions {
@@ -7538,6 +8474,23 @@ impl IngestExternalFileOptions {
     pub fn get_write_global_seqno(&self) -> bool {
         unsafe { ffi::rocksdb_ingestexternalfileoptions_get_write_global_seqno(self.inner) != 0 }
     }
+
+    /// Set to TRUE if user wants file to be ingested to the last level. An error of
+    /// Status::TryAgain() will be returned if a file cannot fit in the last level when
+    /// calling DB::IngestExternalFile()/DB::IngestExternalFiles(). The user should clear the
+    /// last level in the overlapping range before re-attempt.
+    ///
+    /// ingest_behind takes precedence over fail_if_not_bottommost_level.
+    ///
+    /// XXX: "bottommost" is obsolete/confusing terminology to refer to last level.
+    pub fn set_fail_if_not_bottommost_level(&mut self, val: bool) {
+        unsafe {
+            ffi::rocksdb_ingestexternalfileoptions_set_fail_if_not_bottommost_level(
+                self.inner,
+                c_uchar::from(val),
+            );
+        }
+    }
 }
 
 impl Default for IngestExternalFileOptions {
@@ -7809,6 +8762,100 @@ impl FifoCompactOptions {
     pub fn get_trivial_copy_buffer_size(&self) -> u64 {
         unsafe { ffi::rocksdb_fifo_compaction_options_get_trivial_copy_buffer_size(self.inner) }
     }
+
+    /// Returns the current `allow_compaction` setting.
+    ///
+    /// See [`Self::set_allow_compaction`] for what this controls.
+    pub fn get_allow_compaction(&self) -> bool {
+        unsafe { ffi::rocksdb_fifo_compaction_options_get_allow_compaction(self.inner) != 0 }
+    }
+
+    /// Returns the current `max_data_files_size` setting.
+    ///
+    /// See [`Self::set_max_data_files_size`] for what this controls.
+    pub fn get_max_data_files_size(&self) -> u64 {
+        unsafe { ffi::rocksdb_fifo_compaction_options_get_max_data_files_size(self.inner) }
+    }
+
+    /// Returns the current `max_table_files_size` setting.
+    ///
+    /// See [`Self::set_max_table_files_size`] for what this controls.
+    pub fn get_max_table_files_size(&self) -> u64 {
+        unsafe { ffi::rocksdb_fifo_compaction_options_get_max_table_files_size(self.inner) }
+    }
+
+    /// Returns the current `use_kv_ratio_compaction` setting.
+    ///
+    /// See [`Self::set_use_kv_ratio_compaction`] for what this controls.
+    pub fn get_use_kv_ratio_compaction(&self) -> bool {
+        unsafe { ffi::rocksdb_fifo_compaction_options_get_use_kv_ratio_compaction(self.inner) != 0 }
+    }
+
+    /// If true, try to do compaction to compact smaller files into larger ones. Minimum files
+    /// to compact follows options.level0_file_num_compaction_trigger and compaction won't
+    /// trigger if average compact bytes per del file is larger than
+    /// options.write_buffer_size. This is to protect large files from being compacted again.
+    /// Default: false;
+    pub fn set_allow_compaction(&mut self, val: bool) {
+        unsafe {
+            ffi::rocksdb_fifo_compaction_options_set_allow_compaction(
+                self.inner,
+                c_uchar::from(val),
+            );
+        }
+    }
+
+    /// When non-zero, FIFO compaction uses the combined size of SST files and blob files for
+    /// size-based trimming decisions. When the total data size (SST + blob) exceeds this
+    /// limit, the oldest SST files are dropped along with their associated blob files.
+    ///
+    /// When non-zero, this takes precedence over max_table_files_size for all FIFO compaction
+    /// decisions: size-based dropping, TTL threshold checks, and compaction score
+    /// computation. max_table_files_size is ignored.
+    ///
+    /// When zero (default), FIFO compaction uses max_table_files_size which only considers
+    /// SST file sizes, maintaining backward compatibility.
+    ///
+    /// This option is primarily intended for use with integrated BlobDB where blob files can
+    /// represent a significant portion of the total data.
+    ///
+    /// Dynamically changeable through SetOptions() API. Default: 0 (use max_table_files_size
+    /// behavior).
+    pub fn set_max_data_files_size(&mut self, val: u64) {
+        unsafe {
+            ffi::rocksdb_fifo_compaction_options_set_max_data_files_size(self.inner, val);
+        }
+    }
+
+    /// When true, enables a capacity-derived intra-L0 compaction strategy optimized for
+    /// BlobDB workloads where SST files are much smaller than write_buffer_size. Uses the
+    /// observed key/value size ratio (SST vs blob file sizes) to compute a target compacted
+    /// file size, producing uniform files for predictable FIFO trimming.
+    ///
+    /// Uses level0_file_num_compaction_trigger as the target max L0 file count.
+    ///
+    /// When max_compaction_bytes is 0, the target is auto-calculated from the data capacity
+    /// and observed SST/blob ratio. When max_compaction_bytes is explicitly set to a non-zero
+    /// value, it overrides the auto-calculated target.
+    ///
+    /// Recommends:
+    /// - allow_compaction = true (master switch for intra-L0 compaction)
+    /// - max_data_files_size > 0 (needed to compute the target file size) If these are not
+    ///   met, kv_ratio compaction is skipped and the old cost-based intra-L0 compaction
+    ///   algorithm is used as a fallback.
+    ///
+    /// When false, the old intra-L0 strategy is used if allow_compaction is true
+    /// (PickCostBasedIntraL0Compaction with 1.1 * write_buffer_size guard).
+    ///
+    /// Dynamically changeable through SetOptions() API. Default: false.
+    pub fn set_use_kv_ratio_compaction(&mut self, val: bool) {
+        unsafe {
+            ffi::rocksdb_fifo_compaction_options_set_use_kv_ratio_compaction(
+                self.inner,
+                c_uchar::from(val),
+            );
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -8021,6 +9068,45 @@ impl UniversalCompactOptions {
             ffi::rocksdb_universal_compaction_options_get_reduce_file_locking(self.inner) != 0
         }
     }
+
+    /// Returns the current `compression_size_percent` setting.
+    ///
+    /// See [`Self::set_compression_size_percent`] for what this controls.
+    pub fn get_compression_size_percent(&self) -> c_int {
+        unsafe {
+            ffi::rocksdb_universal_compaction_options_get_compression_size_percent(self.inner)
+        }
+    }
+
+    /// Returns the current `max_merge_width` setting.
+    ///
+    /// See [`Self::set_max_merge_width`] for what this controls.
+    pub fn get_max_merge_width(&self) -> c_int {
+        unsafe { ffi::rocksdb_universal_compaction_options_get_max_merge_width(self.inner) }
+    }
+
+    /// Returns the current `max_size_amplification_percent` setting.
+    ///
+    /// See [`Self::set_max_size_amplification_percent`] for what this controls.
+    pub fn get_max_size_amplification_percent(&self) -> c_int {
+        unsafe {
+            ffi::rocksdb_universal_compaction_options_get_max_size_amplification_percent(self.inner)
+        }
+    }
+
+    /// Returns the current `min_merge_width` setting.
+    ///
+    /// See [`Self::set_min_merge_width`] for what this controls.
+    pub fn get_min_merge_width(&self) -> c_int {
+        unsafe { ffi::rocksdb_universal_compaction_options_get_min_merge_width(self.inner) }
+    }
+
+    /// Returns the current `size_ratio` setting.
+    ///
+    /// See [`Self::set_size_ratio`] for what this controls.
+    pub fn get_size_ratio(&self) -> c_int {
+        unsafe { ffi::rocksdb_universal_compaction_options_get_size_ratio(self.inner) }
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -8161,6 +9247,84 @@ impl CompactOptions {
     pub fn get_blob_garbage_collection_policy(&self) -> c_int {
         unsafe { ffi::rocksdb_compactoptions_get_blob_garbage_collection_policy(self.inner) }
     }
+
+    /// Returns the current `allow_write_stall` setting.
+    ///
+    /// See [`Self::set_allow_write_stall`] for what this controls.
+    pub fn get_allow_write_stall(&self) -> bool {
+        unsafe { ffi::rocksdb_compactoptions_get_allow_write_stall(self.inner) != 0 }
+    }
+
+    /// Returns the current `bottommost_level_compaction` setting.
+    ///
+    /// See [`Self::set_bottommost_level_compaction`] for what this controls.
+    pub fn get_bottommost_level_compaction(&self) -> bool {
+        unsafe { ffi::rocksdb_compactoptions_get_bottommost_level_compaction(self.inner) != 0 }
+    }
+
+    /// Returns the current `change_level` setting.
+    ///
+    /// See [`Self::set_change_level`] for what this controls.
+    pub fn get_change_level(&self) -> bool {
+        unsafe { ffi::rocksdb_compactoptions_get_change_level(self.inner) != 0 }
+    }
+
+    /// Returns the current `exclusive_manual_compaction` setting.
+    ///
+    /// See [`Self::set_exclusive_manual_compaction`] for what this controls.
+    pub fn get_exclusive_manual_compaction(&self) -> bool {
+        unsafe { ffi::rocksdb_compactoptions_get_exclusive_manual_compaction(self.inner) != 0 }
+    }
+
+    /// Returns the current `max_subcompactions` setting.
+    ///
+    /// See [`Self::set_max_subcompactions`] for what this controls.
+    pub fn get_max_subcompactions(&self) -> c_int {
+        unsafe { ffi::rocksdb_compactoptions_get_max_subcompactions(self.inner) }
+    }
+
+    /// Returns the current `target_level` setting.
+    ///
+    /// See [`Self::set_target_level`] for what this controls.
+    pub fn get_target_level(&self) -> c_int {
+        unsafe { ffi::rocksdb_compactoptions_get_target_level(self.inner) }
+    }
+
+    /// Returns the current `target_path_id` setting.
+    ///
+    /// See [`Self::set_target_path_id`] for what this controls.
+    pub fn get_target_path_id(&self) -> c_int {
+        unsafe { ffi::rocksdb_compactoptions_get_target_path_id(self.inner) }
+    }
+
+    /// If true, the flush would proceed immediately even it means writes will stall for the
+    /// duration of the flush; if false the operation will wait until it's possible to do
+    /// flush w/o causing stall or until required flush is performed by someone else
+    /// (foreground call or background thread). Default: false.
+    pub fn set_allow_write_stall(&mut self, val: bool) {
+        unsafe {
+            ffi::rocksdb_compactoptions_set_allow_write_stall(self.inner, c_uchar::from(val));
+        }
+    }
+
+    /// This value represents the maximum number of threads that will concurrently perform a
+    /// compaction job by breaking it into multiple, smaller ones that are run simultaneously.
+    /// Default: 1 (i.e. no subcompactions)
+    ///
+    /// Dynamically changeable through SetDBOptions() API.
+    pub fn set_max_subcompactions(&mut self, val: c_int) {
+        unsafe {
+            ffi::rocksdb_compactoptions_set_max_subcompactions(self.inner, val);
+        }
+    }
+
+    /// Compaction outputs will be placed in options.db_paths\[target_path_id\]. Behavior is
+    /// undefined if target_path_id is out of range.
+    pub fn set_target_path_id(&mut self, val: c_int) {
+        unsafe {
+            ffi::rocksdb_compactoptions_set_target_path_id(self.inner, val);
+        }
+    }
 }
 
 pub struct WaitForCompactOptions {
@@ -8234,6 +9398,44 @@ impl WaitForCompactOptions {
     /// Returns the value of the `wait_for_purge` option.
     pub fn get_wait_for_purge(&self) -> bool {
         unsafe { ffi::rocksdb_wait_for_compact_options_get_wait_for_purge(self.inner) != 0 }
+    }
+
+    /// Returns the current `abort_on_pause` setting.
+    ///
+    /// See [`Self::set_abort_on_pause`] for what this controls.
+    pub fn get_abort_on_pause(&self) -> bool {
+        unsafe { ffi::rocksdb_wait_for_compact_options_get_abort_on_pause(self.inner) != 0 }
+    }
+
+    /// Returns the current `close_db` setting.
+    ///
+    /// See [`Self::set_close_db`] for what this controls.
+    pub fn get_close_db(&self) -> bool {
+        unsafe { ffi::rocksdb_wait_for_compact_options_get_close_db(self.inner) != 0 }
+    }
+
+    /// Returns the current `flush` setting.
+    ///
+    /// See [`Self::set_flush`] for what this controls.
+    pub fn get_flush(&self) -> bool {
+        unsafe { ffi::rocksdb_wait_for_compact_options_get_flush(self.inner) != 0 }
+    }
+
+    /// Returns the current `timeout` setting.
+    ///
+    /// See [`Self::set_timeout`] for what this controls.
+    pub fn get_timeout(&self) -> u64 {
+        unsafe { ffi::rocksdb_wait_for_compact_options_get_timeout(self.inner) }
+    }
+
+    /// A boolean to call Close() after waiting is done. By the time Close() is called here,
+    /// there should be no background jobs in progress and no new background jobs should be
+    /// added. DB may not have been closed if Close() returned Aborted status due to
+    /// unreleased snapshots in the system. See comments in DB::Close() for details.
+    pub fn set_close_db(&mut self, val: bool) {
+        unsafe {
+            ffi::rocksdb_wait_for_compact_options_set_close_db(self.inner, c_uchar::from(val));
+        }
     }
 }
 
@@ -8347,6 +9549,13 @@ impl ImportColumnFamilyOptions {
                 c_uchar::from(move_files),
             );
         }
+    }
+
+    /// Returns the current `move_files` setting.
+    ///
+    /// See [`Self::set_move_files`] for what this controls.
+    pub fn get_move_files(&self) -> bool {
+        unsafe { ffi::rocksdb_import_column_family_options_get_move_files(self.inner) != 0 }
     }
 }
 

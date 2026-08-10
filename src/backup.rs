@@ -224,6 +224,18 @@ impl BackupEngine {
             info
         }
     }
+
+    /// Aborts a backup that is currently running.
+    ///
+    /// This is one way. Once it is called on a backup engine, every later backup
+    /// request on that engine fails. The backup directory is left consistent and is
+    /// cleaned up by the next backup or garbage collection performed through a new
+    /// backup engine on the same directory.
+    pub fn stop_backup(&mut self) {
+        unsafe {
+            ffi::rocksdb_backup_engine_stop_backup(self.inner);
+        }
+    }
 }
 
 impl BackupEngineOptions {
@@ -355,6 +367,139 @@ impl BackupEngineOptions {
     /// Returns the value of the `share_files_with_checksum` option.
     pub fn get_share_files_with_checksum(&self) -> bool {
         unsafe { ffi::rocksdb_backup_engine_options_get_share_files_with_checksum(self.inner) != 0 }
+    }
+
+    /// Returns the current `backup_log_files` setting.
+    ///
+    /// See [`Self::set_backup_log_files`] for what this controls.
+    pub fn get_backup_log_files(&self) -> bool {
+        unsafe { ffi::rocksdb_backup_engine_options_get_backup_log_files(self.inner) != 0 }
+    }
+
+    /// Returns the current `backup_rate_limit` setting.
+    ///
+    /// See [`Self::set_backup_rate_limit`] for what this controls.
+    pub fn get_backup_rate_limit(&self) -> u64 {
+        unsafe { ffi::rocksdb_backup_engine_options_get_backup_rate_limit(self.inner) }
+    }
+
+    /// Returns the current `callback_trigger_interval_size` setting.
+    ///
+    /// See [`Self::set_callback_trigger_interval_size`] for what this controls.
+    pub fn get_callback_trigger_interval_size(&self) -> u64 {
+        unsafe { ffi::rocksdb_backup_engine_options_get_callback_trigger_interval_size(self.inner) }
+    }
+
+    /// Returns the current `destroy_old_data` setting.
+    ///
+    /// See [`Self::set_destroy_old_data`] for what this controls.
+    pub fn get_destroy_old_data(&self) -> bool {
+        unsafe { ffi::rocksdb_backup_engine_options_get_destroy_old_data(self.inner) != 0 }
+    }
+
+    /// Returns the current `max_background_operations` setting.
+    ///
+    /// See [`Self::set_max_background_operations`] for what this controls.
+    pub fn get_max_background_operations(&self) -> c_int {
+        unsafe { ffi::rocksdb_backup_engine_options_get_max_background_operations(self.inner) }
+    }
+
+    /// Returns the current `max_valid_backups_to_open` setting.
+    ///
+    /// See [`Self::set_max_valid_backups_to_open`] for what this controls.
+    pub fn get_max_valid_backups_to_open(&self) -> c_int {
+        unsafe { ffi::rocksdb_backup_engine_options_get_max_valid_backups_to_open(self.inner) }
+    }
+
+    /// Returns the current `restore_rate_limit` setting.
+    ///
+    /// See [`Self::set_restore_rate_limit`] for what this controls.
+    pub fn get_restore_rate_limit(&self) -> u64 {
+        unsafe { ffi::rocksdb_backup_engine_options_get_restore_rate_limit(self.inner) }
+    }
+
+    /// Returns the current `share_table_files` setting.
+    ///
+    /// See [`Self::set_share_table_files`] for what this controls.
+    pub fn get_share_table_files(&self) -> bool {
+        unsafe { ffi::rocksdb_backup_engine_options_get_share_table_files(self.inner) != 0 }
+    }
+
+    /// If false, we won't backup log files. This option can be useful for backing up
+    /// in-memory databases where log file are persisted, but table files are in memory.
+    /// Default: true.
+    pub fn set_backup_log_files(&mut self, val: bool) {
+        unsafe {
+            ffi::rocksdb_backup_engine_options_set_backup_log_files(self.inner, c_uchar::from(val));
+        }
+    }
+
+    /// Max bytes that can be transferred in a second while creating a backup.
+    ///
+    /// If 0, go as fast as you can. This limit only applies to writes.
+    ///
+    /// Default: `0`
+    pub fn set_backup_rate_limit(&mut self, val: u64) {
+        unsafe {
+            ffi::rocksdb_backup_engine_options_set_backup_rate_limit(self.inner, val);
+        }
+    }
+
+    /// During backup user can get callback every time next callback_trigger_interval_size
+    /// bytes being copied. Default: 4194304.
+    pub fn set_callback_trigger_interval_size(&mut self, val: u64) {
+        unsafe {
+            ffi::rocksdb_backup_engine_options_set_callback_trigger_interval_size(self.inner, val);
+        }
+    }
+
+    /// If true, it will delete whatever backups there are already Default: false.
+    pub fn set_destroy_old_data(&mut self, val: bool) {
+        unsafe {
+            ffi::rocksdb_backup_engine_options_set_destroy_old_data(self.inner, c_uchar::from(val));
+        }
+    }
+
+    /// For BackupEngineReadOnly, Open() will open at most this many of the latest
+    /// non-corrupted backups.
+    ///
+    /// Note: this setting is ignored (behaves like INT_MAX) for any kind of writable
+    /// BackupEngine because it would inhibit accounting for shared files for proper backup
+    /// deletion, including purging any incompletely created backups on creation of a new
+    /// backup.
+    ///
+    /// Default: INT_MAX.
+    pub fn set_max_valid_backups_to_open(&mut self, val: c_int) {
+        unsafe {
+            ffi::rocksdb_backup_engine_options_set_max_valid_backups_to_open(self.inner, val);
+        }
+    }
+
+    /// Max bytes that can be transferred in a second during restore. If 0, go as fast as you
+    /// can This limit only applies to writes. To also limit reads, a rate limiter able to
+    /// also limit reads (e.g, its mode = kAllIo) have to be passed in through the option
+    /// "restore_rate_limiter" Default: 0.
+    pub fn set_restore_rate_limit(&mut self, val: u64) {
+        unsafe {
+            ffi::rocksdb_backup_engine_options_set_restore_rate_limit(self.inner, val);
+        }
+    }
+
+    /// Share_table_files supports table and blob files.
+    ///
+    /// If share_table_files == true, the backup directory will share table and blob files
+    /// among backups, to save space among backups of the same DB and to enable incremental
+    /// backups by only copying new files. If share_table_files == false, each backup will be
+    /// on its own and will not share any data with other backups.
+    ///
+    /// default: true.
+    pub fn set_share_table_files(&mut self, val: bool) {
+        unsafe {
+            ffi::rocksdb_backup_engine_options_set_share_table_files(
+                self.inner,
+                c_uchar::from(val),
+            );
+        }
     }
 }
 

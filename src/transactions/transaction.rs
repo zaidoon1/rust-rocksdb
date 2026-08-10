@@ -937,6 +937,28 @@ impl<DB> Transaction<'_, DB> {
         }
         Ok(())
     }
+
+    /// Sets the commit timestamp for this transaction.
+    ///
+    /// Only meaningful when the column family uses user-defined timestamps. RocksDB
+    /// reports an unsupported timestamp through a status that the C API discards, so
+    /// calling this on a transaction without timestamp support does nothing.
+    pub fn set_commit_timestamp(&self, val: u64) {
+        unsafe {
+            ffi::rocksdb_transaction_set_commit_timestamp(self.inner, val);
+        }
+    }
+
+    /// Sets the read timestamp used to validate this transaction's reads.
+    ///
+    /// Only meaningful when the column family uses user-defined timestamps. RocksDB
+    /// reports an unsupported timestamp through a status that the C API discards, so
+    /// calling this on a transaction without timestamp support does nothing.
+    pub fn set_read_timestamp_for_validation(&self, val: u64) {
+        unsafe {
+            ffi::rocksdb_transaction_set_read_timestamp_for_validation(self.inner, val);
+        }
+    }
 }
 
 impl<DB> Drop for Transaction<'_, DB> {

@@ -285,6 +285,36 @@ impl FlushJobInfo {
     pub fn flush_reason(&self) -> DBFlushReason {
         unsafe { DBFlushReason::from(ffi::rocksdb_flushjobinfo_flush_reason(self.inner)) }
     }
+
+    /// Number of blob files created by this flush.
+    pub fn blob_file_addition_infos_count(&self) -> usize {
+        unsafe { ffi::rocksdb_flushjobinfo_blob_file_addition_infos_count(self.inner) }
+    }
+
+    /// The id of the column family where the compaction happened.
+    pub fn cf_id(&self) -> u32 {
+        unsafe { ffi::rocksdb_flushjobinfo_cf_id(self.inner) }
+    }
+
+    /// The file number of the newly created file.
+    pub fn file_number(&self) -> u64 {
+        unsafe { ffi::rocksdb_flushjobinfo_file_number(self.inner) }
+    }
+
+    /// The id of the job (which could be flush or compaction) that created the file.
+    pub fn job_id(&self) -> i32 {
+        unsafe { ffi::rocksdb_flushjobinfo_job_id(self.inner) }
+    }
+
+    /// The oldest blob file referenced by the newly created file.
+    pub fn oldest_blob_file_number(&self) -> u64 {
+        unsafe { ffi::rocksdb_flushjobinfo_oldest_blob_file_number(self.inner) }
+    }
+
+    /// The id of the thread that completed this flush job.
+    pub fn thread_id(&self) -> u64 {
+        unsafe { ffi::rocksdb_flushjobinfo_thread_id(self.inner) }
+    }
 }
 
 pub struct CompactionJobInfo {
@@ -362,6 +392,67 @@ impl CompactionJobInfo {
             DBCompactionReason::from(ffi::rocksdb_compactionjobinfo_compaction_reason(self.inner))
         }
     }
+
+    /// Whether this compaction was aborted via AbortAllCompactions().
+    pub fn aborted(&self) -> bool {
+        unsafe { ffi::rocksdb_compactionjobinfo_aborted(self.inner) != 0 }
+    }
+
+    /// Number of blob files created by this compaction.
+    pub fn blob_file_addition_infos_count(&self) -> usize {
+        unsafe { ffi::rocksdb_compactionjobinfo_blob_file_addition_infos_count(self.inner) }
+    }
+
+    /// Number of blob files this compaction produced garbage for.
+    pub fn blob_file_garbage_infos_count(&self) -> usize {
+        unsafe { ffi::rocksdb_compactionjobinfo_blob_file_garbage_infos_count(self.inner) }
+    }
+
+    /// The id of the column family where the compaction happened.
+    pub fn cf_id(&self) -> u32 {
+        unsafe { ffi::rocksdb_compactionjobinfo_cf_id(self.inner) }
+    }
+
+    /// Number of entries in the per-input-file detail list.
+    ///
+    /// This counts the same files as [`Self::input_file_count`], reported from the
+    /// richer per-file records rather than the plain path list.
+    pub fn input_file_infos_count(&self) -> usize {
+        unsafe { ffi::rocksdb_compactionjobinfo_input_file_infos_count(self.inner) }
+    }
+
+    /// The id of the job (which could be flush or compaction) that created the file.
+    pub fn job_id(&self) -> i32 {
+        unsafe { ffi::rocksdb_compactionjobinfo_job_id(self.inner) }
+    }
+
+    /// The number of compaction input files (table files).
+    pub fn num_input_files(&self) -> usize {
+        unsafe { ffi::rocksdb_compactionjobinfo_num_input_files(self.inner) }
+    }
+
+    /// The number of L0 files in the CF right before and after the compaction.
+    pub fn num_l0_files(&self) -> i32 {
+        unsafe { ffi::rocksdb_compactionjobinfo_num_l0_files(self.inner) }
+    }
+
+    /// Number of entries in the per-output-file detail list.
+    ///
+    /// This counts the same files as [`Self::output_file_count`], reported from the
+    /// richer per-file records rather than the plain path list.
+    pub fn output_file_infos_count(&self) -> usize {
+        unsafe { ffi::rocksdb_compactionjobinfo_output_file_infos_count(self.inner) }
+    }
+
+    /// Number of files whose table properties this compaction collected.
+    pub fn table_properties_count(&self) -> usize {
+        unsafe { ffi::rocksdb_compactionjobinfo_table_properties_count(self.inner) }
+    }
+
+    /// The id of the thread that completed this flush job.
+    pub fn thread_id(&self) -> u64 {
+        unsafe { ffi::rocksdb_compactionjobinfo_thread_id(self.inner) }
+    }
 }
 
 pub struct SubcompactionJobInfo {
@@ -410,6 +501,23 @@ impl SubcompactionJobInfo {
             ))
         }
     }
+
+    /// The id of the column family where the compaction happened.
+    pub fn cf_id(&self) -> u32 {
+        unsafe { ffi::rocksdb_subcompactionjobinfo_cf_id(self.inner) }
+    }
+
+    /// The id of the job (which could be flush or compaction) that created the file.
+    pub fn job_id(&self) -> i32 {
+        unsafe { ffi::rocksdb_subcompactionjobinfo_job_id(self.inner) }
+    }
+
+    /// Sub-compaction job id, which is only unique within the same compaction, so use both
+    /// 'job_id' and 'subcompaction_job_id' to identify a subcompaction within an instance.
+    /// For non subcompaction job, it's set to -1.
+    pub fn subcompaction_job_id(&self) -> i32 {
+        unsafe { ffi::rocksdb_subcompactionjobinfo_subcompaction_job_id(self.inner) }
+    }
 }
 
 pub struct IngestionInfo {
@@ -432,6 +540,11 @@ impl IngestionInfo {
 
             Some(cf_name_vec)
         }
+    }
+
+    /// The global sequence number assigned to keys in this file.
+    pub fn global_seqno(&self) -> u64 {
+        unsafe { ffi::rocksdb_externalfileingestioninfo_global_seqno(self.inner) }
     }
 }
 

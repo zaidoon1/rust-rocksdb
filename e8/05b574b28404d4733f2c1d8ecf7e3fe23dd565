@@ -1,0 +1,31 @@
+src/backup.rs
+  s_aa5348e1af4d7b::t_b7ee02230ea83c 227-238,371-503
+src/db_options.rs
+  s_aa5348e1af4d7b::t_d976e6fdc55c35 1516-1548,6317-6321,6324-6328,6331,6333-6338,6340-6345,6347-6349,6352-6356,6359-6363,6366-6370,6373-6377,6380-6384,6387-6391,6394-6399,6401-6405,6408-6412,6415,6417-6418,6420-6422,6426,6428-6430,6433,6435-6437,6440,6442-6444,6447,6449-6451,6454,6456-6457,6459,6463-6465,6468-6472,6475,6477-6479,6482-6486,6489,6491-6496,6498-6500,6503-6507,6510-6515,6517-6521,6524-6528,6531-6535,6538-7387,8018-8119,8477-8493,8765-8858,9071-9109,9250-9327,9402-9439,9553-9559
+src/env.rs
+  s_aa5348e1af4d7b::t_75c0c7100e6f5f 142-169
+src/event_listener.rs
+  s_aa5348e1af4d7b::t_7a5a9aa5a81507 288-317,395-455,504-520,544-548
+src/transactions/options.rs
+  s_aa5348e1af4d7b::t_dcd127090a2fb2 304-366,578-621
+src/transactions/transaction.rs
+  s_aa5348e1af4d7b::t_c621ca806d77ba 940-961
+tests/test_capi_accessor_roundtrip.rs
+  s_aa5348e1af4d7b::t_7688510fb7e035 1-1274
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e805b574b28404d4733f2c1d8ecf7e3fe23dd565",
+  "prompts": {},
+  "sessions": {
+    "s_aa5348e1af4d7b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_024c47fa6ffeAoozO7B3U55VAT",
+        "model": "claude-opus-5"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    }
+  }
+}

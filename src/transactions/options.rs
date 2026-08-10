@@ -126,6 +126,181 @@ impl TransactionOptions {
             ffi::rocksdb_transaction_options_set_max_write_batch_size(self.inner, size);
         }
     }
+
+    /// The following three options enable optimizations for large transaction commit to
+    /// bypass memtable write.
+    /// - If any transaction's commit should bybass memtable write, set
+    ///   commit_bypass_memtable to true.
+    /// - If only bypass memtable write for transactions with >= n operations, set
+    ///   commit_bypass_memtable to false, large_txn_commit_optimize_threshold to n, and
+    ///   large_txn_commit_optimize_byte_threshold to 0. Similarly for only optimize when a
+    ///   transaction's write batch size is >= n.
+    /// - If bypass memtable write for transactions with >= n operations or >= x bytes, set
+    ///   commit_bypass_memtable to false, large_txn_commit_optimize_threshold to n, and
+    ///   large_txn_commit_optimize_byte_threshold to x.
+    ///
+    /// EXPERIMENTAL, SUBJECT TO CHANGE Only supports write-committed policy. If set to true,
+    /// the transaction will skip memtable write and ingest into the DB directly during
+    /// Commit(). This makes Commit() much faster for transactions with many operations.
+    /// Transaction neeeds to call Prepare() before Commit() for this option to take effect.
+    /// Transactions with Merge() or PutEntity() is not supported yet.
+    ///
+    /// Note that the transaction will be ingested as an immutable memtable for CFs it
+    /// updates, and the current memtable will be switched to a new one. So ingesting many
+    /// transactions in a short period of time may cause stall due to too many memtables. Note
+    /// that the ingestion relies on the transaction's underlying index,
+    /// (WriteBatchWithIndex), so updates that are added to the transaction without indexing
+    /// (i.e. added directly to the transaction underlying write batch through
+    /// Transaction::GetWriteBatch()->GetWriteBatch()) are not supported, and the optimization
+    /// will not apply in that case.
+    ///
+    /// NOTE: since WBWI keep track of the most recent update per key, a Put followed by a
+    /// SingleDelete will be written to DB as a SingleDelete. This can cause flush/compaction
+    /// to report `num_single_del_mismatch` due to consecutive SingleDeletes.
+    pub fn set_commit_bypass_memtable(&mut self, val: bool) {
+        unsafe {
+            ffi::rocksdb_transaction_options_set_commit_bypass_memtable(self.inner, u8::from(val));
+        }
+    }
+
+    /// Returns the value of the `commit_bypass_memtable` option.
+    pub fn get_commit_bypass_memtable(&self) -> bool {
+        unsafe { ffi::rocksdb_transaction_options_get_commit_bypass_memtable(self.inner) != 0 }
+    }
+
+    /// Setting to true means that before acquiring locks, this transaction will check if
+    /// doing so will cause a deadlock. If so, it will return with Status::Busy.  The user
+    /// should retry their transaction.
+    pub fn get_deadlock_detect(&self) -> bool {
+        unsafe { ffi::rocksdb_transaction_options_get_deadlock_detect(self.inner) != 0 }
+    }
+
+    /// EXPERIMENTAL, SUBJECT TO CHANGE When the size of a transaction's write batch is at
+    /// least this threshold, we will enable optimizations for commiting a large transaction.
+    /// See comment for `commit_bypass_memtable` for more optimization detail.
+    ///
+    /// Default: 0 (disabled).
+    pub fn set_large_txn_commit_optimize_byte_threshold(&mut self, val: u64) {
+        unsafe {
+            ffi::rocksdb_transaction_options_set_large_txn_commit_optimize_byte_threshold(
+                self.inner, val,
+            );
+        }
+    }
+
+    /// Returns the value of the `large_txn_commit_optimize_byte_threshold` option.
+    pub fn get_large_txn_commit_optimize_byte_threshold(&self) -> u64 {
+        unsafe {
+            ffi::rocksdb_transaction_options_get_large_txn_commit_optimize_byte_threshold(
+                self.inner,
+            )
+        }
+    }
+
+    /// EXPERIMENTAL, SUBJECT TO CHANGE When the number of updates in a transaction is at
+    /// least this threshold, we will enable optimizations for commiting a large transaction.
+    /// See comment for `commit_bypass_memtable` for more optimization detail.
+    ///
+    /// Default: 0 (disabled).
+    pub fn set_large_txn_commit_optimize_threshold(&mut self, val: u32) {
+        unsafe {
+            ffi::rocksdb_transaction_options_set_large_txn_commit_optimize_threshold(
+                self.inner, val,
+            );
+        }
+    }
+
+    /// Returns the value of the `large_txn_commit_optimize_threshold` option.
+    pub fn get_large_txn_commit_optimize_threshold(&self) -> u32 {
+        unsafe {
+            ffi::rocksdb_transaction_options_get_large_txn_commit_optimize_threshold(self.inner)
+        }
+    }
+
+    /// The maximum number of bytes used for the write batch. 0 means no limit.
+    pub fn get_max_write_batch_size(&self) -> usize {
+        unsafe { ffi::rocksdb_transaction_options_get_max_write_batch_size(self.inner) }
+    }
+
+    /// Setting set_snapshot=true is the same as calling Transaction::SetSnapshot().
+    pub fn get_set_snapshot(&self) -> bool {
+        unsafe { ffi::rocksdb_transaction_options_get_set_snapshot(self.inner) != 0 }
+    }
+
+    /// If true, the TransactionDB implementation might skip concurrency control unless it is
+    /// overridden by TransactionOptions or TransactionDBWriteOptimizations. This can be used
+    /// in conjunction with DBOptions::unordered_write when the TransactionDB is used solely
+    /// for write ordering rather than concurrency control.
+    pub fn set_skip_concurrency_control(&mut self, val: bool) {
+        unsafe {
+            ffi::rocksdb_transaction_options_set_skip_concurrency_control(
+                self.inner,
+                u8::from(val),
+            );
+        }
+    }
+
+    /// Returns the value of the `skip_concurrency_control` option.
+    pub fn get_skip_concurrency_control(&self) -> bool {
+        unsafe { ffi::rocksdb_transaction_options_get_skip_concurrency_control(self.inner) != 0 }
+    }
+
+    /// In pessimistic transaction, if this is true, then you can skip Prepare before Commit,
+    /// otherwise, you must Prepare before Commit.
+    pub fn get_skip_prepare(&self) -> bool {
+        unsafe { ffi::rocksdb_transaction_options_get_skip_prepare(self.inner) != 0 }
+    }
+
+    /// If set, it states that the CommitTimeWriteBatch represents the latest state of the
+    /// application, has only one sub-batch, i.e., no duplicate keys,  and meant to be used
+    /// later during recovery. It enables an optimization to postpone updating the memtable
+    /// with CommitTimeWriteBatch to only SwitchMemtable or recovery. This option does not
+    /// affect write-committed. Only write-prepared/write-unprepared transactions will be
+    /// affected.
+    pub fn set_use_only_the_last_commit_time_batch_for_recovery(&mut self, val: bool) {
+        unsafe {
+            ffi::rocksdb_transaction_options_set_use_only_the_last_commit_time_batch_for_recovery(
+                self.inner,
+                u8::from(val),
+            );
+        }
+    }
+
+    /// Returns the value of the `use_only_the_last_commit_time_batch_for_recovery` option.
+    pub fn get_use_only_the_last_commit_time_batch_for_recovery(&self) -> bool {
+        unsafe {
+            ffi::rocksdb_transaction_options_get_use_only_the_last_commit_time_batch_for_recovery(
+                self.inner,
+            ) != 0
+        }
+    }
+
+    /// DO NOT USE. This is only a temporary option dedicated for MyRocks that will soon be
+    /// removed. In normal use cases, meta info like column family's timestamp size is tracked
+    /// at the transaction layer, so it's not necessary and even detrimental to track such
+    /// info inside the internal WriteBatch because it may let anti-patterns like bypassing
+    /// Transaction write APIs and directly write to its internal `WriteBatch` retrieved like
+    /// this:
+    /// <https://github.com/facebook/mysql-5.6/blob/fb-mysql-8.0.32/storage/rocksdb/ha_rocksdb.cc#L4949-L4950>
+    /// Setting this option to true will keep aforementioned use case continue to work before
+    /// it's refactored out. When this flag is enabled, we also intentionally only track the
+    /// timestamp size in APIs that MyRocks currently are using, including Put, Merge, Delete
+    /// DeleteRange, SingleDelete.
+    pub fn set_write_batch_track_timestamp_size(&mut self, val: bool) {
+        unsafe {
+            ffi::rocksdb_transaction_options_set_write_batch_track_timestamp_size(
+                self.inner,
+                u8::from(val),
+            );
+        }
+    }
+
+    /// Returns the value of the `write_batch_track_timestamp_size` option.
+    pub fn get_write_batch_track_timestamp_size(&self) -> bool {
+        unsafe {
+            ffi::rocksdb_transaction_options_get_write_batch_track_timestamp_size(self.inner) != 0
+        }
+    }
 }
 
 impl Drop for TransactionOptions {
@@ -226,6 +401,117 @@ impl TransactionDBOptions {
             ffi::rocksdb_transactiondb_options_set_num_stripes(self.inner, num_stripes);
         }
     }
+
+    /// A flag to control for the whole DB whether user-defined timestamp based validation are
+    /// enabled when applicable. Only WriteCommittedTxn support user-defined timestamps so
+    /// this option only applies in this case.
+    pub fn set_enable_udt_validation(&mut self, val: bool) {
+        unsafe {
+            ffi::rocksdb_transactiondb_options_set_enable_udt_validation(self.inner, u8::from(val));
+        }
+    }
+
+    /// Returns the value of the `enable_udt_validation` option.
+    pub fn get_enable_udt_validation(&self) -> bool {
+        unsafe { ffi::rocksdb_transactiondb_options_get_enable_udt_validation(self.inner) != 0 }
+    }
+
+    /// Stores the number of latest deadlocks to track
+    pub fn set_max_num_deadlocks(&mut self, val: u32) {
+        unsafe {
+            ffi::rocksdb_transactiondb_options_set_max_num_deadlocks(self.inner, val);
+        }
+    }
+
+    /// Returns the value of the `max_num_deadlocks` option.
+    pub fn get_max_num_deadlocks(&self) -> u32 {
+        unsafe { ffi::rocksdb_transactiondb_options_get_max_num_deadlocks(self.inner) }
+    }
+
+    /// Increasing this value will increase the concurrency by dividing the lock table (per
+    /// column family) into more sub-tables, each with their own separate mutex.
+    pub fn get_num_stripes(&self) -> usize {
+        unsafe { ffi::rocksdb_transactiondb_options_get_num_stripes(self.inner) }
+    }
+
+    /// TODO(myabandeh): remove this option Note: this is a temporary option as a hot fix in
+    /// rollback of writeprepared txns in myrocks. MyRocks uses merge operands for autoinc
+    /// column id without however obtaining locks. This breaks the assumption behind the
+    /// rollback logic in myrocks. This hack of simply not rolling back merge operands works
+    /// for the special way that myrocks uses this operands.
+    pub fn set_rollback_merge_operands(&mut self, val: bool) {
+        unsafe {
+            ffi::rocksdb_transactiondb_options_set_rollback_merge_operands(
+                self.inner,
+                u8::from(val),
+            );
+        }
+    }
+
+    /// Returns the value of the `rollback_merge_operands` option.
+    pub fn get_rollback_merge_operands(&self) -> bool {
+        unsafe { ffi::rocksdb_transactiondb_options_get_rollback_merge_operands(self.inner) != 0 }
+    }
+
+    /// If true, the TransactionDB implementation might skip concurrency control unless it is
+    /// overridden by TransactionOptions or TransactionDBWriteOptimizations. This can be used
+    /// in conjunction with DBOptions::unordered_write when the TransactionDB is used solely
+    /// for write ordering rather than concurrency control.
+    pub fn set_skip_concurrency_control(&mut self, val: bool) {
+        unsafe {
+            ffi::rocksdb_transactiondb_options_set_skip_concurrency_control(
+                self.inner,
+                u8::from(val),
+            );
+        }
+    }
+
+    /// Returns the value of the `skip_concurrency_control` option.
+    pub fn get_skip_concurrency_control(&self) -> bool {
+        unsafe { ffi::rocksdb_transactiondb_options_get_skip_concurrency_control(self.inner) != 0 }
+    }
+
+    /// Deprecated, this option has no effect and may be removed in the future. Use
+    /// TransactionOptions::large_txn_commit_optimize_threshold instead.
+    ///
+    /// This option is only valid for write committed. If the number of updates in a
+    /// transaction is at least this threshold, then the transaction commit will skip
+    /// insertions into memtable as an optimization to reduce commit latency. See comment for
+    /// TransactionOptions::commit_bypass_memtable for more detail. Setting
+    /// TransactionOptions::commit_bypass_memtable to true takes precedence over this option.
+    pub fn set_txn_commit_bypass_memtable_threshold(&mut self, val: u32) {
+        unsafe {
+            ffi::rocksdb_transactiondb_options_set_txn_commit_bypass_memtable_threshold(
+                self.inner, val,
+            );
+        }
+    }
+
+    /// Returns the value of the `txn_commit_bypass_memtable_threshold` option.
+    pub fn get_txn_commit_bypass_memtable_threshold(&self) -> u32 {
+        unsafe {
+            ffi::rocksdb_transactiondb_options_get_txn_commit_bypass_memtable_threshold(self.inner)
+        }
+    }
+
+    /// EXPERIMENTAL
+    ///
+    /// Flag to enable/disable the per key point lock manager.
+    pub fn set_use_per_key_point_lock_mgr(&mut self, val: bool) {
+        unsafe {
+            ffi::rocksdb_transactiondb_options_set_use_per_key_point_lock_mgr(
+                self.inner,
+                u8::from(val),
+            );
+        }
+    }
+
+    /// Returns the value of the `use_per_key_point_lock_mgr` option.
+    pub fn get_use_per_key_point_lock_mgr(&self) -> bool {
+        unsafe {
+            ffi::rocksdb_transactiondb_options_get_use_per_key_point_lock_mgr(self.inner) != 0
+        }
+    }
 }
 
 impl Drop for TransactionDBOptions {
@@ -284,6 +570,11 @@ impl OptimisticTransactionOptions {
                 u8::from(snapshot),
             );
         }
+    }
+
+    /// Setting set_snapshot=true is the same as calling Transaction::SetSnapshot().
+    pub fn get_set_snapshot(&self) -> bool {
+        unsafe { ffi::rocksdb_optimistictransaction_options_get_set_snapshot(self.inner) != 0 }
     }
 }
 

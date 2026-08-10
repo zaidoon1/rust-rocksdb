@@ -1,0 +1,25 @@
+src/backup.rs
+  s_aa5348e1af4d7b::t_fdc636a25fefa6 19,282-358,373-380
+src/db_options.rs
+  s_aa5348e1af4d7b::t_28de4a9bc84251 897-1515,1588-1630,4758-4759,4761-4763,4765-4769,4773-4775,4778-6304,6321-6368,6453-6502,6504,6507-6511,6998-7183,7253-7540,7762-7811,7928-8023,8142-8163,8223-8237
+src/transactions/options.rs
+  s_aa5348e1af4d7b::t_6269d9c2a0f795 129-302,403-513,573-577
+tests/test_capi_options_roundtrip.rs
+  s_aa5348e1af4d7b::t_ecc7eb58379da9 1-1199
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e7e5d5eb108187dd24c07a882f4c00e7b125e2ae",
+  "prompts": {},
+  "sessions": {
+    "s_aa5348e1af4d7b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_024c47fa6ffeAoozO7B3U55VAT",
+        "model": "claude-opus-5"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    }
+  }
+}

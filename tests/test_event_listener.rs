@@ -38,6 +38,14 @@ impl EventListener for EventCounter {
         assert_ne!(info.largest_seqno(), 0);
         assert!(info.smallest_seqno() <= info.largest_seqno());
 
+        assert!(info.job_id() > 0);
+        assert_ne!(info.thread_id(), 0);
+        assert_eq!(info.cf_id(), 0, "default column family");
+        assert_ne!(info.file_number(), 0);
+        // This test never enables blob files.
+        assert_eq!(info.oldest_blob_file_number(), 0);
+        assert_eq!(info.blob_file_addition_infos_count(), 0);
+
         if info.flush_reason() == DBFlushReason::KManualFlush {
             self.manual_flush.fetch_add(1, Ordering::SeqCst);
         }
@@ -57,6 +65,21 @@ impl EventListener for EventCounter {
         assert_eq!(info.num_corrupt_keys(), 0);
         assert!(info.output_level() >= 0);
 
+        assert!(info.job_id() > 0);
+        assert_ne!(info.thread_id(), 0);
+        assert_eq!(info.cf_id(), 0, "default column family");
+        assert!(!info.aborted(), "status() already succeeded");
+        // input_files_count walks the file list, num_input_files comes from the
+        // compaction stats; they describe the same set.
+        assert_eq!(info.num_input_files(), input_file_count);
+        assert!(info.num_l0_files() >= 0);
+        assert_eq!(info.input_file_infos_count(), input_file_count);
+        assert_eq!(info.output_file_infos_count(), output_file_count);
+        assert!(info.table_properties_count() > 0);
+        // This test never enables blob files.
+        assert_eq!(info.blob_file_addition_infos_count(), 0);
+        assert_eq!(info.blob_file_garbage_infos_count(), 0);
+
         self.compaction.fetch_add(1, Ordering::SeqCst);
         self.input_records
             .fetch_add(info.input_records() as usize, Ordering::SeqCst);
@@ -74,6 +97,8 @@ impl EventListener for EventCounter {
 
     fn on_external_file_ingested(&self, info: &IngestionInfo) {
         assert!(!info.cf_name().unwrap().is_empty());
+        // Ingesting into a non-empty DB assigns the file a real sequence number.
+        assert_ne!(info.global_seqno(), 0);
         self.ingestion.fetch_add(1, Ordering::SeqCst);
     }
 }

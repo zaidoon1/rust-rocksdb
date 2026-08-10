@@ -301,6 +301,69 @@ impl TransactionOptions {
             ffi::rocksdb_transaction_options_get_write_batch_track_timestamp_size(self.inner) != 0
         }
     }
+
+    /// Returns the current `deadlock_detect_depth` setting.
+    ///
+    /// See [`Self::set_deadlock_detect_depth`] for what this controls.
+    pub fn get_deadlock_detect_depth(&self) -> i64 {
+        unsafe { ffi::rocksdb_transaction_options_get_deadlock_detect_depth(self.inner) }
+    }
+
+    /// Returns the current `deadlock_timeout_us` setting.
+    ///
+    /// See [`Self::set_deadlock_timeout_us`] for what this controls.
+    pub fn get_deadlock_timeout_us(&self) -> i64 {
+        unsafe { ffi::rocksdb_transaction_options_get_deadlock_timeout_us(self.inner) }
+    }
+
+    /// Returns the current `expiration` setting.
+    ///
+    /// See [`Self::set_expiration`] for what this controls.
+    pub fn get_expiration(&self) -> i64 {
+        unsafe { ffi::rocksdb_transaction_options_get_expiration(self.inner) }
+    }
+
+    /// Returns the current `lock_timeout` setting.
+    ///
+    /// See [`Self::set_lock_timeout`] for what this controls.
+    pub fn get_lock_timeout(&self) -> i64 {
+        unsafe { ffi::rocksdb_transaction_options_get_lock_timeout(self.inner) }
+    }
+
+    /// Returns the current `write_batch_flush_threshold` setting.
+    ///
+    /// See [`Self::set_write_batch_flush_threshold`] for what this controls.
+    pub fn get_write_batch_flush_threshold(&self) -> i64 {
+        unsafe { ffi::rocksdb_transaction_options_get_write_batch_flush_threshold(self.inner) }
+    }
+
+    /// Timeout in microseconds before perform dead lock detection. If 0, deadlock detection
+    /// will be performed immediately.
+    ///
+    /// To optimize performance, this parameter could be tuned.
+    ///
+    /// When deadlock happens very frequently, deadlock timeout should be set to 0, so
+    /// deadlock will be detected immediately.
+    ///
+    /// When deadlock happen very rarely, this timeout could be turned to be slightly longer
+    /// than the typical transaction execution time, so that transaction will be waked up to
+    /// take the lock before this timeout, which will allow the transaction to save the CPU
+    /// time on deadlock detection.
+    ///
+    /// Deadlock timeout is always smaller than lock_timeout.
+    pub fn set_deadlock_timeout_us(&mut self, val: i64) {
+        unsafe {
+            ffi::rocksdb_transaction_options_set_deadlock_timeout_us(self.inner, val);
+        }
+    }
+
+    /// See TransactionDBOptions::default_write_batch_flush_threshold for description. If a
+    /// negative value is specified, then the default value from TransactionDBOptions is used.
+    pub fn set_write_batch_flush_threshold(&mut self, val: i64) {
+        unsafe {
+            ffi::rocksdb_transaction_options_set_write_batch_flush_threshold(self.inner, val);
+        }
+    }
 }
 
 impl Drop for TransactionOptions {
@@ -510,6 +573,50 @@ impl TransactionDBOptions {
     pub fn get_use_per_key_point_lock_mgr(&self) -> bool {
         unsafe {
             ffi::rocksdb_transactiondb_options_get_use_per_key_point_lock_mgr(self.inner) != 0
+        }
+    }
+
+    /// Returns the current `default_lock_timeout` setting.
+    ///
+    /// See [`Self::set_default_lock_timeout`] for what this controls.
+    pub fn get_default_lock_timeout(&self) -> i64 {
+        unsafe { ffi::rocksdb_transactiondb_options_get_default_lock_timeout(self.inner) }
+    }
+
+    /// Returns the current `default_write_batch_flush_threshold` setting.
+    ///
+    /// See [`Self::set_default_write_batch_flush_threshold`] for what this controls.
+    pub fn get_default_write_batch_flush_threshold(&self) -> i64 {
+        unsafe {
+            ffi::rocksdb_transactiondb_options_get_default_write_batch_flush_threshold(self.inner)
+        }
+    }
+
+    /// Returns the current `max_num_locks` setting.
+    ///
+    /// See [`Self::set_max_num_locks`] for what this controls.
+    pub fn get_max_num_locks(&self) -> i64 {
+        unsafe { ffi::rocksdb_transactiondb_options_get_max_num_locks(self.inner) }
+    }
+
+    /// If positive, specifies the default wait timeout in milliseconds when a transaction
+    /// attempts to lock a key if not specified by TransactionOptions::lock_timeout.
+    ///
+    /// If 0, no waiting is done if a lock cannot instantly be acquired. If negative, there is
+    /// no timeout.  Not using a timeout is not recommended as it can lead to deadlocks.
+    /// Currently, there is no deadlock-detection to recover from a deadlock.
+    pub fn get_transaction_lock_timeout(&self) -> i64 {
+        unsafe { ffi::rocksdb_transactiondb_options_get_transaction_lock_timeout(self.inner) }
+    }
+
+    /// This option is only valid for write unprepared. If a write batch exceeds this
+    /// threshold, then the transaction will implicitly flush the currently pending writes
+    /// into the database. A value of 0 or less means no limit.
+    pub fn set_default_write_batch_flush_threshold(&mut self, val: i64) {
+        unsafe {
+            ffi::rocksdb_transactiondb_options_set_default_write_batch_flush_threshold(
+                self.inner, val,
+            );
         }
     }
 }

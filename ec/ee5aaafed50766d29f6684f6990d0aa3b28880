@@ -1,0 +1,86 @@
+src/env.rs
+  s_bd736f8e641085::t_e1aef832363c62 1,6,171-193,198-225
+tests/test_compact_files.rs
+  s_bd736f8e641085::t_e6712d35a1af46 1-711
+src/compaction.rs
+  s_bd736f8e641085::t_40fa37990ba564 1-682
+src/event_listener.rs
+  s_bd736f8e641085::t_3ede68f7909188 1-3,5-10,69-70,97-98,127,151,173,197,332-399,404-412,525-531,551-922,988-1011,1040-1095,1166-1187,1350-1353,1362-1365,1487-1570
+src/checkpoint.rs
+  s_bd736f8e641085::t_a3420cf7971db9 22-23,318-425
+tests/test_compaction_service.rs
+  s_bd736f8e641085::t_fe3c8bcba39a09 1-520
+src/transactions/transaction.rs
+  s_34b77193451b63::t_f13ae6a15169e1 20-21,640-781,1084-1137
+src/transactions/transaction_db.rs
+  s_34b77193451b63::t_d8d4cc97c4dadf 33-35,442-457
+tests/test_statistics_level.rs
+  s_bd736f8e641085::t_c1d85e33d0a75f 1-202
+src/wal.rs
+  s_bd736f8e641085::t_4237829c496cf8 1-385
+tests/test_event_listener.rs
+  s_bd736f8e641085::t_2709b018bf6169 75-76
+tests/test_trace_replay.rs
+  s_bd736f8e641085::t_7ba9cae9c73494 1-631
+src/db_options.rs
+  s_bd736f8e641085::t_0543e778529d89 23,25,28-29,31,33-34,41-42,45,78,81,100,107-110,115,243-305,438-453,486-525,1603-1665,2158-2178,2215-2223,2273-2281,2306-2315,2735-2860,2881,2919,3061-3067,3087-3095,3631-3640,3742-3753,3792-3803,4186-4194,4229-4240,4383-4389,4923-4930,4988-5010,5056-5078,5189-5197,5282-5317,5607-5668,5693-5759,7824-7981,8186-8198,8227-8242,8417-8425,8490-8497,8856-9017,9525,9529,9532,9540,9545-9546,9618-9637,9646-9659,9669-9690,9709-9764,9996-10010,10119-10127,10729-10753
+src/lib.rs
+  s_bd736f8e641085::t_20902c008f52b3 96,99,107,109,112,120,122-123,125-126,132,137-140,142-147,149-151,161,163-165,169-171,173,176-179,185-190,192-194,196-197
+src/sst_partitioner.rs
+  s_34b77193451b63::t_34af962e61fe5d 1-84
+src/compaction_service.rs
+  s_bd736f8e641085::t_598a4a01adde27 1-1383
+src/trace.rs
+  s_bd736f8e641085::t_2579ee48dcb5d1 1-616
+tests/test_enum_drift.rs
+  s_bd736f8e641085::t_af327740bd0221 1-376
+tests/test_get_with_ts.rs
+  s_bd736f8e641085::t_71955e2876e8da 1-254
+tests/test_metadata.rs
+  s_bd736f8e641085::t_1d3d3b36b94c2b 1-853
+tests/test_db_maintenance.rs
+  s_bd736f8e641085::t_856e3a86757644 1-340
+src/perf_enum.rs
+  s_bd736f8e641085::t_935cad0023d5fb 13-97
+  s_bd736f8e641085::t_927c1132e3f308 8-11
+src/wal_filter.rs
+  s_34b77193451b63::t_2bbcd131dc65a4 1-331
+src/transactions/mod.rs
+  s_34b77193451b63::t_e25c0234cf542f 22-25
+src/statistics.rs
+  s_bd736f8e641085::t_d9fb1fb0cc6987 2,78-89,91-95,97-105,107-108,110-132
+src/transactions/optimistic_transaction_db.rs
+  s_bd736f8e641085::t_e0b655338577cd 23-24,89-92,141,150-208,212-220,242,270-278,316,320-333,340,348-369
+tests/test_wal_files.rs
+  s_bd736f8e641085::t_8e2fefec57f337 1-338
+src/sst_file_writer.rs
+  s_34b77193451b63::t_cf878018735885 16,25-27,36-40,42-52,54-62,71
+src/table_properties.rs
+  s_bd736f8e641085::t_1043aa40c65082 1-447
+src/transactions/options.rs
+  s_34b77193451b63::t_29d8fba6d31129 16-20,382-436,682-704,778-992
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ecee5aaafed50766d29f6684f6990d0aa3b28880",
+  "prompts": {},
+  "sessions": {
+    "s_34b77193451b63": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ffc49145bffeGXIH7U9lucb5kG",
+        "model": "claude-opus-5"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    },
+    "s_bd736f8e641085": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ffc995879ffeirx1AOmNrbgQVr",
+        "model": "claude-opus-5"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    }
+  }
+}

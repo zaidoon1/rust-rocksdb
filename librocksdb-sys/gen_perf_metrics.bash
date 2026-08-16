@@ -9,6 +9,10 @@ echo ""
 echo "/// Rust representation of the performance metrics from RocksDB's perf_context"
 echo "#[derive(Debug, Copy, Clone, PartialEq, Eq)]"
 echo "#[repr(u32)]"
+echo "// MSVC types an anonymous C enum as signed int where clang picks unsigned, so"
+echo "// these constants are i32 on Windows and u32 everywhere else. The cast is"
+echo "// needed on Windows and redundant on the platforms clippy runs on."
+echo "#[allow(clippy::unnecessary_cast)]"
 echo "pub enum PerfMetric {"
 
 # Extract the metric enum from c.h and generate our enum based on that ordering
@@ -30,13 +34,17 @@ if (/enum\s*\{[^}]*rocksdb_user_key_comparison_count[^}]*\}/sm) {
         $count++;
     }
     
-    # Output the Rust enum variants
+    # Output the Rust enum variants. Discriminants come from the generated
+    # bindings rather than literals, so the values track c.h even if this
+    # script is not re-run after a RocksDB upgrade. The cast is required
+    # because MSVC types an anonymous C enum as signed int while clang picks
+    # unsigned, so the constants arrive as i32 on Windows and u32 elsewhere.
     foreach $pair (@metrics) {
         ($metric, $value) = @$pair;
         # Convert snake_case to PascalCase
         $name = $metric;
         $name =~ s/(^|_)(\w)/\U$2/g;
-        print "    $name = $value,\n";
+        print "    $name = ffi::rocksdb_$metric as u32,\n";
     }
 }' $CHeaderFile
 

@@ -1,8 +1,9 @@
+use std::path::Path;
 use std::sync::Arc;
 
 use libc::{self, c_int};
 
-use crate::{Error, ffi};
+use crate::{Error, ffi, ffi_util::to_cpath};
 
 /// An Env is an interface used by the rocksdb implementation to access
 /// operating system functionality like the filesystem etc. Callers
@@ -167,7 +168,58 @@ impl Env {
     pub fn get_low_priority_background_threads(&self) -> c_int {
         unsafe { ffi::rocksdb_env_get_low_priority_background_threads(self.0.inner) }
     }
+
+    /// Creates `path` through this environment, and returns `Ok` if it is
+    /// already there.
+    ///
+    /// This is `Env::CreateDirIfMissing`, one level only. The POSIX
+    /// implementation is a plain `mkdir`, so every parent has to exist
+    /// already. It is not the recursive `std::fs::create_dir_all`.
+    ///
+    /// # Errors
+    ///
+    /// The POSIX environment fails when a parent directory is missing, when
+    /// the process cannot write there, or when `path` exists and is not a
+    /// directory. [`Env::mem_env`] always succeeds.
+    pub fn create_dir_if_missing<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
+        let cpath = to_cpath(path)?;
+        unsafe {
+            ffi_try!(ffi::rocksdb_create_dir_if_missing(
+                self.0.inner,
+                cpath.as_ptr(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 unsafe impl Send for EnvWrapper {}
 unsafe impl Sync for EnvWrapper {}
+
+/// Priority at which an IO operation is charged to the rate limiter set with
+/// [`Options::set_ratelimiter`](crate::Options::set_ratelimiter).
+///
+/// Mirrors `Env::IOPriority` from `rocksdb/include/env.h`.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[repr(i32)]
+pub enum IoPriority {
+    Low = 0,
+    Mid = 1,
+    High = 2,
+    User = 3,
+    /// Do not charge the rate limiter at all.
+    Total = 4,
+}
+
+impl IoPriority {
+    pub(crate) fn try_from_raw(raw: c_int) -> Option<Self> {
+        match raw {
+            0 => Some(Self::Low),
+            1 => Some(Self::Mid),
+            2 => Some(Self::High),
+            3 => Some(Self::User),
+            4 => Some(Self::Total),
+            _ => None,
+        }
+    }
+}

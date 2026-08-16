@@ -13,6 +13,11 @@
 // limitations under the License.
 //
 
+use std::ptr::NonNull;
+use std::sync::Arc;
+
+use libc::c_int;
+
 use crate::ffi;
 
 pub struct TransactionOptions {
@@ -374,6 +379,61 @@ impl Drop for TransactionOptions {
     }
 }
 
+/// When a [`TransactionDB`] writes transaction data into the DB.
+///
+/// [`TransactionDB`] reads this once while opening, to choose which implementation to
+/// build, and keeps its own copy. Changing it on a [`TransactionDBOptions`] afterwards
+/// has no effect on a DB that is already open.
+///
+/// [`TransactionDB`]: crate::TransactionDB
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde1", derive(serde::Serialize, serde::Deserialize))]
+pub enum TxnDBWritePolicy {
+    /// Write data at commit time.
+    ///
+    /// Only committed data ever reaches the DB, so readers need no extra machinery to
+    /// tell committed from uncommitted. This is the default.
+    WriteCommitted = ffi::rocksdb_txndb_write_policy_write_committed as isize,
+
+    /// Write data after the prepare phase of two-phase commit.
+    ///
+    /// Data lands before the commit, so the DB has to track which of it is committed and
+    /// readers have to consult that. Experimental: RocksDB describes the non-committed
+    /// policies as less mature, less validated and less compatible with other features
+    /// than `WriteCommitted`.
+    WritePrepared = ffi::rocksdb_txndb_write_policy_write_prepared as isize,
+
+    /// Write data before the prepare phase of two-phase commit.
+    ///
+    /// A running transaction can flush its pending writes into the DB once its batch
+    /// crosses
+    /// [`TransactionDBOptions::set_default_write_batch_flush_threshold`], which keeps
+    /// memory bounded for very large transactions. Experimental, and the least mature of
+    /// the three.
+    WriteUnprepared = ffi::rocksdb_txndb_write_policy_write_unprepared as isize,
+}
+
+impl TxnDBWritePolicy {
+    /// Decodes a raw `rocksdb::TxnDBWritePolicy`.
+    ///
+    /// This covers every policy RocksDB defines today, so `None` only means a future
+    /// release added one.
+    pub(crate) fn try_from_raw(raw: c_int) -> Option<Self> {
+        match raw {
+            n if n == TxnDBWritePolicy::WriteCommitted as c_int => {
+                Some(TxnDBWritePolicy::WriteCommitted)
+            }
+            n if n == TxnDBWritePolicy::WritePrepared as c_int => {
+                Some(TxnDBWritePolicy::WritePrepared)
+            }
+            n if n == TxnDBWritePolicy::WriteUnprepared as c_int => {
+                Some(TxnDBWritePolicy::WriteUnprepared)
+            }
+            _ => None,
+        }
+    }
+}
+
 pub struct TransactionDBOptions {
     pub(crate) inner: *mut ffi::rocksdb_transactiondb_options_t,
 }
@@ -619,6 +679,29 @@ impl TransactionDBOptions {
             );
         }
     }
+
+    /// Sets when transaction data becomes visible in the DB.
+    ///
+    /// Only read while opening a [`TransactionDB`], so this has to be set before the
+    /// open call. See [`TxnDBWritePolicy`] for what each policy costs.
+    ///
+    /// Default: [`TxnDBWritePolicy::WriteCommitted`].
+    ///
+    /// [`TransactionDB`]: crate::TransactionDB
+    pub fn set_write_policy(&mut self, policy: TxnDBWritePolicy) {
+        unsafe {
+            ffi::rocksdb_transactiondb_options_set_write_policy(self.inner, policy as c_int);
+        }
+    }
+
+    /// The write policy set by [`Self::set_write_policy`].
+    ///
+    /// [`TxnDBWritePolicy`] covers every policy RocksDB defines today, so `None` only
+    /// shows up if a future release adds one.
+    pub fn get_write_policy(&self) -> Option<TxnDBWritePolicy> {
+        let raw = unsafe { ffi::rocksdb_transactiondb_options_get_write_policy(self.inner) };
+        TxnDBWritePolicy::try_from_raw(raw)
+    }
 }
 
 impl Drop for TransactionDBOptions {
@@ -689,6 +772,221 @@ impl Drop for OptimisticTransactionOptions {
     fn drop(&mut self) {
         unsafe {
             ffi::rocksdb_optimistictransaction_options_destroy(self.inner);
+        }
+    }
+}
+
+/// How an [`OptimisticTransactionDB`] checks a transaction for write conflicts at commit.
+///
+/// [`OptimisticTransactionDB`]: crate::OptimisticTransactionDB
+// The C API has no constants for these, unlike `TxnDBWritePolicy`. The discriminants are
+// spelled out in `rocksdb::OccValidationPolicy` in
+// include/rocksdb/utilities/optimistic_transaction_db.h and must stay in step with it.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde1", derive(serde::Serialize, serde::Deserialize))]
+pub enum OccValidationPolicy {
+    /// Validate serially at commit, after the transaction has entered the write group.
+    ///
+    /// Validation is single threaded because the write group is. Simple, but it can
+    /// suffer from high mutex contention. See
+    /// <https://github.com/facebook/rocksdb/issues/4402>.
+    ValidateSerial = 0,
+
+    /// Validate in parallel before the transaction enters the write group.
+    ///
+    /// Each transaction takes locks for its write set in a well defined order, off the
+    /// write group, which cuts the mutex contention. This is the default. The locks come
+    /// from the pool sized by [`OptimisticTransactionDBOptions::set_occ_lock_buckets`]
+    /// or supplied by [`OptimisticTransactionDBOptions::set_shared_lock_buckets`].
+    ValidateParallel = 1,
+}
+
+impl OccValidationPolicy {
+    /// Decodes a raw `rocksdb::OccValidationPolicy`.
+    ///
+    /// This covers every policy RocksDB defines today, so `None` only means a future
+    /// release added one.
+    pub(crate) fn try_from_raw(raw: c_int) -> Option<Self> {
+        match raw {
+            n if n == OccValidationPolicy::ValidateSerial as c_int => {
+                Some(OccValidationPolicy::ValidateSerial)
+            }
+            n if n == OccValidationPolicy::ValidateParallel as c_int => {
+                Some(OccValidationPolicy::ValidateParallel)
+            }
+            _ => None,
+        }
+    }
+}
+
+struct OccLockBucketsWrapper {
+    inner: NonNull<ffi::rocksdb_optimistictransactiondb_lock_buckets_t>,
+}
+
+// The C handle is a `std::shared_ptr<OccLockBuckets>` and nothing else, so moving it
+// between threads moves a refcounted pointer. Every call this crate makes on it either
+// reads the pool's memory usage through a `const` method or copies the `shared_ptr` into
+// an options struct, and shared_ptr refcounting is atomic. The `Arc` in `OccLockBuckets`
+// is what guarantees the `_destroy` call is unshared.
+unsafe impl Send for OccLockBucketsWrapper {}
+unsafe impl Sync for OccLockBucketsWrapper {}
+
+impl Drop for OccLockBucketsWrapper {
+    fn drop(&mut self) {
+        unsafe {
+            ffi::rocksdb_optimistictransactiondb_lock_buckets_destroy(self.inner.as_ptr());
+        }
+    }
+}
+
+/// A pool of mutex locks used to validate optimistic transactions.
+///
+/// Only consulted when the validation policy is
+/// [`OccValidationPolicy::ValidateParallel`]. Hand it to
+/// [`OptimisticTransactionDBOptions::set_shared_lock_buckets`] to make several databases
+/// validate against one pool instead of each allocating its own.
+///
+/// Cloning is cheap and produces another handle to the same pool. The pool itself lives
+/// as long as any handle or any options value or database that was given one, so it is
+/// fine to drop every Rust handle right after the `set_shared_lock_buckets` call.
+#[derive(Clone)]
+pub struct OccLockBuckets(Arc<OccLockBucketsWrapper>);
+
+impl OccLockBuckets {
+    /// Allocates a pool of `bucket_count` locks.
+    ///
+    /// More buckets mean less contention between transactions validating at the same
+    /// time, and more memory. `cache_aligned` pads each lock out to a cache line, which
+    /// avoids false sharing between neighbouring buckets at the cost of more memory
+    /// again. RocksDB has historically used `false` here.
+    ///
+    /// # Panics
+    ///
+    /// Panics if RocksDB could not allocate the pool.
+    pub fn new(bucket_count: usize, cache_aligned: bool) -> Self {
+        let inner = NonNull::new(unsafe {
+            ffi::rocksdb_optimistictransactiondb_lock_buckets_create(
+                bucket_count,
+                u8::from(cache_aligned),
+            )
+        })
+        .expect("Could not create RocksDB OCC lock buckets");
+        Self(Arc::new(OccLockBucketsWrapper { inner }))
+    }
+
+    /// Estimates how much memory this pool occupies, in bytes.
+    pub fn approximate_memory_usage(&self) -> usize {
+        unsafe {
+            ffi::rocksdb_optimistictransactiondb_lock_buckets_approximate_memory_usage(
+                self.0.inner.as_ptr(),
+            )
+        }
+    }
+}
+
+/// Options for opening an [`OptimisticTransactionDB`].
+///
+/// These control conflict validation only. Everything else about the database still
+/// comes from [`Options`], which is passed alongside these to the `open` call.
+///
+/// [`OptimisticTransactionDB`]: crate::OptimisticTransactionDB
+/// [`Options`]: crate::Options
+pub struct OptimisticTransactionDBOptions {
+    pub(crate) inner: *mut ffi::rocksdb_optimistictransactiondb_options_t,
+}
+
+// The C handle wraps a plain `OptimisticTransactionDBOptions` struct: an enum, a
+// `uint32_t` and a `shared_ptr`. It owns no thread-local or thread-affine state, so it
+// can move between threads. Every mutating call here takes `&mut self`, so a shared `&`
+// only ever reaches the getters, which read those fields.
+unsafe impl Send for OptimisticTransactionDBOptions {}
+unsafe impl Sync for OptimisticTransactionDBOptions {}
+
+impl Default for OptimisticTransactionDBOptions {
+    fn default() -> Self {
+        let otxn_db_opts = unsafe { ffi::rocksdb_optimistictransactiondb_options_create() };
+        assert!(
+            !otxn_db_opts.is_null(),
+            "Could not create RocksDB optimistic transaction_db options"
+        );
+        Self {
+            inner: otxn_db_opts,
+        }
+    }
+}
+
+impl OptimisticTransactionDBOptions {
+    pub fn new() -> OptimisticTransactionDBOptions {
+        OptimisticTransactionDBOptions::default()
+    }
+
+    /// Specifies how transactions are checked for write conflicts at commit.
+    ///
+    /// Default: [`OccValidationPolicy::ValidateParallel`].
+    pub fn set_validate_policy(&mut self, policy: OccValidationPolicy) {
+        unsafe {
+            ffi::rocksdb_optimistictransactiondb_options_set_validate_policy(
+                self.inner,
+                policy as c_int,
+            );
+        }
+    }
+
+    /// The validation policy set by [`Self::set_validate_policy`].
+    ///
+    /// [`OccValidationPolicy`] covers every policy RocksDB defines today, so `None` only
+    /// shows up if a future release adds one.
+    pub fn get_validate_policy(&self) -> Option<OccValidationPolicy> {
+        let raw =
+            unsafe { ffi::rocksdb_optimistictransactiondb_options_get_validate_policy(self.inner) };
+        OccValidationPolicy::try_from_raw(raw)
+    }
+
+    /// Specifies how many striped mutex locks to allocate for validating transactions.
+    ///
+    /// Only used when the validation policy is
+    /// [`OccValidationPolicy::ValidateParallel`] and no pool was supplied through
+    /// [`Self::set_shared_lock_buckets`]. A larger count potentially reduces contention
+    /// but uses more memory.
+    ///
+    /// Default: 1048576 (1 << 20).
+    pub fn set_occ_lock_buckets(&mut self, num_buckets: u32) {
+        unsafe {
+            ffi::rocksdb_optimistictransactiondb_options_set_occ_lock_buckets(
+                self.inner,
+                num_buckets,
+            );
+        }
+    }
+
+    /// Returns the value of the `occ_lock_buckets` option.
+    pub fn get_occ_lock_buckets(&self) -> u32 {
+        unsafe { ffi::rocksdb_optimistictransactiondb_options_get_occ_lock_buckets(self.inner) }
+    }
+
+    /// Validates against `buckets` instead of a pool private to this database.
+    ///
+    /// Give the same [`OccLockBuckets`] to several databases and they share one set of
+    /// locks, which bounds the total memory spent on validation. Ignored unless the
+    /// validation policy is [`OccValidationPolicy::ValidateParallel`], and it overrides
+    /// [`Self::set_occ_lock_buckets`] when set.
+    ///
+    /// These options take their own reference to the pool, so `buckets` may be dropped
+    /// as soon as this returns.
+    pub fn set_shared_lock_buckets(&mut self, buckets: &OccLockBuckets) {
+        unsafe {
+            ffi::rocksdb_optimistictransactiondb_options_set_shared_lock_buckets(
+                self.inner,
+                buckets.0.inner.as_ptr(),
+            );
+        }
+    }
+}
+
+impl Drop for OptimisticTransactionDBOptions {
+    fn drop(&mut self) {
+        unsafe {
+            ffi::rocksdb_optimistictransactiondb_options_destroy(self.inner);
         }
     }
 }

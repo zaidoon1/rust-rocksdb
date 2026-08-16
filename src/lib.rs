@@ -93,8 +93,10 @@ pub mod backup;
 mod cache;
 pub mod checkpoint;
 mod column_family;
+pub mod compaction;
 pub mod compaction_filter;
 pub mod compaction_filter_factory;
+pub mod compaction_service;
 mod comparator;
 mod db;
 mod db_iterator;
@@ -102,9 +104,12 @@ mod db_options;
 mod db_pinnable_batch;
 mod db_pinnable_slice;
 mod env;
+mod env_options;
 pub mod event_listener;
+pub mod file_checksum;
 mod iter_range;
 pub mod merge_operator;
+pub mod metadata;
 pub mod perf;
 mod prop_name;
 pub mod properties;
@@ -112,23 +117,38 @@ mod slice_transform;
 mod snapshot;
 pub mod sst_file_manager;
 mod sst_file_writer;
+pub mod sst_partitioner;
 pub mod statistics;
+pub mod table_properties;
+pub mod trace;
 mod transactions;
+pub mod wal;
+pub mod wal_filter;
 mod write_batch;
 mod write_batch_with_index;
 mod write_buffer_manager;
 
 pub use crate::{
-    cache::Cache,
+    cache::{Cache, HyperClockCacheOptions, MemoryAllocator},
     column_family::{
         AsColumnFamilyRef, BoundColumnFamily, ColumnFamily, ColumnFamilyDescriptor,
         ColumnFamilyRef, ColumnFamilyTtl, DEFAULT_COLUMN_FAMILY_NAME,
     },
+    compaction::{
+        BlobFileAdditionInfo, BlobFileGarbageInfo, CompactionCancellationToken, CompactionFileInfo,
+        CompactionJobStats, CompactionOptions,
+    },
     compaction_filter::Decision as CompactionDecision,
+    compaction_service::{
+        CompactionService, CompactionServiceJobInfo, CompactionServiceJobStatus,
+        CompactionServiceOptionsOverride, EnvPriority, OpenAndCompactCancellationToken,
+        OpenAndCompactOptions, ScheduleResponse,
+    },
+    comparator::Comparator,
     db::{
-        ColumnFamilyMetaData, DB, DBAccess, DBCommon, DBWithThreadMode, ExportImportFilesMetaData,
-        GetIntoBufferResult, LiveFile, MultiThreaded, PrefixProber, Range, SingleThreaded,
-        ThreadMode,
+        ColumnFamilyMetaData, CompactFilesResult, DB, DBAccess, DBCommon, DBWithThreadMode,
+        ExportImportFilesMetaData, GetIntoBufferResult, LiveFile, MultiThreaded, PrefixProber,
+        Range, SingleThreaded, ThreadMode, TimestampedValue,
     },
     db_iterator::{
         DBIterator, DBIteratorWithThreadMode, DBRawIterator, DBRawIteratorWithThreadMode,
@@ -138,26 +158,43 @@ pub use crate::{
         BlockBasedIndexType, BlockBasedOptions, BlockBasedPinningTier, BottommostLevelCompaction,
         ChecksumType, CompactOptions, CuckooTableOptions, DBCompactionPri, DBCompactionStyle,
         DBCompressionType, DBPath, DBRecoveryMode, DataBlockIndexType, FifoCompactOptions,
-        FlushOptions, ImportColumnFamilyOptions, IndexBlockSearchType, InfoLogger,
+        FlushOptions, FlushWalOptions, ImportColumnFamilyOptions, IndexBlockSearchType, InfoLogger,
         IngestExternalFileOptions, KeyEncodingType, LogLevel, LruCacheOptions, MemtableFactory,
-        Options, PlainTableFactoryOptions, RateLimiterMode, ReadOptions, ReadTier,
-        UniversalCompactOptions, UniversalCompactionStopStyle, WaitForCompactOptions, WriteOptions,
+        Options, PlainTableFactoryOptions, PrepopulateBlobCache, RateLimiterMode, ReadOptions,
+        ReadTier, SizeApproximationFlags, SizeApproximationOptions, UniversalCompactOptions,
+        UniversalCompactionStopStyle, WaitForCompactOptions, WriteOptions,
     },
     db_pinnable_batch::{DBPinnableBatch, DBPinnableBatchIter},
     db_pinnable_slice::DBPinnableSlice,
-    env::Env,
+    env::{Env, IoPriority},
+    env_options::EnvOptions,
+    event_listener::OwnedCompactionJobInfo,
     ffi_util::{CSlice, CStrLike},
+    file_checksum::FileChecksumGenFactory,
     iter_range::{IterateBounds, PrefixRange},
     merge_operator::MergeOperands,
+    metadata::{
+        ColumnFamilyMetaDataOptions, FileType, LevelMetaData, LiveFileStorageInfoEntry,
+        LiveFilesStorageInfo, LiveFilesStorageInfoOptions, SstFileMetaData, Temperature,
+    },
     perf::{PerfContext, PerfMetric, PerfStatsLevel, with_thread_local},
     slice_transform::SliceTransform,
     snapshot::{Snapshot, SnapshotReadOptions, SnapshotWithThreadMode},
     sst_file_manager::SstFileManager,
     sst_file_writer::SstFileWriter,
-    transactions::{
-        OptimisticTransactionDB, OptimisticTransactionOptions, Transaction, TransactionDB,
-        TransactionDBOptions, TransactionOptions,
+    sst_partitioner::SstPartitionerFactory,
+    table_properties::TableProperties,
+    trace::{
+        BlockCacheTraceOptions, BlockCacheTraceWriterOptions, ReplayOptions, Replayer, TraceFilter,
+        TraceOptions, TraceReader,
     },
+    transactions::{
+        OccLockBuckets, OccValidationPolicy, OptimisticTransactionDB,
+        OptimisticTransactionDBOptions, OptimisticTransactionOptions, Transaction, TransactionDB,
+        TransactionDBOptions, TransactionOptions, TxnDBWritePolicy,
+    },
+    wal::{OwnedWalFile, WalFile, WalFileType, WalFiles, WalReadOptions},
+    wal_filter::{WalFilter, WalRecordAction},
     write_batch::{
         WriteBatch, WriteBatchIterator, WriteBatchIteratorCf, WriteBatchWithTransaction,
     },

@@ -17,7 +17,8 @@ use std::marker::PhantomData;
 
 use crate::{
     AsColumnFamilyRef, DBIteratorWithThreadMode, DBPinnableSlice, DBRawIteratorWithThreadMode,
-    Direction, Error, IteratorMode, ReadOptions, SnapshotWithThreadMode, WriteBatchWithTransaction,
+    Direction, Error, IteratorMode, ReadOptions, SnapshotWithThreadMode, WriteBatchWithIndex,
+    WriteBatchWithTransaction,
     db::{DBAccess, convert_values},
     ffi,
 };
@@ -636,6 +637,148 @@ impl<DB> Transaction<'_, DB> {
         convert_values(values, values_sizes, errors)
     }
 
+    /// Return the values associated with the given keys, marking every key read for update.
+    ///
+    /// See [`multi_get_for_update_cf_opt`] for details.
+    ///
+    /// [`multi_get_for_update_cf_opt`]: Self::multi_get_for_update_cf_opt
+    pub fn multi_get_for_update<K, I>(&self, keys: I) -> Vec<Result<Option<Vec<u8>>, Error>>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = K>,
+    {
+        DEFAULT_READ_OPTS.with(|opts| self.multi_get_for_update_opt(keys, opts))
+    }
+
+    /// Return the values associated with the given keys using read options, marking every key
+    /// read for update.
+    ///
+    /// See [`multi_get_for_update_cf_opt`] for details.
+    ///
+    /// [`multi_get_for_update_cf_opt`]: Self::multi_get_for_update_cf_opt
+    pub fn multi_get_for_update_opt<K, I>(
+        &self,
+        keys: I,
+        readopts: &ReadOptions,
+    ) -> Vec<Result<Option<Vec<u8>>, Error>>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = K>,
+    {
+        let owned_keys: Vec<K> = keys.into_iter().collect();
+        let (ptr_keys, keys_sizes): (Vec<*const c_char>, Vec<usize>) = owned_keys
+            .iter()
+            .map(|k| {
+                let key = k.as_ref();
+                (key.as_ptr() as *const c_char, key.len())
+            })
+            .unzip();
+
+        let mut values: Vec<*mut c_char> = Vec::with_capacity(ptr_keys.len());
+        let mut values_sizes: Vec<usize> = Vec::with_capacity(ptr_keys.len());
+        let mut errors: Vec<*mut c_char> = Vec::with_capacity(ptr_keys.len());
+        unsafe {
+            ffi::rocksdb_transaction_multi_get_for_update(
+                self.inner,
+                readopts.inner,
+                ptr_keys.len(),
+                ptr_keys.as_ptr(),
+                keys_sizes.as_ptr(),
+                values.as_mut_ptr(),
+                values_sizes.as_mut_ptr(),
+                errors.as_mut_ptr(),
+            );
+        }
+
+        unsafe {
+            values.set_len(ptr_keys.len());
+            values_sizes.set_len(ptr_keys.len());
+            errors.set_len(ptr_keys.len());
+        }
+
+        convert_values(values, values_sizes, errors)
+    }
+
+    /// Return the values associated with the given keys and column families, marking every key
+    /// read for update.
+    ///
+    /// See [`multi_get_for_update_cf_opt`] for details.
+    ///
+    /// [`multi_get_for_update_cf_opt`]: Self::multi_get_for_update_cf_opt
+    pub fn multi_get_for_update_cf<'a, 'b: 'a, K, I, W>(
+        &'a self,
+        keys: I,
+    ) -> Vec<Result<Option<Vec<u8>>, Error>>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = (&'b W, K)>,
+        W: 'b + AsColumnFamilyRef,
+    {
+        DEFAULT_READ_OPTS.with(|opts| self.multi_get_for_update_cf_opt(keys, opts))
+    }
+
+    /// Return the values associated with the given keys and column families using read options,
+    /// marking every key read for update.
+    ///
+    /// This is [`get_for_update_cf_opt`] over a batch of keys: each key is fetched and
+    /// conflict checked, so the transaction only commits if none of them were written
+    /// outside it after the read (or after the snapshot, if one is set). There is no
+    /// `exclusive` parameter because RocksDB always takes the lock exclusively here.
+    ///
+    /// Locking is all or nothing. RocksDB locks every key before reading any of them,
+    /// and if one lock fails it returns that same error for every entry without
+    /// performing the reads. Once the locks are held, each key is read on its own, so
+    /// after that point the results can differ per key.
+    ///
+    /// [`get_for_update_cf_opt`]: Self::get_for_update_cf_opt
+    pub fn multi_get_for_update_cf_opt<'a, 'b: 'a, K, I, W>(
+        &'a self,
+        keys: I,
+        readopts: &ReadOptions,
+    ) -> Vec<Result<Option<Vec<u8>>, Error>>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = (&'b W, K)>,
+        W: 'b + AsColumnFamilyRef,
+    {
+        let cfs_and_owned_keys: Vec<(&'b W, K)> = keys.into_iter().collect();
+        let (ptr_keys, keys_sizes): (Vec<*const c_char>, Vec<usize>) = cfs_and_owned_keys
+            .iter()
+            .map(|(_, k)| {
+                let key = k.as_ref();
+                (key.as_ptr() as *const c_char, key.len())
+            })
+            .unzip();
+        let ptr_cfs: Vec<*const ffi::rocksdb_column_family_handle_t> = cfs_and_owned_keys
+            .iter()
+            .map(|(c, _)| c.inner().cast_const())
+            .collect();
+        let mut values: Vec<*mut c_char> = Vec::with_capacity(ptr_keys.len());
+        let mut values_sizes: Vec<usize> = Vec::with_capacity(ptr_keys.len());
+        let mut errors: Vec<*mut c_char> = Vec::with_capacity(ptr_keys.len());
+        unsafe {
+            ffi::rocksdb_transaction_multi_get_for_update_cf(
+                self.inner,
+                readopts.inner,
+                ptr_cfs.as_ptr(),
+                ptr_keys.len(),
+                ptr_keys.as_ptr(),
+                keys_sizes.as_ptr(),
+                values.as_mut_ptr(),
+                values_sizes.as_mut_ptr(),
+                errors.as_mut_ptr(),
+            );
+        }
+
+        unsafe {
+            values.set_len(ptr_keys.len());
+            values_sizes.set_len(ptr_keys.len());
+            errors.set_len(ptr_keys.len());
+        }
+
+        convert_values(values, values_sizes, errors)
+    }
+
     /// Put the key value in default column family and do conflict checking on the key.
     ///
     /// See [`put_cf`] for details.
@@ -936,6 +1079,60 @@ impl<DB> Transaction<'_, DB> {
             ));
         }
         Ok(())
+    }
+
+    /// Replays the writes indexed by `writebatch` into this transaction.
+    ///
+    /// RocksDB walks the batch underlying the index and re-applies each record through
+    /// this transaction's own put, merge and delete, so the keys end up tracked and
+    /// conflict checked as if they had been written on the transaction directly. Under
+    /// [`TxnDBWritePolicy::WriteUnprepared`] the records are already in the DB from WAL
+    /// replay, so RocksDB only re-tracks the keys instead of rewriting them.
+    ///
+    /// Nothing is cleared first, so this layers on top of whatever the transaction
+    /// already holds. Run it on a fresh transaction that has not been prepared or
+    /// committed, the way RocksDB uses it when rebuilding prepared transactions during
+    /// recovery. `writebatch` is only read, never taken over or modified.
+    ///
+    /// Returns an error if the batch carries two-phase commit markers, or if a replayed
+    /// write fails for any of the reasons listed on [`put_cf`].
+    ///
+    /// [`TxnDBWritePolicy::WriteUnprepared`]: crate::TxnDBWritePolicy::WriteUnprepared
+    /// [`put_cf`]: Self::put_cf
+    pub fn rebuild_from_writebatch_wi(
+        &self,
+        writebatch: &WriteBatchWithIndex,
+    ) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_transaction_rebuild_from_writebatch_wi(
+                self.inner,
+                writebatch.inner
+            ));
+        }
+        Ok(())
+    }
+
+    /// Appends a blob of arbitrary size to the records in this transaction.
+    ///
+    /// The blob goes into the WAL only. It is never written to an SST file and is never
+    /// visible to any read, so no `get` or iterator will ever return it. Iterating the
+    /// transaction's write batch surfaces it through
+    /// [`WriteBatchIterator::log_data`], interleaved with the puts, deletes and merges
+    /// in insertion order. It consumes no sequence number and does not change the
+    /// batch's count.
+    ///
+    /// A typical use is stamping the transaction log with data needed for replication.
+    ///
+    /// [`WriteBatchIterator::log_data`]: crate::WriteBatchIterator::log_data
+    pub fn put_log_data<V: AsRef<[u8]>>(&self, log_data: V) {
+        let log_data = log_data.as_ref();
+        unsafe {
+            ffi::rocksdb_transaction_put_log_data(
+                self.inner,
+                log_data.as_ptr() as *const c_char,
+                log_data.len() as size_t,
+            );
+        }
     }
 
     /// Sets the commit timestamp for this transaction.

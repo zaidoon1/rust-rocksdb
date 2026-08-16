@@ -30,9 +30,9 @@ use crate::column_family::ColumnFamilyTtl;
 use crate::{
     AsColumnFamilyRef, BoundColumnFamily, ColumnFamily, ColumnFamilyDescriptor, DB,
     DBIteratorWithThreadMode, DBPinnableSlice, DBRawIteratorWithThreadMode,
-    DEFAULT_COLUMN_FAMILY_NAME, Direction, Error, FlushOptions, IteratorMode, MultiThreaded,
-    Options, ReadOptions, SingleThreaded, SnapshotWithThreadMode, ThreadMode, Transaction,
-    TransactionDBOptions, TransactionOptions, WriteBatchWithTransaction, WriteOptions,
+    DEFAULT_COLUMN_FAMILY_NAME, Direction, Error, FlushOptions, FlushWalOptions, IteratorMode,
+    MultiThreaded, Options, ReadOptions, SingleThreaded, SnapshotWithThreadMode, ThreadMode,
+    Transaction, TransactionDBOptions, TransactionOptions, WriteBatchWithTransaction, WriteOptions,
     column_family::UnboundColumnFamily,
     db::{DBAccess, convert_values},
     db_options::OptionsMustOutliveDB,
@@ -434,6 +434,22 @@ impl<T: ThreadMode> TransactionDB<T> {
             ffi_try!(ffi::rocksdb_transactiondb_flush_wal(
                 self.inner,
                 c_uchar::from(sync)
+            ));
+        }
+        Ok(())
+    }
+
+    /// Flushes the WAL buffer using the given options.
+    ///
+    /// [`flush_wal`] only exposes the sync flag. Use this when the flush needs anything
+    /// else [`FlushWalOptions`] carries, such as the rate limiter priority.
+    ///
+    /// [`flush_wal`]: Self::flush_wal
+    pub fn flush_wal_opt(&self, flushopts: &FlushWalOptions) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_transactiondb_flush_wal_with_options(
+                self.inner,
+                flushopts.as_ptr()
             ));
         }
         Ok(())

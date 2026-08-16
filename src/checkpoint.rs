@@ -19,7 +19,8 @@
 
 use crate::db::{DBInner, ExportImportFilesMetaData};
 use crate::{
-    AsColumnFamilyRef, DBCommon, Error, ThreadMode, TransactionDB, ffi, ffi_util::to_cpath,
+    AsColumnFamilyRef, DBCommon, Error, OptimisticTransactionDB, ThreadMode, TransactionDB, ffi,
+    ffi_util::to_cpath,
 };
 use std::{marker::PhantomData, path::Path};
 
@@ -308,6 +309,114 @@ impl<'db> TransactionDBCheckpoint<'db> {
 }
 
 impl Drop for TransactionDBCheckpoint<'_> {
+    fn drop(&mut self) {
+        unsafe {
+            ffi::rocksdb_checkpoint_object_destroy(self.inner);
+        }
+    }
+}
+
+/// `OptimisticTransactionDB`'s checkpoint object.
+/// Used to create checkpoints of the specified `OptimisticTransactionDB` from
+/// time to time.
+///
+/// An `OptimisticTransactionDBCheckpoint` must not outlive the
+/// `OptimisticTransactionDB` it was created from:
+///
+/// ```compile_fail,E0597
+/// use rust_rocksdb::{
+///     checkpoint::OptimisticTransactionDBCheckpoint, OptimisticTransactionDB, SingleThreaded,
+/// };
+///
+/// let _checkpoint = {
+///     let db = OptimisticTransactionDB::<SingleThreaded>::open_default("foo").unwrap();
+///     OptimisticTransactionDBCheckpoint::new(&db)
+/// };
+/// ```
+pub struct OptimisticTransactionDBCheckpoint<'db> {
+    inner: *mut ffi::rocksdb_checkpoint_t,
+    _db: PhantomData<&'db ()>,
+}
+
+impl<'db> OptimisticTransactionDBCheckpoint<'db> {
+    /// Creates new checkpoint object for a specific `OptimisticTransactionDB`.
+    ///
+    /// Does not actually produce checkpoints, call `.create_checkpoint()` to
+    /// produce one.
+    pub fn new<T: ThreadMode>(db: &'db OptimisticTransactionDB<T>) -> Result<Self, Error> {
+        let checkpoint: *mut ffi::rocksdb_checkpoint_t;
+
+        unsafe {
+            checkpoint = ffi_try!(
+                ffi::rocksdb_optimistictransactiondb_checkpoint_object_create(db.inner.db)
+            );
+        }
+
+        if checkpoint.is_null() {
+            return Err(Error::new("Could not create checkpoint object.".to_owned()));
+        }
+
+        Ok(Self {
+            inner: checkpoint,
+            _db: PhantomData,
+        })
+    }
+
+    /// Creates a new physical RocksDB checkpoint in the directory specified by `path`.
+    ///
+    /// This method uses the default `log_size_for_flush` value (`0`), which instructs
+    /// RocksDB to flush memtables as needed before creating the checkpoint.
+    pub fn create_checkpoint<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
+        self.create_checkpoint_with_log_size(path, DEFAULT_LOG_SIZE_FOR_FLUSH)
+    }
+
+    /// Creates a new physical RocksDB checkpoint in `path`, allowing the caller to
+    /// control `log_size_for_flush`.
+    pub fn create_checkpoint_with_log_size<P: AsRef<Path>>(
+        &self,
+        path: P,
+        log_size_for_flush: u64,
+    ) -> Result<(), Error> {
+        let c_path = to_cpath(path)?;
+        unsafe {
+            ffi_try!(ffi::rocksdb_checkpoint_create(
+                self.inner,
+                c_path.as_ptr(),
+                log_size_for_flush,
+            ));
+        }
+        Ok(())
+    }
+
+    /// Export a specified Column Family.
+    ///
+    /// Creates copies of the live SST files at the specified export path.
+    ///
+    /// - SST files will be created as hard links when the directory specified
+    ///   is in the same partition as the db directory, copied otherwise.
+    /// - the path must not yet exist, a new directory is created as part of the export.
+    /// - Always triggers a flush.
+    ///
+    /// See also: [`DB::create_column_family_with_import`](crate::DB::create_column_family_with_import).
+    pub fn export_column_family<P: AsRef<Path>>(
+        &self,
+        column_family: &impl AsColumnFamilyRef,
+        path: P,
+    ) -> Result<ExportImportFilesMetaData, Error> {
+        let c_path = to_cpath(path)?;
+        let column_family_handle = column_family.inner();
+        let metadata = unsafe {
+            ffi_try!(ffi::rocksdb_checkpoint_export_column_family(
+                self.inner,
+                column_family_handle,
+                c_path.as_ptr(),
+            ))
+        };
+        Ok(ExportImportFilesMetaData { inner: metadata })
+    }
+}
+
+impl Drop for OptimisticTransactionDBCheckpoint<'_> {
     fn drop(&mut self) {
         unsafe {
             ffi::rocksdb_checkpoint_object_destroy(self.inner);

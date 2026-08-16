@@ -20,7 +20,8 @@ use libc::{c_char, c_int, size_t};
 use crate::column_family::ColumnFamilyTtl;
 use crate::{
     AsColumnFamilyRef, ColumnFamilyDescriptor, DEFAULT_COLUMN_FAMILY_NAME, Error,
-    OptimisticTransactionOptions, Options, ThreadMode, Transaction, WriteOptions,
+    OptimisticTransactionDBOptions, OptimisticTransactionOptions, Options, ThreadMode, Transaction,
+    WriteOptions,
     db::{DBCommon, DBInner},
     ffi,
     ffi_util::to_cpath,
@@ -85,7 +86,10 @@ pub type OptimisticTransactionDB<T = crate::MultiThreaded> =
 
 pub struct OptimisticTransactionDBInner {
     base: *mut ffi::rocksdb_t,
-    db: *mut ffi::rocksdb_optimistictransactiondb_t,
+    /// The stacked `OptimisticTransactionDB`, as opposed to `base`, which is the plain DB
+    /// underneath it. Reachable from the crate so `checkpoint` can build a checkpoint on
+    /// the stacked DB rather than the base.
+    pub(crate) db: *mut ffi::rocksdb_optimistictransactiondb_t,
 }
 
 impl DBInner for OptimisticTransactionDBInner {
@@ -134,7 +138,7 @@ impl<T: ThreadMode> OptimisticTransactionDB<T> {
             .into_iter()
             .map(|name| ColumnFamilyDescriptor::new(name.as_ref(), Options::default()));
 
-        Self::open_cf_descriptors_internal(opts, path, cfs)
+        Self::open_cf_descriptors_internal(opts, None, path, cfs)
     }
 
     /// Opens a database with the given database options and column family descriptors.
@@ -143,11 +147,77 @@ impl<T: ThreadMode> OptimisticTransactionDB<T> {
         P: AsRef<Path>,
         I: IntoIterator<Item = ColumnFamilyDescriptor>,
     {
-        Self::open_cf_descriptors_internal(opts, path, cfs)
+        Self::open_cf_descriptors_internal(opts, None, path, cfs)
+    }
+
+    /// Opens the database with the specified database and conflict validation options.
+    ///
+    /// Same as [`open`], plus control over how commits are validated. See
+    /// [`OptimisticTransactionDBOptions`].
+    ///
+    /// [`open`]: Self::open
+    pub fn open_with_otxn_db_options<P: AsRef<Path>>(
+        opts: &Options,
+        otxn_db_opts: &OptimisticTransactionDBOptions,
+        path: P,
+    ) -> Result<Self, Error> {
+        Self::open_cf_with_otxn_db_options(opts, otxn_db_opts, path, None::<&str>)
+    }
+
+    /// Opens a database with the given database and conflict validation options and column
+    /// family names.
+    ///
+    /// Same as [`open_cf`], plus control over how commits are validated. Column families
+    /// opened this way are created with default `Options`, including `default`.
+    ///
+    /// [`open_cf`]: Self::open_cf
+    pub fn open_cf_with_otxn_db_options<P, I, N>(
+        opts: &Options,
+        otxn_db_opts: &OptimisticTransactionDBOptions,
+        path: P,
+        cfs: I,
+    ) -> Result<Self, Error>
+    where
+        P: AsRef<Path>,
+        I: IntoIterator<Item = N>,
+        N: AsRef<str>,
+    {
+        let cfs = cfs
+            .into_iter()
+            .map(|name| ColumnFamilyDescriptor::new(name.as_ref(), Options::default()));
+
+        Self::open_cf_descriptors_internal(opts, Some(otxn_db_opts), path, cfs)
+    }
+
+    /// Opens a database with the given database and conflict validation options and column
+    /// family descriptors.
+    ///
+    /// Same as [`open_cf_descriptors`], plus control over how commits are validated.
+    ///
+    /// [`open_cf_descriptors`]: Self::open_cf_descriptors
+    pub fn open_cf_descriptors_with_otxn_db_options<P, I>(
+        opts: &Options,
+        otxn_db_opts: &OptimisticTransactionDBOptions,
+        path: P,
+        cfs: I,
+    ) -> Result<Self, Error>
+    where
+        P: AsRef<Path>,
+        I: IntoIterator<Item = ColumnFamilyDescriptor>,
+    {
+        Self::open_cf_descriptors_internal(opts, Some(otxn_db_opts), path, cfs)
     }
 
     /// Internal implementation for opening RocksDB.
-    fn open_cf_descriptors_internal<P, I>(opts: &Options, path: P, cfs: I) -> Result<Self, Error>
+    ///
+    /// `otxn_db_opts` of `None` picks the C entry point that does not take them and lets
+    /// RocksDB supply its own defaults.
+    fn open_cf_descriptors_internal<P, I>(
+        opts: &Options,
+        otxn_db_opts: Option<&OptimisticTransactionDBOptions>,
+        path: P,
+        cfs: I,
+    ) -> Result<Self, Error>
     where
         P: AsRef<Path>,
         I: IntoIterator<Item = ColumnFamilyDescriptor>,
@@ -169,7 +239,7 @@ impl<T: ThreadMode> OptimisticTransactionDB<T> {
         let mut cf_map = BTreeMap::new();
 
         if cfs.is_empty() {
-            db = Self::open_raw(opts, &cpath)?;
+            db = Self::open_raw(opts, otxn_db_opts, &cpath)?;
         } else {
             let mut cfs_v = cfs;
             // Always open the default column family.
@@ -197,7 +267,15 @@ impl<T: ThreadMode> OptimisticTransactionDB<T> {
                 .map(|cf| cf.options.inner.cast_const())
                 .collect();
 
-            db = Self::open_cf_raw(opts, &cpath, &cfs_v, &cfnames, &cfopts, &mut cfhandles)?;
+            db = Self::open_cf_raw(
+                opts,
+                otxn_db_opts,
+                &cpath,
+                &cfs_v,
+                &cfnames,
+                &cfopts,
+                &mut cfhandles,
+            )?;
 
             for handle in &cfhandles {
                 if handle.is_null() {
@@ -235,19 +313,31 @@ impl<T: ThreadMode> OptimisticTransactionDB<T> {
 
     fn open_raw(
         opts: &Options,
+        otxn_db_opts: Option<&OptimisticTransactionDBOptions>,
         cpath: &CString,
     ) -> Result<*mut ffi::rocksdb_optimistictransactiondb_t, Error> {
         unsafe {
-            let db = ffi_try!(ffi::rocksdb_optimistictransactiondb_open(
-                opts.inner,
-                cpath.as_ptr()
-            ));
+            let db = if let Some(otxn_db_opts) = otxn_db_opts {
+                ffi_try!(
+                    ffi::rocksdb_optimistictransactiondb_open_with_otxn_db_options(
+                        opts.inner,
+                        otxn_db_opts.inner,
+                        cpath.as_ptr()
+                    )
+                )
+            } else {
+                ffi_try!(ffi::rocksdb_optimistictransactiondb_open(
+                    opts.inner,
+                    cpath.as_ptr()
+                ))
+            };
             Ok(db)
         }
     }
 
     fn open_cf_raw(
         opts: &Options,
+        otxn_db_opts: Option<&OptimisticTransactionDBOptions>,
         cpath: &CString,
         cfs_v: &[ColumnFamilyDescriptor],
         cfnames: &[*const c_char],
@@ -255,14 +345,28 @@ impl<T: ThreadMode> OptimisticTransactionDB<T> {
         cfhandles: &mut [*mut ffi::rocksdb_column_family_handle_t],
     ) -> Result<*mut ffi::rocksdb_optimistictransactiondb_t, Error> {
         unsafe {
-            let db = ffi_try!(ffi::rocksdb_optimistictransactiondb_open_column_families(
-                opts.inner,
-                cpath.as_ptr(),
-                cfs_v.len() as c_int,
-                cfnames.as_ptr(),
-                cfopts.as_ptr(),
-                cfhandles.as_mut_ptr(),
-            ));
+            let db = if let Some(otxn_db_opts) = otxn_db_opts {
+                ffi_try!(
+                    ffi::rocksdb_optimistictransactiondb_open_column_families_with_otxn_db_options(
+                        opts.inner,
+                        otxn_db_opts.inner,
+                        cpath.as_ptr(),
+                        cfs_v.len() as c_int,
+                        cfnames.as_ptr(),
+                        cfopts.as_ptr(),
+                        cfhandles.as_mut_ptr(),
+                    )
+                )
+            } else {
+                ffi_try!(ffi::rocksdb_optimistictransactiondb_open_column_families(
+                    opts.inner,
+                    cpath.as_ptr(),
+                    cfs_v.len() as c_int,
+                    cfnames.as_ptr(),
+                    cfopts.as_ptr(),
+                    cfhandles.as_mut_ptr(),
+                ))
+            };
             Ok(db)
         }
     }

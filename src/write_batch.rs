@@ -125,6 +125,12 @@ pub trait WriteBatchIterator {
     fn put(&mut self, key: &[u8], value: &[u8]);
     /// Called with a key that was `delete`d from the batch.
     fn delete(&mut self, key: &[u8]);
+    /// Called with a blob that was appended by
+    /// [`put_log_data`](WriteBatchWithTransaction::put_log_data).
+    ///
+    /// Log data is interleaved with the puts and deletes in insertion order.
+    /// The default implementation ignores it.
+    fn log_data(&mut self, _blob: &[u8]) {}
 }
 
 /// Receives the puts, deletes, and merges of a write batch with column family
@@ -147,9 +153,16 @@ pub trait WriteBatchIteratorCf {
     /// Merge operations combine the provided value with the existing value at
     /// the key using a database-defined merge operator.
     fn merge_cf(&mut self, cf_id: u32, key: &[u8], value: &[u8]);
+    /// Called with a blob that was appended by
+    /// [`put_log_data`](WriteBatchWithTransaction::put_log_data).
+    ///
+    /// Log data belongs to no column family, so there is no id here. It is
+    /// interleaved with the other records in insertion order. The default
+    /// implementation ignores it.
+    fn log_data(&mut self, _blob: &[u8]) {}
 }
 
-unsafe extern "C" fn writebatch_put_callback<T: WriteBatchIterator>(
+pub(crate) unsafe extern "C" fn writebatch_put_callback<T: WriteBatchIterator>(
     state: *mut c_void,
     k: *const c_char,
     klen: usize,
@@ -164,7 +177,7 @@ unsafe extern "C" fn writebatch_put_callback<T: WriteBatchIterator>(
     }
 }
 
-unsafe extern "C" fn writebatch_delete_callback<T: WriteBatchIterator>(
+pub(crate) unsafe extern "C" fn writebatch_delete_callback<T: WriteBatchIterator>(
     state: *mut c_void,
     k: *const c_char,
     klen: usize,
@@ -174,6 +187,37 @@ unsafe extern "C" fn writebatch_delete_callback<T: WriteBatchIterator>(
         let key = slice::from_raw_parts(k.cast::<u8>(), klen);
         callbacks.delete(key);
     }
+}
+
+unsafe extern "C" fn writebatch_log_data_callback<T: WriteBatchIterator>(
+    state: *mut c_void,
+    blob: *const c_char,
+    blob_len: usize,
+) {
+    unsafe {
+        let callbacks = &mut *(state as *mut T);
+        callbacks.log_data(slice::from_raw_parts(blob.cast::<u8>(), blob_len));
+    }
+}
+
+unsafe extern "C" fn writebatch_log_data_cf_callback<T: WriteBatchIteratorCf>(
+    state: *mut c_void,
+    blob: *const c_char,
+    blob_len: usize,
+) {
+    unsafe {
+        let callbacks = &mut *(state as *mut T);
+        callbacks.log_data(slice::from_raw_parts(blob.cast::<u8>(), blob_len));
+    }
+}
+
+/// Trampoline for `rocksdb_writebatch{,_wi}_update_timestamps`, which asks the
+/// caller how wide the timestamp is for each column family it encounters.
+pub(crate) unsafe extern "C" fn get_ts_size_callback<F: FnMut(u32) -> usize>(
+    state: *mut c_void,
+    cf_id: u32,
+) -> size_t {
+    unsafe { (*(state as *mut F))(cf_id) }
 }
 
 unsafe extern "C" fn writebatch_put_cf_callback<T: WriteBatchIteratorCf>(
@@ -278,26 +322,27 @@ impl<const TRANSACTION: bool> WriteBatchWithTransaction<TRANSACTION> {
         self.len() == 0
     }
 
-    /// Iterate the put and delete operations within this write batch. Note that
-    /// this does _not_ return an `Iterator` but instead will invoke the `put()`
-    /// and `delete()` member functions of the provided `WriteBatchIterator`
-    /// trait implementation.
+    /// Iterate the put, delete, and log data operations within this write
+    /// batch. Note that this does _not_ return an `Iterator` but instead will
+    /// invoke the `put()`, `delete()`, and `log_data()` member functions of the
+    /// provided `WriteBatchIterator` trait implementation.
     pub fn iterate<T: WriteBatchIterator>(&self, callbacks: &mut T) {
         let state = std::ptr::from_mut::<T>(callbacks) as *mut c_void;
         unsafe {
-            ffi::rocksdb_writebatch_iterate(
+            ffi::rocksdb_writebatch_iterate_ld(
                 self.inner,
                 state,
                 Some(writebatch_put_callback::<T>),
                 Some(writebatch_delete_callback::<T>),
+                Some(writebatch_log_data_callback::<T>),
             );
         }
     }
 
-    /// Iterate the put, delete, and merge operations within this write batch with column family
-    /// information. Note that this does _not_ return an `Iterator` but instead will invoke the
-    /// `put_cf()`, `delete_cf()`, and `merge_cf()` member functions of the provided
-    /// `WriteBatchIteratorCf` trait implementation.
+    /// Iterate the put, delete, merge, and log data operations within this write batch with
+    /// column family information. Note that this does _not_ return an `Iterator` but instead will
+    /// invoke the `put_cf()`, `delete_cf()`, `merge_cf()`, and `log_data()` member functions of
+    /// the provided `WriteBatchIteratorCf` trait implementation.
     ///
     /// # Notes
     /// - For operations on the default column family ("default"), the `cf_id` parameter passed to
@@ -305,12 +350,13 @@ impl<const TRANSACTION: bool> WriteBatchWithTransaction<TRANSACTION> {
     pub fn iterate_cf<T: WriteBatchIteratorCf>(&self, callbacks: &mut T) {
         let state = std::ptr::from_mut::<T>(callbacks) as *mut c_void;
         unsafe {
-            ffi::rocksdb_writebatch_iterate_cf(
+            ffi::rocksdb_writebatch_iterate_cf_ld(
                 self.inner,
                 state,
                 Some(writebatch_put_cf_callback::<T>),
                 Some(writebatch_delete_cf_callback::<T>),
                 Some(writebatch_merge_cf_callback::<T>),
+                Some(writebatch_log_data_cf_callback::<T>),
             );
         }
     }
@@ -587,6 +633,66 @@ impl<const TRANSACTION: bool> WriteBatchWithTransaction<TRANSACTION> {
         Ok(())
     }
 
+    /// Removes the database entry for a key that was written exactly once.
+    ///
+    /// This is a cheaper delete than [`delete`](Self::delete), but it is only
+    /// correct when the key has had at most one `put` and no `merge` since the
+    /// last delete of that key. Using it on a key that was written more than
+    /// once leaves an older version of the key visible, and RocksDB does not
+    /// report that as an error.
+    pub fn single_delete<K: AsRef<[u8]>>(&mut self, key: K) {
+        let key = key.as_ref();
+
+        unsafe {
+            ffi::rocksdb_writebatch_singledelete(
+                self.inner,
+                key.as_ptr() as *const c_char,
+                key.len() as size_t,
+            );
+        }
+    }
+
+    /// Removes the entry for a write-once key in the given column family.
+    ///
+    /// See [`single_delete`](Self::single_delete) for when this is safe to use.
+    pub fn single_delete_cf<K: AsRef<[u8]>>(&mut self, cf: &impl AsColumnFamilyRef, key: K) {
+        let key = key.as_ref();
+
+        unsafe {
+            ffi::rocksdb_writebatch_singledelete_cf(
+                self.inner,
+                cf.inner(),
+                key.as_ptr() as *const c_char,
+                key.len() as size_t,
+            );
+        }
+    }
+
+    /// Removes the entry for a write-once key in a column family that uses
+    /// user-defined timestamps.
+    ///
+    /// See [`single_delete`](Self::single_delete) for when this is safe to use.
+    pub fn single_delete_cf_with_ts<K: AsRef<[u8]>, S: AsRef<[u8]>>(
+        &mut self,
+        cf: &impl AsColumnFamilyRef,
+        key: K,
+        ts: S,
+    ) {
+        let key = key.as_ref();
+        let ts = ts.as_ref();
+
+        unsafe {
+            ffi::rocksdb_writebatch_singledelete_cf_with_ts(
+                self.inner,
+                cf.inner(),
+                key.as_ptr() as *const c_char,
+                key.len() as size_t,
+                ts.as_ptr() as *const c_char,
+                ts.len() as size_t,
+            );
+        }
+    }
+
     /// Removes the database entry in the specific column family with timestamp for key.
     /// Does nothing if the key was not found.
     pub fn delete_cf_with_ts<K: AsRef<[u8]>, S: AsRef<[u8]>>(
@@ -636,6 +742,101 @@ impl<const TRANSACTION: bool> WriteBatchWithTransaction<TRANSACTION> {
         unsafe {
             ffi::rocksdb_writebatch_clear(self.inner);
         }
+    }
+
+    /// Record the current state of the batch so it can be undone later.
+    ///
+    /// Save points nest. Each [`set_save_point`](Self::set_save_point) pushes
+    /// onto a stack that [`rollback_to_save_point`](Self::rollback_to_save_point)
+    /// and [`pop_save_point`](Self::pop_save_point) pop from.
+    pub fn set_save_point(&mut self) {
+        unsafe {
+            ffi::rocksdb_writebatch_set_save_point(self.inner);
+        }
+    }
+
+    /// Undo every operation recorded since the most recent save point, and pop
+    /// that save point.
+    ///
+    /// Returns an error if there is no save point to roll back to.
+    pub fn rollback_to_save_point(&mut self) -> Result<(), crate::Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_writebatch_rollback_to_save_point(self.inner));
+        }
+        Ok(())
+    }
+
+    /// Pop the most recent save point without undoing anything.
+    ///
+    /// Returns an error if there is no save point to pop.
+    pub fn pop_save_point(&mut self) -> Result<(), crate::Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_writebatch_pop_save_point(self.inner));
+        }
+        Ok(())
+    }
+
+    /// Recompute the per-key protection info over the batch and check it
+    /// against what was stored when each entry was added.
+    ///
+    /// Only meaningful for a batch built with a non-zero
+    /// `protection_bytes_per_key`, which is the fourth argument to
+    /// `rocksdb_writebatch_create_with_params`. On a batch without protection
+    /// this succeeds without checking anything.
+    pub fn verify_checksum(&self) -> Result<(), crate::Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_writebatch_verify_checksum(self.inner));
+        }
+        Ok(())
+    }
+
+    /// Overwrite the user-defined timestamp on every entry in the batch.
+    ///
+    /// `get_ts_size` is called with each column family id the batch touches and
+    /// must return the timestamp width configured for that column family, or 0
+    /// if it does not use timestamps. `ts` must be exactly as wide as every
+    /// non-zero size it returns.
+    ///
+    /// This is for reassigning a timestamp to an already-built batch, such as
+    /// when a commit timestamp is only known at write time.
+    ///
+    /// # Safety
+    ///
+    /// Every key already recorded for a column family whose `get_ts_size`
+    /// returns a non-zero width must be at least that many bytes long, which in
+    /// practice means it was written through one of the `_with_ts` methods and
+    /// already carries a timestamp suffix of exactly that width. RocksDB
+    /// overwrites the last `width` bytes of each key without checking that the
+    /// key is that long, so a shorter key makes it write in front of the key and
+    /// corrupt the heap. Mixing plain [`put`](Self::put) with a non-zero width
+    /// for the same column family is what usually triggers this.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `ts` is empty, if its length differs from a non-zero
+    /// width returned by `get_ts_size`, or if `get_ts_size` reports that it
+    /// could not find the width for a column family.
+    pub unsafe fn update_timestamps<S, F>(
+        &mut self,
+        ts: S,
+        mut get_ts_size: F,
+    ) -> Result<(), crate::Error>
+    where
+        S: AsRef<[u8]>,
+        F: FnMut(u32) -> usize,
+    {
+        let ts = ts.as_ref();
+        let state = std::ptr::from_mut(&mut get_ts_size).cast::<c_void>();
+        unsafe {
+            ffi_try!(ffi::rocksdb_writebatch_update_timestamps(
+                self.inner,
+                ts.as_ptr() as *const c_char,
+                ts.len() as size_t,
+                state,
+                Some(get_ts_size_callback::<F>),
+            ));
+        }
+        Ok(())
     }
 }
 

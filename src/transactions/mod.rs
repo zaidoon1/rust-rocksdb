@@ -19,6 +19,9 @@ mod transaction;
 mod transaction_db;
 
 pub use optimistic_transaction_db::OptimisticTransactionDB;
-pub use options::{OptimisticTransactionOptions, TransactionDBOptions, TransactionOptions};
+pub use options::{
+    OccLockBuckets, OccValidationPolicy, OptimisticTransactionDBOptions,
+    OptimisticTransactionOptions, TransactionDBOptions, TransactionOptions, TxnDBWritePolicy,
+};
 pub use transaction::Transaction;
 pub use transaction_db::TransactionDB;

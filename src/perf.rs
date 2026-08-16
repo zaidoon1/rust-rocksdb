@@ -23,6 +23,16 @@ use crate::ffi_util::from_cstr_and_free;
 use crate::{DB, DBCommon, ThreadMode, TransactionDB};
 use crate::{Error, db::DBInner, ffi};
 
+/// How much work `PerfContext` measures.
+///
+/// These values come from `PerfLevel` in `include/rocksdb/perf_level.h`, not
+/// from the `rocksdb_uninitialized`-style constants in `c.h`. The `c.h` enum is
+/// stale: it never gained `kEnableWait` or
+/// `kEnableTimeAndCPUTimeExceptForMutex`, so from 3 upward its numbering no
+/// longer lines up with the C++ enum. `rocksdb_set_perf_level` casts straight
+/// to `PerfLevel` (c.cc:6384) without validating, so the C++ header is what
+/// actually decides behavior. Wiring these to the `c.h` constants would send
+/// the wrong level.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[repr(i32)]
 pub enum PerfStatsLevel {

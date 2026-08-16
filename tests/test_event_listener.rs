@@ -72,7 +72,8 @@ impl EventListener for EventCounter {
         // input_files_count walks the file list, num_input_files comes from the
         // compaction stats; they describe the same set.
         assert_eq!(info.num_input_files(), input_file_count);
-        assert!(info.num_l0_files() >= 0);
+        // Listener callbacks get a fully populated job info, unlike `compact_files`.
+        assert!(info.num_l0_files().expect("set for listener callbacks") >= 0);
         assert_eq!(info.input_file_infos_count(), input_file_count);
         assert_eq!(info.output_file_infos_count(), output_file_count);
         assert!(info.table_properties_count() > 0);

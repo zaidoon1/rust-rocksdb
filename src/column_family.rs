@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::ffi_util::raw_data_and_free;
 use crate::{Options, db::MultiThreaded, ffi};
 
 use std::sync::Arc;
@@ -81,7 +82,10 @@ impl ColumnFamilyDescriptor {
 /// Specifies the TTL behavior for a column family.
 /// <https://github.com/facebook/rocksdb/blob/18cecb9c46b4c2a8b148659dac2fcab5a843d32b/include/rocksdb/utilities/db_ttl.h#L16-L46>
 pub enum ColumnFamilyTtl {
-    /// Will internally set TTL to -1 (disabled)
+    /// Entries are kept, using the longest TTL the C API can express.
+    ///
+    /// That is `i32::MAX` seconds, about 68 years, not RocksDB's never-expire
+    /// sentinel.
     #[default]
     Disabled,
     /// Will set ttl to the specified duration
@@ -162,6 +166,34 @@ pub type ColumnFamilyRef<'a> = Arc<BoundColumnFamily<'a>>;
 /// (`&ColumnFamily` and `BoundColumnFamily`)
 pub trait AsColumnFamilyRef {
     fn inner(&self) -> *mut ffi::rocksdb_column_family_handle_t;
+
+    /// The id RocksDB assigned this column family.
+    ///
+    /// Assigned in creation order and stable for the life of the column family, so
+    /// it is what shows up as `cf_id` in listener callbacks. Reusing it after the
+    /// column family is dropped is up to RocksDB.
+    fn id(&self) -> u32 {
+        // SAFETY: `inner` is a live handle for as long as this reference is, and the
+        // C call only reads the name out of it.
+        unsafe { ffi::rocksdb_column_family_handle_get_id(self.inner()) }
+    }
+
+    /// The name this column family was created with.
+    ///
+    /// Bytes rather than a `String` because RocksDB stores the name as given and
+    /// does not require it to be UTF-8. Names created through this crate always are,
+    /// since the constructors take `&str`.
+    fn name(&self) -> Vec<u8> {
+        let mut len: usize = 0;
+        // SAFETY: `inner` is a live handle, and the returned buffer is a `malloc`ed
+        // copy of the name with its length written through `len`. It carries no NUL
+        // terminator, `CopyString` at c.cc:1069 only copies the bytes, so it has to
+        // be read by length and then freed, which is what `raw_data_and_free` does.
+        unsafe {
+            let ptr = ffi::rocksdb_column_family_handle_get_name(self.inner(), &raw mut len);
+            raw_data_and_free(ptr, len).unwrap_or_default()
+        }
+    }
 }
 
 impl AsColumnFamilyRef for ColumnFamily {

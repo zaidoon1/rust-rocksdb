@@ -1,4 +1,5 @@
 use crate::ffi;
+use libc::c_int;
 
 #[derive(Debug, Clone)]
 pub struct NameParseError;
@@ -74,27 +75,61 @@ macro_rules! iterable_named_enum {
     };
 }
 
-/// StatsLevel can be used to reduce statistics overhead by skipping certain
-/// types of stats in the stats collection process.
+/// How much statistics detail to collect, trading overhead for visibility.
+///
+/// The levels are ordered, and each one adds to the one before it. The
+/// discriminants come from the C API rather than being written out here, because
+/// the setter passes the value straight through and a mismatch would silently
+/// select a different level instead of failing.
+///
+/// RocksDB also defines `kExceptTickers`, which has the same value as
+/// `kDisableAll` and so cannot be a separate variant here. [`DisableAll`] is that
+/// value.
+///
+/// [`DisableAll`]: StatsLevel::DisableAll
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-#[repr(u8)]
+#[repr(u32)]
+// MSVC types an anonymous C enum as signed int where clang picks unsigned, so
+// these constants are i32 on Windows and u32 everywhere else. The cast is needed
+// on Windows and redundant on the platforms clippy runs on.
+#[allow(clippy::unnecessary_cast)]
 pub enum StatsLevel {
-    /// Disable all metrics
-    DisableAll = 0,
-    /// Disable timer stats, and skip histogram stats
-    ExceptHistogramOrTimers = 2,
-    /// Skip timer stats
-    ExceptTimers,
-    /// Collect all stats except time inside mutex lock AND time spent on
+    /// Collect nothing. Also what RocksDB reports when no statistics object has
+    /// been installed, so this does not distinguish "turned off" from "never
+    /// turned on".
+    DisableAll = ffi::rocksdb_statistics_level_disable_all as u32,
+    /// Skip histograms and timers.
+    ExceptHistogramOrTimers = ffi::rocksdb_statistics_level_except_histogram_or_timers as u32,
+    /// Collect histograms, skip timers.
+    ExceptTimers = ffi::rocksdb_statistics_level_except_timers as u32,
+    /// Collect everything except time spent inside a mutex lock and time spent on
     /// compression.
-    ExceptDetailedTimers,
-    /// Collect all stats except the counters requiring to get time inside the
+    ExceptDetailedTimers = ffi::rocksdb_statistics_level_except_detailed_timers as u32,
+    /// Collect everything except the counters that need the time from inside the
     /// mutex lock.
-    ExceptTimeForMutex,
-    /// Collect all stats, including measuring duration of mutex operations.
-    /// If getting time is expensive on the platform to run, it can
-    /// reduce scalability to more threads, especially for writes.
-    All,
+    ExceptTimeForMutex = ffi::rocksdb_statistics_level_except_time_for_mutex as u32,
+    /// Collect everything, including how long mutex operations take. Where reading
+    /// the clock is expensive this can limit scalability across threads,
+    /// especially for writes.
+    All = ffi::rocksdb_statistics_level_all as u32,
+}
+
+impl StatsLevel {
+    /// Decodes a raw `rocksdb::StatsLevel`.
+    ///
+    /// `None` for a value this crate has no variant for, which RocksDB's own
+    /// clamping in `rocksdb_options_set_statistics_level` should prevent.
+    pub(crate) fn try_from_raw(raw: c_int) -> Option<Self> {
+        match raw {
+            n if n == Self::DisableAll as c_int => Some(Self::DisableAll),
+            n if n == Self::ExceptHistogramOrTimers as c_int => Some(Self::ExceptHistogramOrTimers),
+            n if n == Self::ExceptTimers as c_int => Some(Self::ExceptTimers),
+            n if n == Self::ExceptDetailedTimers as c_int => Some(Self::ExceptDetailedTimers),
+            n if n == Self::ExceptTimeForMutex as c_int => Some(Self::ExceptTimeForMutex),
+            n if n == Self::All as c_int => Some(Self::All),
+            _ => None,
+        }
+    }
 }
 
 include!("statistics_enum_ticker.rs");

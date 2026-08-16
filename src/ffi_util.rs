@@ -46,6 +46,25 @@ pub(crate) unsafe fn raw_data(ptr: *const c_char, size: usize) -> Option<Vec<u8>
     }
 }
 
+/// Borrows `len` bytes at `ptr` without copying them, treating null or empty as an
+/// empty slice.
+///
+/// For fields that live inside a C++ object RocksDB owns and does not hand over,
+/// where there is nothing to free. Use [`raw_data`] instead when the bytes have to
+/// outlive that object.
+///
+/// # Safety
+///
+/// `ptr` must either be null or point to `len` readable bytes that stay valid and
+/// unmodified for all of `'a`.
+pub(crate) unsafe fn bytes_from_raw<'a>(ptr: *const c_char, len: usize) -> &'a [u8] {
+    if ptr.is_null() || len == 0 {
+        return &[];
+    }
+    // SAFETY: the caller guarantees `len` readable bytes at `ptr` for `'a`.
+    unsafe { std::slice::from_raw_parts(ptr.cast::<u8>(), len) }
+}
+
 /// Copies `size` bytes out of a buffer that the RocksDB C API allocated with
 /// `malloc` (see `CopyString` in `rocksdb/db/c.cc`), then releases the original
 /// with `rocksdb_free`.

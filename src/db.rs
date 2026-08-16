@@ -36,12 +36,23 @@ use crate::{
     IteratorMode, Options, ReadOptions, SnapshotWithThreadMode, WaitForCompactOptions, WriteBatch,
     WriteBatchWithIndex, WriteOptions,
     column_family::{AsColumnFamilyRef, BoundColumnFamily, UnboundColumnFamily},
-    db_options::{ImportColumnFamilyOptions, OptionsMustOutliveDB},
+    compaction::CompactionOptions,
+    db_options::{
+        FlushWalOptions, ImportColumnFamilyOptions, OptionsMustOutliveDB, SizeApproximationFlags,
+        SizeApproximationOptions,
+    },
+    event_listener::OwnedCompactionJobInfo,
     ffi,
     ffi_util::{
         CStrLike, convert_rocksdb_error, from_cstr_and_free, from_cstr_without_free,
         opt_bytes_to_ptr, raw_data, to_cpath,
     },
+    metadata::{
+        ColumnFamilyMetaDataOptions, LevelMetaData, LiveFilesStorageInfo,
+        LiveFilesStorageInfoOptions, levels_from_cf_metadata_owned,
+    },
+    trace::{BlockCacheTraceOptions, BlockCacheTraceWriterOptions, Replayer, TraceOptions},
+    wal::{OwnedWalFile, WalFiles},
 };
 use rust_librocksdb_sys::{
     rocksdb_livefile_destroy, rocksdb_livefile_t, rocksdb_livefiles_destroy, rocksdb_livefiles_t,
@@ -303,6 +314,13 @@ pub struct DBCommon<T: ThreadMode, D: DBInner> {
     cfs: T, // Column families are held differently depending on thread mode
     path: PathBuf,
     _outlive: Vec<OptionsMustOutliveDB>,
+    /// The TTL this DB was opened with, if it was opened with one.
+    ///
+    /// Two things need it. `create_cf_with_ttl` reaches a C function that casts the
+    /// handle to `DBWithTTL` without checking, so calling it on any other kind of DB
+    /// is undefined behaviour, and nothing in the C API can be asked after the fact.
+    /// It is also the TTL that [`ColumnFamilyTtl::SameAsDb`] refers to.
+    opened_with_ttl: Option<Duration>,
 }
 
 /// Minimal set of DB-related methods, intended to be generic over
@@ -550,6 +568,7 @@ enum AccessType<'a> {
     ReadOnly { error_if_log_file_exist: bool },
     Secondary { secondary_path: &'a Path },
     WithTTL { ttl: Duration },
+    TrimHistory { trim_ts: &'a [u8] },
 }
 
 /// Methods of `DBWithThreadMode`.
@@ -645,6 +664,81 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
         I: IntoIterator<Item = ColumnFamilyDescriptor>,
     {
         Self::open_cf_descriptors_internal(opts, path, cfs, &AccessType::WithTTL { ttl })
+    }
+
+    /// Opens the database and drops everything written after `trim_ts`.
+    ///
+    /// Column families opened using this function will be created with default
+    /// `Options`. See [`open_cf_descriptors_and_trim_history`][Self::open_cf_descriptors_and_trim_history].
+    ///
+    /// # Errors
+    ///
+    /// See [`open_cf_descriptors_and_trim_history`][Self::open_cf_descriptors_and_trim_history].
+    pub fn open_cf_and_trim_history<P, I, N>(
+        opts: &Options,
+        path: P,
+        cfs: I,
+        trim_ts: &[u8],
+    ) -> Result<Self, Error>
+    where
+        P: AsRef<Path>,
+        I: IntoIterator<Item = N>,
+        N: AsRef<str>,
+    {
+        let cfs = cfs
+            .into_iter()
+            .map(|name| ColumnFamilyDescriptor::new(name.as_ref(), Options::default()));
+
+        Self::open_cf_descriptors_and_trim_history(opts, path, cfs, trim_ts)
+    }
+
+    /// Opens the database and drops everything written after `trim_ts`, given column
+    /// family descriptors.
+    ///
+    /// This is for recovering a column family that uses user-defined timestamps, where
+    /// writes past a known good point have to be undone before anything reads them.
+    /// Entries with a timestamp greater than `trim_ts` are gone once this returns.
+    /// `trim_ts` is compared with the column family's comparator, so it has to be
+    /// encoded the way that comparator expects. Column families without user-defined
+    /// timestamps are left alone.
+    ///
+    /// The trim is permanent, so open a copy first if the discarded writes still
+    /// matter.
+    ///
+    /// RocksDB marks the underlying API experimental and subject to change.
+    ///
+    /// *NOTE*: The `default` column family is opened with `Options::default()` unless
+    /// explicitly configured within the `cfs` iterator. A column family that uses
+    /// user-defined timestamps carries its comparator in its own options, so it has to
+    /// be named here with those options even when it is the default one. Opening it
+    /// with `Options::default()` instead fails with a comparator mismatch.
+    ///
+    /// # Errors
+    ///
+    /// Returns the RocksDB error if the database cannot be opened, which includes
+    /// leaving out a column family that exists on disk. Also errors if a column family
+    /// name contains an interior NUL byte, or if the directory cannot be created.
+    pub fn open_cf_descriptors_and_trim_history<P, I>(
+        opts: &Options,
+        path: P,
+        cfs: I,
+        trim_ts: &[u8],
+    ) -> Result<Self, Error>
+    where
+        P: AsRef<Path>,
+        I: IntoIterator<Item = ColumnFamilyDescriptor>,
+    {
+        // The C function only takes the column family form, so make sure the open goes
+        // down that path even when the caller named no families.
+        let mut cfs: Vec<ColumnFamilyDescriptor> = cfs.into_iter().collect();
+        if cfs.is_empty() {
+            cfs.push(ColumnFamilyDescriptor::new(
+                DEFAULT_COLUMN_FAMILY_NAME,
+                Options::default(),
+            ));
+        }
+
+        Self::open_cf_descriptors_internal(opts, path, cfs, &AccessType::TrimHistory { trim_ts })
     }
 
     /// Opens a database with the given database options and column family names.
@@ -909,6 +1003,10 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
             path: path.as_ref().to_path_buf(),
             cfs: T::new_cf_map_internal(cf_map),
             _outlive: outlive,
+            opened_with_ttl: match access_type {
+                AccessType::WithTTL { ttl } => Some(*ttl),
+                _ => None,
+            },
         })
     }
 
@@ -928,6 +1026,13 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
                 )),
                 AccessType::ReadWrite => {
                     ffi_try!(ffi::rocksdb_open(opts.inner, cpath.as_ptr()))
+                }
+                AccessType::TrimHistory { .. } => {
+                    // open_cf_descriptors_and_trim_history always names at least the
+                    // default column family, so this path is not reached.
+                    return Err(Error::new(
+                        "Trimming history requires opening with column families".to_owned(),
+                    ));
                 }
                 AccessType::Secondary { secondary_path } => {
                     ffi_try!(ffi::rocksdb_open_as_secondary(
@@ -991,11 +1096,7 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
                 AccessType::WithTTL { ttl } => {
                     let ttls: Vec<_> = cfs_v
                         .iter()
-                        .map(|cf| match cf.ttl {
-                            ColumnFamilyTtl::Disabled => i32::MAX,
-                            ColumnFamilyTtl::Duration(duration) => ttl_to_seconds(duration),
-                            ColumnFamilyTtl::SameAsDb => ttl_to_seconds(ttl),
-                        })
+                        .map(|cf| cf_ttl_to_seconds(cf.ttl, ttl))
                         .collect();
 
                     ffi_try!(ffi::rocksdb_open_column_families_with_ttl(
@@ -1006,6 +1107,23 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
                         cfopts.as_ptr(),
                         cfhandles.as_mut_ptr(),
                         ttls.as_ptr(),
+                    ))
+                }
+                AccessType::TrimHistory { trim_ts } => {
+                    // The C function copies the timestamp into a std::string before
+                    // doing anything with it, so this only has to stay alive across
+                    // the call. It takes a non-const pointer without writing through
+                    // it, hence the local copy rather than casting the borrow.
+                    let mut trim_ts = trim_ts.to_vec();
+                    ffi_try!(ffi::rocksdb_open_and_trim_history(
+                        opts.inner,
+                        cpath.as_ptr(),
+                        cfs_v.len() as c_int,
+                        cfnames.as_ptr(),
+                        cfopts.as_ptr(),
+                        cfhandles.as_mut_ptr(),
+                        trim_ts.as_mut_ptr().cast::<c_char>(),
+                        trim_ts.len(),
                     ))
                 }
             }
@@ -1090,6 +1208,159 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
     }
 }
 
+/// A value read from a DB with user-defined timestamps, and the timestamp it carries.
+///
+/// Both halves are RocksDB allocations this owns, freed on drop. Read them as bytes
+/// through `AsRef<[u8]>`.
+///
+/// The timestamp is the raw bytes RocksDB stored, in whatever width and encoding the
+/// column family's comparator defines, so it is only meaningful to code that knows
+/// that comparator. RocksDB's own `comparator_with_u64_ts` uses a little endian
+/// `u64`.
+pub struct TimestampedValue {
+    /// The value stored under the key.
+    pub value: CSlice,
+    /// The timestamp the value was written with.
+    pub timestamp: CSlice,
+}
+
+impl fmt::Debug for TimestampedValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TimestampedValue")
+            .field("value", &self.value.as_ref().len())
+            .field("timestamp", &self.timestamp.as_ref())
+            .finish()
+    }
+}
+
+/// What one `rocksdb_create_column_families` call managed to create.
+///
+/// The call is not atomic, so it can commit some families and then fail. Both
+/// fields can be non-empty at once, and the handles have to be recorded even when
+/// there is an error.
+struct CreatedCfHandles {
+    /// Owned handles for the families that were created, in the order the names
+    /// were given. Each one needs `rocksdb_column_family_handle_destroy`.
+    handles: Vec<*mut ffi::rocksdb_column_family_handle_t>,
+    /// Why the remaining families were not created.
+    error: Option<Error>,
+}
+
+impl CreatedCfHandles {
+    /// Nothing was created, because the call never got as far as RocksDB.
+    fn failed(error: Error) -> Self {
+        Self {
+            handles: Vec::new(),
+            error: Some(error),
+        }
+    }
+}
+
+/// What a [`DBCommon::compact_files`] call produced.
+pub struct CompactFilesResult {
+    /// The SST files the compaction wrote, as RocksDB names them.
+    ///
+    /// Empty when the compaction had nothing to write, for instance when every
+    /// input key was deleted.
+    pub output_files: Vec<String>,
+    /// Statistics and file lists for the compaction that just ran.
+    ///
+    /// `None` when [`CompactionOptions::set_allow_trivial_move`] is enabled.
+    /// RocksDB can then satisfy the request by moving files between levels
+    /// instead of rewriting them, and that path returns success without
+    /// reporting anything about the work it did. Nothing distinguishes it from
+    /// the rewriting path afterwards, so the statistics are not collected at all
+    /// rather than sometimes being made up.
+    ///
+    /// [`CompactionOptions::set_allow_trivial_move`]:
+    ///     crate::compaction::CompactionOptions::set_allow_trivial_move
+    pub job_info: Option<OwnedCompactionJobInfo>,
+}
+
+impl fmt::Debug for CompactFilesResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CompactFilesResult")
+            .field("output_files", &self.output_files)
+            .field("job_info", &self.job_info)
+            .finish()
+    }
+}
+
+/// Splits an optional key into the pointer and length a RocksDB range bound wants.
+///
+/// A `None` bound becomes a null pointer, which RocksDB reads as unbounded. This is
+/// why the bound is `Option<&T>` rather than `&[u8]`: an empty slice has a non-null
+/// pointer and means the empty key, which is a different request.
+fn optional_key_parts<T: AsRef<[u8]> + ?Sized>(key: Option<&T>) -> (*const c_char, usize) {
+    (opt_bytes_to_ptr(key), key.map_or(0, |k| k.as_ref().len()))
+}
+
+/// Reads a `char**` array RocksDB allocated into owned `String`s and frees it.
+///
+/// The strings are read without freeing them individually because
+/// `rocksdb_compact_files_output_file_names_destroy` frees the whole array,
+/// entries included.
+///
+/// # Safety
+///
+/// `names` must be null, or an array of `count` NUL-terminated strings allocated
+/// by `rocksdb_compact_files`, which nothing else will free.
+unsafe fn collect_and_free_output_names(names: *mut *mut c_char, count: usize) -> Vec<String> {
+    if names.is_null() || count == 0 {
+        return Vec::new();
+    }
+    let collected = (0..count)
+        .map(|i| unsafe { from_cstr_without_free(*names.add(i)) })
+        .collect();
+    unsafe { ffi::rocksdb_compact_files_output_file_names_destroy(names, count) };
+    collected
+}
+
+/// The pointer arrays the `rocksdb_approximate_sizes*` family takes, kept in one
+/// place because all five variants want the same six arguments.
+///
+/// The key pointers borrow from the `Range` slice, so this must not outlive it.
+struct ApproximateSizesArgs {
+    count: c_int,
+    start_keys: Vec<*const c_char>,
+    start_key_lens: Vec<usize>,
+    end_keys: Vec<*const c_char>,
+    end_key_lens: Vec<usize>,
+    sizes: Vec<u64>,
+}
+
+impl ApproximateSizesArgs {
+    fn new(ranges: &[Range]) -> Self {
+        Self {
+            count: c_int::try_from(ranges.len()).unwrap_or(c_int::MAX),
+            start_keys: ranges
+                .iter()
+                .map(|x| x.start_key.as_ptr().cast::<c_char>())
+                .collect(),
+            start_key_lens: ranges.iter().map(|x| x.start_key.len()).collect(),
+            end_keys: ranges
+                .iter()
+                .map(|x| x.end_key.as_ptr().cast::<c_char>())
+                .collect(),
+            end_key_lens: ranges.iter().map(|x| x.end_key.len()).collect(),
+            sizes: vec![0; ranges.len()],
+        }
+    }
+
+    /// Turns the `errptr` RocksDB filled in into a `Result`, yielding the sizes
+    /// on success.
+    ///
+    /// RocksDB reports failures here through `errptr`. Ignoring it both leaked
+    /// the `strdup`ed message and returned a vector of zeros that the caller
+    /// could not distinguish from "these ranges are empty".
+    fn finish(&mut self, err: *mut c_char) -> Result<Vec<u64>, Error> {
+        if !err.is_null() {
+            return Err(convert_rocksdb_error(err));
+        }
+        Ok(std::mem::take(&mut self.sizes))
+    }
+}
+
 /// Common methods of `DBWithThreadMode` and `OptimisticTransactionDB`.
 impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
     pub(crate) fn new(inner: D, cfs: T, path: PathBuf, outlive: Vec<OptionsMustOutliveDB>) -> Self {
@@ -1098,6 +1369,7 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
             cfs,
             path,
             _outlive: outlive,
+            opened_with_ttl: None,
         }
     }
 
@@ -1148,6 +1420,455 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
             ffi_try!(ffi::rocksdb_flush_wal(
                 self.inner.inner(),
                 c_uchar::from(sync)
+            ));
+        }
+        Ok(())
+    }
+
+    /// Flushes the WAL buffer, taking the rate limiter priority as well as `sync`.
+    ///
+    /// [`flush_wal`](Self::flush_wal) covers the common case. Reach for this one to
+    /// give the flush a priority other than the default, which decides how the WAL
+    /// write is charged against a configured rate limiter.
+    ///
+    /// # Errors
+    ///
+    /// Returns the RocksDB error if the flush or the sync fails.
+    pub fn flush_wal_with_options(&self, opts: &FlushWalOptions) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_flush_wal_with_options(
+                self.inner.inner(),
+                opts.as_ptr()
+            ));
+        }
+        Ok(())
+    }
+
+    /// Stops background flushes and compactions and waits for the ones already
+    /// running to finish.
+    ///
+    /// Writes are not blocked, so they keep filling memtables that cannot be
+    /// flushed. Enough of them and the DB stalls or hits the stop trigger, so pair
+    /// this with [`continue_background_work`](Self::continue_background_work) and
+    /// keep the gap short.
+    ///
+    /// Calls nest. Background work resumes once as many `continue` calls have been
+    /// made as `pause` calls.
+    ///
+    /// # Errors
+    ///
+    /// Returns the RocksDB error if the DB is shutting down.
+    pub fn pause_background_work(&self) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_pause_background_work(self.inner.inner()));
+        }
+        Ok(())
+    }
+
+    /// Undoes one [`pause_background_work`](Self::pause_background_work) call.
+    ///
+    /// # Errors
+    ///
+    /// Returns the RocksDB error if background work was not paused, or if the DB is
+    /// shutting down.
+    pub fn continue_background_work(&self) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_continue_background_work(self.inner.inner()));
+        }
+        Ok(())
+    }
+
+    /// Undoes one [`disable_manual_compaction`](Self::disable_manual_compaction) call.
+    ///
+    /// This is a counter, so it takes as many calls here as there were calls there
+    /// before manual compactions start running again.
+    ///
+    /// Pair the two. RocksDB decrements without a floor, and the assertion that would
+    /// catch it is compiled out of this build, so calling this more often than
+    /// `disable_manual_compaction` drives the counter below zero. That reads as
+    /// not paused, which looks fine, but it means the next
+    /// `disable_manual_compaction` only brings the counter back to zero and does not
+    /// actually pause anything.
+    pub fn enable_manual_compaction(&self) {
+        unsafe { ffi::rocksdb_enable_manual_compaction(self.inner.inner()) }
+    }
+
+    /// Cancels running manual compactions and makes later ones return immediately.
+    ///
+    /// Affects only manual compactions, so [`compact_range`](Self::compact_range),
+    /// [`compact_files`](Self::compact_files) and the like. Automatic background
+    /// compaction keeps going. Use it to get out of a long manual compaction during
+    /// shutdown without waiting for it.
+    ///
+    /// This increments a counter, so it needs a matching
+    /// [`enable_manual_compaction`](Self::enable_manual_compaction) call for each
+    /// call here.
+    pub fn disable_manual_compaction(&self) {
+        unsafe { ffi::rocksdb_disable_manual_compaction(self.inner.inner()) }
+    }
+
+    /// Reads every live SST and blob file and checks its block checksums.
+    ///
+    /// Reads the whole DB, so it is as slow as the data is large.
+    ///
+    /// # Errors
+    ///
+    /// Returns the RocksDB error naming the first corrupt file found.
+    pub fn verify_checksum(&self) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_verify_checksum(self.inner.inner()));
+        }
+        Ok(())
+    }
+
+    /// Like [`verify_checksum`](Self::verify_checksum), reading through `readopts`.
+    ///
+    /// Worth setting when the default read path is not what you want for a full
+    /// scan, for instance to keep the verification from filling the block cache or
+    /// to give it a rate limiter priority.
+    ///
+    /// # Errors
+    ///
+    /// See [`verify_checksum`](Self::verify_checksum).
+    pub fn verify_checksum_opt(&self, readopts: &ReadOptions) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_verify_checksum_with_options(
+                self.inner.inner(),
+                readopts.inner
+            ));
+        }
+        Ok(())
+    }
+
+    /// Recomputes each live file's whole file checksum and compares it against the
+    /// one recorded in the manifest.
+    ///
+    /// This is the file level check, as opposed to the per block one
+    /// [`verify_checksum`](Self::verify_checksum) does. It requires the DB to have
+    /// been written with a file checksum generator, see
+    /// [`Options::set_file_checksum_gen_factory`](crate::Options::set_file_checksum_gen_factory).
+    ///
+    /// # Errors
+    ///
+    /// Returns the RocksDB error naming the first file whose checksum does not match
+    /// what the manifest recorded. Also errors when no generator is configured, since
+    /// then there is nothing recorded to compare against, rather than treating that
+    /// as having nothing to check.
+    pub fn verify_file_checksums(&self) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_verify_file_checksums(self.inner.inner()));
+        }
+        Ok(())
+    }
+
+    /// Like [`verify_file_checksums`](Self::verify_file_checksums), reading through
+    /// `readopts`.
+    ///
+    /// # Errors
+    ///
+    /// See [`verify_file_checksums`](Self::verify_file_checksums).
+    pub fn verify_file_checksums_opt(&self, readopts: &ReadOptions) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_verify_file_checksums_with_options(
+                self.inner.inner(),
+                readopts.inner
+            ));
+        }
+        Ok(())
+    }
+
+    /// Marks the files overlapping `[start, end)` for compaction and returns
+    /// without compacting anything.
+    ///
+    /// Background compaction picks the marked files up on its own schedule, so this
+    /// returns as soon as the marking is done. That makes it the cheap way to hint
+    /// that a range is worth compacting, as opposed to
+    /// [`compact_range`](Self::compact_range), which does the work before it
+    /// returns.
+    ///
+    /// `None` for either bound means unbounded in that direction. An empty slice is
+    /// a real empty key, not the same thing.
+    ///
+    /// # Errors
+    ///
+    /// Returns the RocksDB error if the range cannot be marked.
+    pub fn suggest_compact_range<S: AsRef<[u8]>, E: AsRef<[u8]>>(
+        &self,
+        start: Option<S>,
+        end: Option<E>,
+    ) -> Result<(), Error> {
+        let (start, start_len) = optional_key_parts(start.as_ref());
+        let (end, end_len) = optional_key_parts(end.as_ref());
+        unsafe {
+            ffi_try!(ffi::rocksdb_suggest_compact_range(
+                self.inner.inner(),
+                start,
+                start_len,
+                end,
+                end_len
+            ));
+        }
+        Ok(())
+    }
+
+    /// Like [`suggest_compact_range`](Self::suggest_compact_range), for a single
+    /// column family.
+    ///
+    /// # Errors
+    ///
+    /// See [`suggest_compact_range`](Self::suggest_compact_range).
+    pub fn suggest_compact_range_cf<S: AsRef<[u8]>, E: AsRef<[u8]>>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        start: Option<S>,
+        end: Option<E>,
+    ) -> Result<(), Error> {
+        let (start, start_len) = optional_key_parts(start.as_ref());
+        let (end, end_len) = optional_key_parts(end.as_ref());
+        unsafe {
+            ffi_try!(ffi::rocksdb_suggest_compact_range_cf(
+                self.inner.inner(),
+                cf.inner(),
+                start,
+                start_len,
+                end,
+                end_len
+            ));
+        }
+        Ok(())
+    }
+
+    /// Reads a key along with the user-defined timestamp its value was written with.
+    ///
+    /// Only meaningful on a column family configured for user-defined timestamps, so
+    /// one whose comparator carries a timestamp size. The plain
+    /// [`get`](Self::get) reads the same value but throws the timestamp away, and
+    /// there is no pinned equivalent of this call in the C API.
+    ///
+    /// `readopts` decides which timestamp is read. Without a read timestamp set on
+    /// it RocksDB rejects the read rather than picking one, see
+    /// [`ReadOptions::set_timestamp`](crate::ReadOptions::set_timestamp).
+    ///
+    /// # Errors
+    ///
+    /// Returns the RocksDB error if the read fails. A key that is not present is
+    /// `Ok(None)`, not an error.
+    pub fn get_with_ts<K: AsRef<[u8]>>(
+        &self,
+        key: K,
+        readopts: &ReadOptions,
+    ) -> Result<Option<TimestampedValue>, Error> {
+        let key = key.as_ref();
+        self.get_with_ts_impl(readopts, |db, ro, vallen, ts, tslen, err| unsafe {
+            ffi::rocksdb_get_with_ts(
+                db,
+                ro,
+                key.as_ptr().cast::<c_char>(),
+                key.len(),
+                vallen,
+                ts,
+                tslen,
+                err,
+            )
+        })
+    }
+
+    /// Like [`get_with_ts`](Self::get_with_ts), for a single column family.
+    ///
+    /// # Errors
+    ///
+    /// See [`get_with_ts`](Self::get_with_ts).
+    pub fn get_cf_with_ts<K: AsRef<[u8]>>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        key: K,
+        readopts: &ReadOptions,
+    ) -> Result<Option<TimestampedValue>, Error> {
+        let key = key.as_ref();
+        let cf = cf.inner();
+        self.get_with_ts_impl(readopts, |db, ro, vallen, ts, tslen, err| unsafe {
+            ffi::rocksdb_get_cf_with_ts(
+                db,
+                ro,
+                cf,
+                key.as_ptr().cast::<c_char>(),
+                key.len(),
+                vallen,
+                ts,
+                tslen,
+                err,
+            )
+        })
+    }
+
+    /// Shared tail of the two timestamped gets.
+    ///
+    /// `call` is handed the out-params and returns the value pointer. Note that
+    /// RocksDB only writes through `ts` when the read succeeds, so `ts` starts as
+    /// null here and a miss leaves it that way rather than leaving it indeterminate
+    /// (c.cc:2592-2603).
+    fn get_with_ts_impl(
+        &self,
+        readopts: &ReadOptions,
+        call: impl FnOnce(
+            *mut ffi::rocksdb_t,
+            *const ffi::rocksdb_readoptions_t,
+            *mut usize,
+            *mut *mut c_char,
+            *mut usize,
+            *mut *mut c_char,
+        ) -> *mut c_char,
+    ) -> Result<Option<TimestampedValue>, Error> {
+        let mut vallen: usize = 0;
+        let mut ts: *mut c_char = ptr::null_mut();
+        let mut tslen: usize = 0;
+        let mut err: *mut c_char = ptr::null_mut();
+
+        let value = call(
+            self.inner.inner(),
+            readopts.inner,
+            &raw mut vallen,
+            &raw mut ts,
+            &raw mut tslen,
+            &raw mut err,
+        );
+
+        if !err.is_null() {
+            // RocksDB reports a failure without allocating either output, but free
+            // anything it did hand back rather than trusting that on an error path.
+            unsafe {
+                if !value.is_null() {
+                    ffi::rocksdb_free(value.cast::<c_void>());
+                }
+                if !ts.is_null() {
+                    ffi::rocksdb_free(ts.cast::<c_void>());
+                }
+            }
+            return Err(convert_rocksdb_error(err));
+        }
+
+        if value.is_null() {
+            return Ok(None);
+        }
+
+        // SAFETY: both pointers came from RocksDB's `CopyString`, so they are
+        // `malloc`ed buffers of the reported length that nothing else frees, which is
+        // exactly what `CSlice` takes over.
+        unsafe {
+            Ok(Some(TimestampedValue {
+                value: CSlice::from_raw_parts(value, vallen),
+                timestamp: CSlice::from_raw_parts(ts, tslen),
+            }))
+        }
+    }
+
+    /// Reads many keys along with the timestamps their values were written with.
+    ///
+    /// One native batch, results in input order, one `Result` per key so a single
+    /// bad key does not sink the batch. See [`get_with_ts`](Self::get_with_ts) for
+    /// what the timestamp means and what `readopts` has to carry.
+    pub fn multi_get_with_ts<K, I>(
+        &self,
+        keys: I,
+        readopts: &ReadOptions,
+    ) -> Vec<Result<Option<TimestampedValue>, Error>>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = K>,
+    {
+        let owned_keys: Vec<K> = keys.into_iter().collect();
+        let (ptr_keys, keys_sizes) = key_ptrs_and_sizes(&owned_keys);
+        let mut out = MultiGetTsOut::with_capacity(ptr_keys.len());
+
+        unsafe {
+            ffi::rocksdb_multi_get_with_ts(
+                self.inner.inner(),
+                readopts.inner,
+                ptr_keys.len(),
+                ptr_keys.as_ptr(),
+                keys_sizes.as_ptr(),
+                out.values.as_mut_ptr(),
+                out.values_sizes.as_mut_ptr(),
+                out.timestamps.as_mut_ptr(),
+                out.timestamps_sizes.as_mut_ptr(),
+                out.errors.as_mut_ptr(),
+            );
+            out.assume_filled(ptr_keys.len());
+        }
+
+        out.into_results()
+    }
+
+    /// Like [`multi_get_with_ts`](Self::multi_get_with_ts), for one column family per
+    /// key.
+    pub fn multi_get_cf_with_ts<'c, K, I, W>(
+        &self,
+        keys: I,
+        readopts: &ReadOptions,
+    ) -> Vec<Result<Option<TimestampedValue>, Error>>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = (&'c W, K)>,
+        W: AsColumnFamilyRef + 'c,
+    {
+        let (cfs, owned_keys): (Vec<_>, Vec<K>) = keys.into_iter().unzip();
+        let cf_ptrs: Vec<*const ffi::rocksdb_column_family_handle_t> =
+            cfs.iter().map(|cf| cf.inner().cast_const()).collect();
+        let (ptr_keys, keys_sizes) = key_ptrs_and_sizes(&owned_keys);
+        let mut out = MultiGetTsOut::with_capacity(ptr_keys.len());
+
+        unsafe {
+            ffi::rocksdb_multi_get_cf_with_ts(
+                self.inner.inner(),
+                readopts.inner,
+                cf_ptrs.as_ptr(),
+                ptr_keys.len(),
+                ptr_keys.as_ptr(),
+                keys_sizes.as_ptr(),
+                out.values.as_mut_ptr(),
+                out.values_sizes.as_mut_ptr(),
+                out.timestamps.as_mut_ptr(),
+                out.timestamps_sizes.as_mut_ptr(),
+                out.errors.as_mut_ptr(),
+            );
+            out.assume_filled(ptr_keys.len());
+        }
+
+        out.into_results()
+    }
+
+    /// Changes DB wide mutable options at runtime.
+    ///
+    /// Takes the same option names and string values the RocksDB configuration
+    /// strings use, so `max_background_jobs` or `bytes_per_sync`. Only options
+    /// RocksDB marks mutable at the DB level can be set, and the whole call is
+    /// rejected if any name or value is not accepted.
+    ///
+    /// [`set_options`](Self::set_options) is the column family equivalent.
+    ///
+    /// # Aborts
+    ///
+    /// Some unparseable values take the process down instead of returning an error.
+    /// See [`set_options`](Self::set_options) for the details and why this is not
+    /// caught.
+    ///
+    /// # Errors
+    ///
+    /// Returns the RocksDB error if a name is unknown or the option is not
+    /// changeable at runtime, and for an empty `opts`, which RocksDB rejects as
+    /// `empty input`. Also errors if any name or value contains an interior NUL
+    /// byte.
+    pub fn set_db_options(&self, opts: &[(&str, &str)]) -> Result<(), Error> {
+        let copts = convert_options(opts)?;
+        let names: Vec<*const c_char> = copts.iter().map(|(n, _)| n.as_ptr()).collect();
+        let values: Vec<*const c_char> = copts.iter().map(|(_, v)| v.as_ptr()).collect();
+
+        unsafe {
+            ffi_try!(ffi::rocksdb_set_db_options(
+                self.inner.inner(),
+                option_count(&copts)?,
+                names.as_ptr(),
+                values.as_ptr(),
             ));
         }
         Ok(())
@@ -2287,6 +3008,123 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         Ok(cf_handle)
     }
 
+    /// Creates every named column family in one call.
+    ///
+    /// This is not atomic. RocksDB creates the families one at a time and stops at
+    /// the first failure, so the ones before it are already committed and stay that
+    /// way. Only the options file write at the end is shared, which is the whole
+    /// saving over calling [`create_cf`](Self::create_cf) in a loop.
+    ///
+    /// Returns the handles that were created, in the order the names were given,
+    /// alongside the error that stopped the rest. The caller owns those handles and
+    /// has to record them in its column family map even when there is an error,
+    /// because the families exist either way.
+    fn create_inner_cf_handles(
+        &self,
+        names: &[(String, CString)],
+        opts: &Options,
+    ) -> CreatedCfHandles {
+        let name_ptrs: Vec<*const c_char> = names.iter().map(|(_, name)| name.as_ptr()).collect();
+        let Ok(count) = c_int::try_from(names.len()) else {
+            return CreatedCfHandles::failed(Error::new(format!(
+                "Too many column families to create at once: {}",
+                names.len()
+            )));
+        };
+
+        let mut len: usize = 0;
+        let mut err: *mut ::libc::c_char = ::std::ptr::null_mut();
+        // Can't use ffi_try: like rocksdb_create_column_family, this allocates a result
+        // that needs to be freed on error.
+        let list = unsafe {
+            ffi::rocksdb_create_column_families(
+                self.inner.inner(),
+                opts.inner,
+                count,
+                name_ptrs.as_ptr(),
+                &raw mut len,
+                &raw mut err,
+            )
+        };
+
+        // Two allocations come back: the array, and a handle per family. Freeing the
+        // array does not touch the handles, so take copies of them and release the
+        // array on its own.
+        let handles = if list.is_null() {
+            Vec::new()
+        } else {
+            let handles = unsafe { std::slice::from_raw_parts(list, len) }.to_vec();
+            unsafe { ffi::rocksdb_create_column_families_destroy(list) };
+            handles
+        };
+
+        if !err.is_null() {
+            // Hand the handles back even though this failed. The families they name
+            // were committed before the failing one and are still there, so the caller
+            // needs them to be able to use or drop those families.
+            return CreatedCfHandles {
+                handles,
+                error: Some(convert_rocksdb_error(err)),
+            };
+        }
+
+        let created = handles.len();
+        let error = (created != names.len()).then(|| {
+            Error::new(format!(
+                "Expected {} column family handles, got {created}",
+                names.len(),
+            ))
+        });
+
+        CreatedCfHandles { handles, error }
+    }
+
+    /// Creates one column family whose entries expire after `ttl`.
+    ///
+    /// Only valid on a DB opened with a TTL. The C function casts the handle to
+    /// `DBWithTTL` unchecked, so the caller has to have proven that already.
+    fn create_inner_cf_handle_with_ttl(
+        &self,
+        name: impl CStrLike,
+        opts: &Options,
+        ttl: ColumnFamilyTtl,
+    ) -> Result<*mut ffi::rocksdb_column_family_handle_t, Error> {
+        let Some(db_ttl) = self.opened_with_ttl else {
+            return Err(Error::new(
+                "create_cf_with_ttl requires a database opened with DB::open_with_ttl \
+                 or one of the open_cf*_with_ttl functions"
+                    .to_owned(),
+            ));
+        };
+
+        let cf_name = name.bake().map_err(|err| {
+            Error::new(format!(
+                "Failed to convert name to CString when creating cf with ttl: {err}"
+            ))
+        })?;
+        let ttl = cf_ttl_to_seconds(ttl, db_ttl);
+
+        // Can't use ffi_try: like rocksdb_create_column_family, this allocates a result
+        // that needs to be freed on error.
+        let mut err: *mut ::libc::c_char = ::std::ptr::null_mut();
+        let cf_handle = unsafe {
+            ffi::rocksdb_create_column_family_with_ttl(
+                self.inner.inner(),
+                opts.inner,
+                cf_name.as_ptr(),
+                ttl,
+                &raw mut err,
+            )
+        };
+        if !err.is_null() {
+            if !cf_handle.is_null() {
+                unsafe { ffi::rocksdb_column_family_handle_destroy(cf_handle) };
+            }
+            return Err(convert_rocksdb_error(err));
+        }
+        Ok(cf_handle)
+    }
+
     pub fn iterator<'a: 'b, 'b>(
         &'a self,
         mode: IteratorMode,
@@ -3301,15 +4139,44 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         Ok(())
     }
 
+    /// Changes mutable column family options on the default column family at
+    /// runtime.
+    ///
+    /// [`set_db_options`](Self::set_db_options) is the DB wide equivalent. Either the
+    /// whole set is applied or none of it is.
+    ///
+    /// # Aborts
+    ///
+    /// Some unparseable values take the process down instead of returning an error,
+    /// so validate values before passing them here.
+    ///
+    /// RocksDB parses integers with `std::stoi` and friends
+    /// (`util/string_util.cc:378`), which throw `std::invalid_argument`. It does try
+    /// to catch that, but not everywhere, and an integer-valued option such as
+    /// `write_buffer_size` given a non-numeric value aborts the process with
+    /// "Rust cannot catch foreign exceptions". A boolean-valued option such as
+    /// `disable_auto_compactions` returns an error instead. Do not rely on which
+    /// options fall on which side of that line.
+    ///
+    /// Catching it here is not an option. `ColumnFamilyData::SetOptions` runs inside
+    /// a callback that `VersionSet::LogAndApply` invokes while holding the DB mutex
+    /// as the exclusive manifest writer (`db/db_impl/db_impl.cc:1655`), so unwinding
+    /// through it leaves that state behind and the next option change on the DB
+    /// blocks forever in `InstrumentedCondVar::Wait`. That was reproducible under
+    /// ASAN and silent otherwise, which is worse than aborting.
+    ///
+    /// # Errors
+    ///
+    /// Returns the RocksDB error if a name is unknown or the option is not changeable
+    /// at runtime. Also errors if any name or value contains an interior NUL byte.
     pub fn set_options(&self, opts: &[(&str, &str)]) -> Result<(), Error> {
         let copts = convert_options(opts)?;
         let cnames: Vec<*const c_char> = copts.iter().map(|opt| opt.0.as_ptr()).collect();
         let cvalues: Vec<*const c_char> = copts.iter().map(|opt| opt.1.as_ptr()).collect();
-        let count = opts.len() as i32;
         unsafe {
             ffi_try!(ffi::rocksdb_set_options(
                 self.inner.inner(),
-                count,
+                option_count(&copts)?,
                 cnames.as_ptr(),
                 cvalues.as_ptr(),
             ));
@@ -3317,6 +4184,15 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         Ok(())
     }
 
+    /// Like [`set_options`](Self::set_options), for a single column family.
+    ///
+    /// # Aborts
+    ///
+    /// See [`set_options`](Self::set_options).
+    ///
+    /// # Errors
+    ///
+    /// See [`set_options`](Self::set_options).
     pub fn set_options_cf(
         &self,
         cf: &impl AsColumnFamilyRef,
@@ -3325,12 +4201,11 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         let copts = convert_options(opts)?;
         let cnames: Vec<*const c_char> = copts.iter().map(|opt| opt.0.as_ptr()).collect();
         let cvalues: Vec<*const c_char> = copts.iter().map(|opt| opt.1.as_ptr()).collect();
-        let count = opts.len() as i32;
         unsafe {
             ffi_try!(ffi::rocksdb_set_options_cf(
                 self.inner.inner(),
                 cf.inner(),
-                count,
+                option_count(&copts)?,
                 cnames.as_ptr(),
                 cvalues.as_ptr(),
             ));
@@ -3505,36 +4380,18 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         cf: Option<&impl AsColumnFamilyRef>,
         ranges: &[Range],
     ) -> Result<Vec<u64>, Error> {
-        let start_keys: Vec<*const c_char> = ranges
-            .iter()
-            .map(|x| x.start_key.as_ptr() as *const c_char)
-            .collect();
-        let start_key_lens: Vec<_> = ranges.iter().map(|x| x.start_key.len()).collect();
-        let end_keys: Vec<*const c_char> = ranges
-            .iter()
-            .map(|x| x.end_key.as_ptr() as *const c_char)
-            .collect();
-        let end_key_lens: Vec<_> = ranges.iter().map(|x| x.end_key.len()).collect();
-        let mut sizes: Vec<u64> = vec![0; ranges.len()];
-        let (n, start_key_ptr, start_key_len_ptr, end_key_ptr, end_key_len_ptr, size_ptr) = (
-            ranges.len() as i32,
-            start_keys.as_ptr(),
-            start_key_lens.as_ptr(),
-            end_keys.as_ptr(),
-            end_key_lens.as_ptr(),
-            sizes.as_mut_ptr(),
-        );
+        let mut args = ApproximateSizesArgs::new(ranges);
         let mut err: *mut c_char = ptr::null_mut();
         match cf {
             None => unsafe {
                 ffi::rocksdb_approximate_sizes(
                     self.inner.inner(),
-                    n,
-                    start_key_ptr,
-                    start_key_len_ptr,
-                    end_key_ptr,
-                    end_key_len_ptr,
-                    size_ptr,
+                    args.count,
+                    args.start_keys.as_ptr(),
+                    args.start_key_lens.as_ptr(),
+                    args.end_keys.as_ptr(),
+                    args.end_key_lens.as_ptr(),
+                    args.sizes.as_mut_ptr(),
                     &raw mut err,
                 );
             },
@@ -3542,23 +4399,117 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
                 ffi::rocksdb_approximate_sizes_cf(
                     self.inner.inner(),
                     cf.inner(),
-                    n,
-                    start_key_ptr,
-                    start_key_len_ptr,
-                    end_key_ptr,
-                    end_key_len_ptr,
-                    size_ptr,
+                    args.count,
+                    args.start_keys.as_ptr(),
+                    args.start_key_lens.as_ptr(),
+                    args.end_keys.as_ptr(),
+                    args.end_key_lens.as_ptr(),
+                    args.sizes.as_mut_ptr(),
                     &raw mut err,
                 );
             },
         }
-        // RocksDB reports failures here through `errptr`. Ignoring it both
-        // leaked the `strdup`ed message and returned a vector of zeros that the
-        // caller could not distinguish from "these ranges are empty".
-        if !err.is_null() {
-            return Err(convert_rocksdb_error(err));
+        args.finish(err)
+    }
+
+    /// Like [`Self::get_approximate_sizes`], but lets the caller say what counts
+    /// towards the total and how precise the answer has to be.
+    ///
+    /// [`Self::get_approximate_sizes`] counts SST files only. Pass a
+    /// [`SizeApproximationOptions`] with
+    /// [`set_include_memtables`](SizeApproximationOptions::set_include_memtables)
+    /// on to include writes that have not been flushed yet.
+    ///
+    /// # Errors
+    ///
+    /// See [`Self::get_approximate_sizes`].
+    pub fn get_approximate_sizes_with_options(
+        &self,
+        opts: &SizeApproximationOptions,
+        ranges: &[Range],
+    ) -> Result<Vec<u64>, Error> {
+        let mut args = ApproximateSizesArgs::new(ranges);
+        let mut err: *mut c_char = ptr::null_mut();
+        unsafe {
+            ffi::rocksdb_approximate_sizes_with_options(
+                self.inner.inner(),
+                opts.as_ptr(),
+                args.count,
+                args.start_keys.as_ptr(),
+                args.start_key_lens.as_ptr(),
+                args.end_keys.as_ptr(),
+                args.end_key_lens.as_ptr(),
+                args.sizes.as_mut_ptr(),
+                &raw mut err,
+            );
         }
-        Ok(sizes)
+        args.finish(err)
+    }
+
+    /// Like [`Self::get_approximate_sizes_with_options`], for a single column
+    /// family.
+    ///
+    /// # Errors
+    ///
+    /// See [`Self::get_approximate_sizes`].
+    pub fn get_approximate_sizes_cf_with_options(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        opts: &SizeApproximationOptions,
+        ranges: &[Range],
+    ) -> Result<Vec<u64>, Error> {
+        let mut args = ApproximateSizesArgs::new(ranges);
+        let mut err: *mut c_char = ptr::null_mut();
+        unsafe {
+            ffi::rocksdb_approximate_sizes_cf_with_options(
+                self.inner.inner(),
+                cf.inner(),
+                opts.as_ptr(),
+                args.count,
+                args.start_keys.as_ptr(),
+                args.start_key_lens.as_ptr(),
+                args.end_keys.as_ptr(),
+                args.end_key_lens.as_ptr(),
+                args.sizes.as_mut_ptr(),
+                &raw mut err,
+            );
+        }
+        args.finish(err)
+    }
+
+    /// Like [`Self::get_approximate_sizes_cf_with_options`], but selects what
+    /// counts with a flag set instead of an options object.
+    ///
+    /// Prefer [`Self::get_approximate_sizes_cf_with_options`], which can also
+    /// set an error margin. This variant exists because it is the form RocksDB
+    /// offers without allocating.
+    ///
+    /// # Errors
+    ///
+    /// See [`Self::get_approximate_sizes`].
+    pub fn get_approximate_sizes_cf_with_flags(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        flags: SizeApproximationFlags,
+        ranges: &[Range],
+    ) -> Result<Vec<u64>, Error> {
+        let mut args = ApproximateSizesArgs::new(ranges);
+        let mut err: *mut c_char = ptr::null_mut();
+        unsafe {
+            ffi::rocksdb_approximate_sizes_cf_with_flags(
+                self.inner.inner(),
+                cf.inner(),
+                args.count,
+                args.start_keys.as_ptr(),
+                args.start_key_lens.as_ptr(),
+                args.end_keys.as_ptr(),
+                args.end_key_lens.as_ptr(),
+                flags.bits(),
+                args.sizes.as_mut_ptr(),
+                &raw mut err,
+            );
+        }
+        args.finish(err)
     }
 
     /// Iterate over batches of write operations since a given sequence.
@@ -3714,6 +4665,406 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
 
             // return
             metadata
+        }
+    }
+
+    /// Compacts the named SST files into `output_level`, giving the caller
+    /// control over exactly which files are merged.
+    ///
+    /// [`Self::compact_range`] picks the files itself from a key range. This
+    /// picks them by name, which is what a tool driving compaction from
+    /// [`Self::live_files`] or [`Self::get_column_family_metadata_with_options`]
+    /// needs. The file names come from that metadata, not from the filesystem.
+    ///
+    /// Runs on the calling thread, so it blocks until the compaction finishes.
+    ///
+    /// # Errors
+    ///
+    /// Returns the RocksDB error if any input file is unknown, if the files do
+    /// not form a compactible set, or if the compaction itself fails. Nothing is
+    /// compacted in that case.
+    pub fn compact_files<I, N>(
+        &self,
+        opts: &CompactionOptions,
+        input_file_names: I,
+        output_level: i32,
+    ) -> Result<CompactFilesResult, Error>
+    where
+        I: IntoIterator<Item = N>,
+        N: CStrLike,
+    {
+        self.compact_files_impl(None::<&ColumnFamily>, opts, input_file_names, output_level)
+    }
+
+    /// Like [`Self::compact_files`], for a single column family.
+    ///
+    /// # Errors
+    ///
+    /// See [`Self::compact_files`].
+    pub fn compact_files_cf<I, N>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        opts: &CompactionOptions,
+        input_file_names: I,
+        output_level: i32,
+    ) -> Result<CompactFilesResult, Error>
+    where
+        I: IntoIterator<Item = N>,
+        N: CStrLike,
+    {
+        self.compact_files_impl(Some(cf), opts, input_file_names, output_level)
+    }
+
+    fn compact_files_impl<I, N>(
+        &self,
+        cf: Option<&impl AsColumnFamilyRef>,
+        opts: &CompactionOptions,
+        input_file_names: I,
+        output_level: i32,
+    ) -> Result<CompactFilesResult, Error>
+    where
+        I: IntoIterator<Item = N>,
+        N: CStrLike,
+    {
+        let names = input_file_names
+            .into_iter()
+            .map(CStrLike::into_c_string)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| Error::new(format!("Invalid input file name: {e}")))?;
+        let name_ptrs: Vec<*const c_char> = names.iter().map(|n| n.as_ptr()).collect();
+
+        let mut output_names: *mut *mut c_char = ptr::null_mut();
+        let mut output_count: usize = 0;
+
+        // A trivial move returns from `CompactFilesImpl` before
+        // `BuildCompactionJobInfo` runs, so it leaves a caller-allocated job info
+        // untouched while still reporting success, and nothing afterwards says
+        // which path ran. Asking for the job info only when that path is off
+        // keeps every value handed out one RocksDB actually wrote.
+        let mut job_info = (!opts.get_allow_trivial_move()).then(OwnedCompactionJobInfo::new);
+        let job_info_ptr = job_info
+            .as_mut()
+            .map_or(ptr::null_mut(), OwnedCompactionJobInfo::as_mut_ptr);
+
+        // `output_path_id` 0 means the first configured DB path. RocksDB has no
+        // named constant for it and the crate does not expose `cf_paths`
+        // selection here, so it is fixed rather than a parameter nobody could
+        // use meaningfully.
+        let output_path_id = 0;
+
+        unsafe {
+            match cf {
+                None => ffi_try!(ffi::rocksdb_compact_files(
+                    self.inner.inner(),
+                    opts.inner.cast_const(),
+                    name_ptrs.as_ptr(),
+                    name_ptrs.len(),
+                    output_level,
+                    output_path_id,
+                    &raw mut output_names,
+                    &raw mut output_count,
+                    job_info_ptr,
+                )),
+                Some(cf) => ffi_try!(ffi::rocksdb_compact_files_cf(
+                    self.inner.inner(),
+                    cf.inner(),
+                    opts.inner.cast_const(),
+                    name_ptrs.as_ptr(),
+                    name_ptrs.len(),
+                    output_level,
+                    output_path_id,
+                    &raw mut output_names,
+                    &raw mut output_count,
+                    job_info_ptr,
+                )),
+            }
+        }
+
+        // On failure RocksDB returns before touching either out-param, so this
+        // only runs once the call succeeded and both are known good.
+        let output_files = unsafe { collect_and_free_output_names(output_names, output_count) };
+
+        Ok(CompactFilesResult {
+            output_files,
+            job_info,
+        })
+    }
+
+    /// Obtains the LSM-tree meta data of the default column family, reporting
+    /// only the levels and files `opts` selects.
+    ///
+    /// Unlike [`Self::get_column_family_metadata`], which returns only the
+    /// totals, this reports every level and every SST file in it.
+    pub fn get_column_family_metadata_with_options(
+        &self,
+        opts: &ColumnFamilyMetaDataOptions,
+    ) -> Vec<LevelMetaData> {
+        unsafe {
+            let ptr = ffi::rocksdb_get_column_family_metadata_with_options(
+                self.inner.inner(),
+                opts.inner,
+            );
+            // The level and file handles borrow from `ptr`, so the returned
+            // values own it and destroy it when the last one drops.
+            levels_from_cf_metadata_owned(ptr)
+        }
+    }
+
+    /// Like [`Self::get_column_family_metadata_with_options`], for a single
+    /// column family.
+    pub fn get_column_family_metadata_cf_with_options(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        opts: &ColumnFamilyMetaDataOptions,
+    ) -> Vec<LevelMetaData> {
+        unsafe {
+            let ptr = ffi::rocksdb_get_column_family_metadata_cf_with_options(
+                self.inner.inner(),
+                cf.inner(),
+                opts.inner,
+            );
+            levels_from_cf_metadata_owned(ptr)
+        }
+    }
+
+    /// Returns every file RocksDB needs in order to restore this DB, which is
+    /// what a copy-based backup has to capture.
+    ///
+    /// This covers more than [`Self::live_files`] does: alongside the SST files
+    /// it reports the WAL, manifest, options and `CURRENT` files, each with the
+    /// size and, when `opts` asks for it, the checksum needed to verify a copy.
+    ///
+    /// # Errors
+    ///
+    /// Returns the RocksDB error if the file list cannot be gathered, for
+    /// instance when a flush it needs to run fails.
+    pub fn get_livefiles_storage_info(
+        &self,
+        opts: &LiveFilesStorageInfoOptions,
+    ) -> Result<LiveFilesStorageInfo, Error> {
+        unsafe {
+            let ptr = ffi_try!(ffi::rocksdb_get_livefiles_storage_info(
+                self.inner.inner(),
+                opts.inner,
+            ));
+            if ptr.is_null() {
+                return Err(Error::new(
+                    "Could not get live files storage info".to_owned(),
+                ));
+            }
+            Ok(LiveFilesStorageInfo::from_ptr(ptr))
+        }
+    }
+
+    /// Returns every WAL file the DB currently knows about, oldest first,
+    /// including the one being written to.
+    ///
+    /// # Errors
+    ///
+    /// Returns the RocksDB error if the WAL directory cannot be listed.
+    pub fn get_sorted_wal_files(&self) -> Result<WalFiles, Error> {
+        unsafe {
+            let ptr = ffi_try!(ffi::rocksdb_get_sorted_wal_files(self.inner.inner()));
+            if ptr.is_null() {
+                return Err(Error::new("Could not get sorted WAL files".to_owned()));
+            }
+            Ok(WalFiles::from_ptr(ptr))
+        }
+    }
+
+    /// Returns the WAL file currently being written to.
+    ///
+    /// Reported as alive, with its size read from the filesystem, and with a
+    /// [`start_sequence`](crate::wal::WalFile::start_sequence) of 0 rather than a
+    /// real sequence number.
+    ///
+    /// # Errors
+    ///
+    /// Returns the RocksDB error if the current WAL file cannot be identified.
+    pub fn get_current_wal_file(&self) -> Result<OwnedWalFile, Error> {
+        unsafe {
+            let ptr = ffi_try!(ffi::rocksdb_get_current_wal_file(self.inner.inner()));
+            if ptr.is_null() {
+                return Err(Error::new("Could not get current WAL file".to_owned()));
+            }
+            Ok(OwnedWalFile::from_ptr(ptr))
+        }
+    }
+
+    /// Starts recording every read and write to a trace file at `trace_path`,
+    /// which [`Self::new_default_replayer`] can later replay against a DB.
+    ///
+    /// The trace file is written through the DB's own `Env` with default file
+    /// options, so it is not rate limited.
+    ///
+    /// Call [`Self::end_trace`] to stop.
+    ///
+    /// Starting a second trace without ending the first does not fail. `StartTrace`
+    /// installs the new tracer unconditionally, and the old one is dropped without
+    /// its buffered records being written, so the first trace file is left
+    /// truncated. Unlike [`Self::start_io_trace`] and
+    /// [`Self::start_block_cache_trace`], which report `Busy`, this one is the
+    /// caller's to get right.
+    ///
+    /// # Errors
+    ///
+    /// Returns the RocksDB error if the trace file cannot be created.
+    pub fn start_trace<P: AsRef<Path>>(
+        &self,
+        opts: &TraceOptions,
+        trace_path: P,
+    ) -> Result<(), Error> {
+        let cpath = to_cpath(trace_path)?;
+        unsafe {
+            // Null `env` uses the DB's own `Env`, which the DB already keeps
+            // alive, and null `env_options` uses RocksDB's defaults. Passing an
+            // `EnvOptions` here would be unsound: the trace writer keeps its
+            // `rate_limiter` as a borrowed pointer for the life of the trace,
+            // but the reference counting it lives behind stays in the caller's
+            // handle.
+            ffi_try!(ffi::rocksdb_start_trace(
+                self.inner.inner(),
+                ptr::null_mut(),
+                ptr::null(),
+                opts.inner,
+                cpath.as_ptr(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Stops the trace started by [`Self::start_trace`] and closes the file.
+    ///
+    /// # Errors
+    ///
+    /// Returns the RocksDB error if no trace is running or the file cannot be
+    /// closed cleanly.
+    pub fn end_trace(&self) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_end_trace(self.inner.inner()));
+        }
+        Ok(())
+    }
+
+    /// Starts recording file system operations to a trace file at `trace_path`,
+    /// for diagnosing IO behaviour rather than replaying queries.
+    ///
+    /// Written the same way as [`Self::start_trace`]. Call [`Self::end_io_trace`]
+    /// to stop.
+    ///
+    /// # Errors
+    ///
+    /// Returns the RocksDB error if the trace file cannot be created, or `Busy` if
+    /// an IO trace is already running.
+    pub fn start_io_trace<P: AsRef<Path>>(
+        &self,
+        opts: &TraceOptions,
+        trace_path: P,
+    ) -> Result<(), Error> {
+        let cpath = to_cpath(trace_path)?;
+        unsafe {
+            ffi_try!(ffi::rocksdb_start_io_trace(
+                self.inner.inner(),
+                ptr::null_mut(),
+                ptr::null(),
+                opts.inner,
+                cpath.as_ptr(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Stops the IO trace started by [`Self::start_io_trace`].
+    ///
+    /// Does nothing if no IO trace is running.
+    ///
+    /// # Errors
+    ///
+    /// `EndIOTrace` always reports success, so this only fails if a future RocksDB
+    /// gives it something to report. It returns a `Result` to keep that a
+    /// non-breaking change.
+    pub fn end_io_trace(&self) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_end_io_trace(self.inner.inner()));
+        }
+        Ok(())
+    }
+
+    /// Starts recording block cache accesses to a trace file at `trace_path`,
+    /// which the `block_cache_trace_analyzer` tool can then simulate cache
+    /// configurations against.
+    ///
+    /// Written the same way as [`Self::start_trace`]. Call
+    /// [`Self::end_block_cache_trace`] to stop.
+    ///
+    /// # Errors
+    ///
+    /// Returns the RocksDB error if the trace file cannot be created, or `Busy` if
+    /// a block cache trace is already running.
+    pub fn start_block_cache_trace<P: AsRef<Path>>(
+        &self,
+        opts: &BlockCacheTraceOptions,
+        writer_opts: &BlockCacheTraceWriterOptions,
+        trace_path: P,
+    ) -> Result<(), Error> {
+        let cpath = to_cpath(trace_path)?;
+        unsafe {
+            ffi_try!(ffi::rocksdb_start_block_cache_trace_with_options(
+                self.inner.inner(),
+                ptr::null_mut(),
+                ptr::null(),
+                opts.inner,
+                writer_opts.inner,
+                cpath.as_ptr(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Stops the block cache trace started by [`Self::start_block_cache_trace`].
+    ///
+    /// Does nothing if no block cache trace is running.
+    ///
+    /// # Errors
+    ///
+    /// `EndBlockCacheTrace` always reports success, so this only fails if a future
+    /// RocksDB gives it something to report. It returns a `Result` to keep that a
+    /// non-breaking change.
+    pub fn end_block_cache_trace(&self) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_end_block_cache_trace(self.inner.inner()));
+        }
+        Ok(())
+    }
+
+    /// Builds a replayer that replays the trace at `trace_path` against this DB.
+    ///
+    /// `column_families` must name every column family the trace touched, or
+    /// replay fails with `Corruption: Invalid Column Family ID.`. An empty list
+    /// means the default column family only.
+    ///
+    /// # Errors
+    ///
+    /// Returns the RocksDB error if the trace file cannot be opened or read.
+    pub fn new_default_replayer<'cf, W, I, P>(
+        &self,
+        column_families: I,
+        trace_path: P,
+    ) -> Result<Replayer<'_>, Error>
+    where
+        W: AsColumnFamilyRef + 'cf,
+        I: IntoIterator<Item = &'cf W>,
+        P: AsRef<Path>,
+    {
+        let cpath = to_cpath(trace_path)?;
+        unsafe {
+            Replayer::create_default(
+                self.inner.inner(),
+                column_families,
+                ptr::null_mut(),
+                ptr::null(),
+                &cpath,
+            )
         }
     }
 
@@ -3880,6 +5231,63 @@ impl<I: DBInner> DBCommon<SingleThreaded, I> {
         Ok(())
     }
 
+    /// Creates a column family whose entries expire after `ttl`, on a DB that was
+    /// opened with a TTL.
+    ///
+    /// [`ColumnFamilyDescriptor::new_with_ttl`] sets this at open time. This is the
+    /// way to add such a family to a DB that is already open.
+    ///
+    /// # Errors
+    ///
+    /// Errors if the DB was not opened with [`DB::open_with_ttl`] or one of the
+    /// `open_cf*_with_ttl` functions, since RocksDB would otherwise treat the handle
+    /// as a type it is not. Also returns the RocksDB error if the family already
+    /// exists or cannot be created, and errors if the name contains an interior NUL
+    /// byte.
+    pub fn create_cf_with_ttl<N: AsRef<str>>(
+        &mut self,
+        name: N,
+        opts: &Options,
+        ttl: ColumnFamilyTtl,
+    ) -> Result<(), Error> {
+        let inner = self.create_inner_cf_handle_with_ttl(name.as_ref(), opts, ttl)?;
+        self.cfs
+            .cfs
+            .insert(name.as_ref().to_string(), ColumnFamily { inner });
+        Ok(())
+    }
+
+    /// Creates the named column families, all sharing `opts`.
+    ///
+    /// This saves one options file write over calling
+    /// [`create_cf`](Self::create_cf) in a loop. It is not a saving on manifest
+    /// writes, and it is not atomic.
+    ///
+    /// # Errors
+    ///
+    /// Returns the RocksDB error if a family already exists or cannot be created,
+    /// and errors if a name contains an interior NUL byte.
+    ///
+    /// RocksDB creates the families in order and stops at the first failure, so on
+    /// error the families named before the failing one already exist and stay that
+    /// way. Those are recorded here as usual and can be used or dropped, so retrying
+    /// with the same list will fail again on the ones that now exist.
+    pub fn create_cfs<Iter, N>(&mut self, names: Iter, opts: &Options) -> Result<(), Error>
+    where
+        Iter: IntoIterator<Item = N>,
+        N: AsRef<str>,
+    {
+        let names = convert_cf_names(names)?;
+        let created = self.create_inner_cf_handles(&names, opts);
+        for ((name, _), inner) in names.into_iter().zip(created.handles) {
+            self.cfs.cfs.insert(name, ColumnFamily { inner });
+        }
+        match created.error {
+            Some(err) => Err(err),
+            None => Ok(()),
+        }
+    }
+
     #[doc = include_str!("db_create_column_family_with_import.md")]
     pub fn create_column_family_with_import<N: AsRef<str>>(
         &mut self,
@@ -3954,6 +5362,65 @@ impl<I: DBInner> DBCommon<MultiThreaded, I> {
             Arc::new(UnboundColumnFamily { inner }),
         );
         Ok(())
+    }
+
+    /// Creates a column family whose entries expire after `ttl`, on a DB that was
+    /// opened with a TTL.
+    ///
+    /// [`ColumnFamilyDescriptor::new_with_ttl`] sets this at open time. This is the
+    /// way to add such a family to a DB that is already open.
+    ///
+    /// # Errors
+    ///
+    /// Errors if the DB was not opened with [`DB::open_with_ttl`] or one of the
+    /// `open_cf*_with_ttl` functions, since RocksDB would otherwise treat the handle
+    /// as a type it is not. Also returns the RocksDB error if the family already
+    /// exists or cannot be created, and errors if the name contains an interior NUL
+    /// byte.
+    pub fn create_cf_with_ttl<N: AsRef<str>>(
+        &self,
+        name: N,
+        opts: &Options,
+        ttl: ColumnFamilyTtl,
+    ) -> Result<(), Error> {
+        // Note that we acquire the cfs lock before inserting: otherwise we might race
+        // another caller who observed the handle as missing.
+        let mut cfs = self.cfs.cfs.write();
+        let inner = self.create_inner_cf_handle_with_ttl(name.as_ref(), opts, ttl)?;
+        cfs.insert(
+            name.as_ref().to_string(),
+            Arc::new(UnboundColumnFamily { inner }),
+        );
+        Ok(())
+    }
+
+    /// Creates the named column families, all sharing `opts`.
+    ///
+    /// See [`DBCommon::create_cfs`](DBCommon::<SingleThreaded, I>::create_cfs),
+    /// including the note that this is not atomic.
+    ///
+    /// # Errors
+    ///
+    /// Returns the RocksDB error if a family already exists or cannot be created,
+    /// and errors if a name contains an interior NUL byte. On error the families
+    /// named before the failing one already exist and are recorded here.
+    pub fn create_cfs<Iter, N>(&self, names: Iter, opts: &Options) -> Result<(), Error>
+    where
+        Iter: IntoIterator<Item = N>,
+        N: AsRef<str>,
+    {
+        let names = convert_cf_names(names)?;
+        // Note that we acquire the cfs lock before creating: otherwise we might race
+        // another caller who observed the handles as missing.
+        let mut cfs = self.cfs.cfs.write();
+        let created = self.create_inner_cf_handles(&names, opts);
+        for ((name, _), inner) in names.into_iter().zip(created.handles) {
+            cfs.insert(name, Arc::new(UnboundColumnFamily { inner }));
+        }
+        match created.error {
+            Some(err) => Err(err),
+            None => Ok(()),
+        }
     }
 
     #[doc = include_str!("db_create_column_family_with_import.md")]
@@ -4308,6 +5775,52 @@ fn ttl_to_seconds(ttl: Duration) -> c_int {
     c_int::try_from(ttl.as_secs()).unwrap_or(c_int::MAX)
 }
 
+/// Resolves a column family's TTL against the TTL the DB was opened with.
+///
+/// [`ColumnFamilyTtl::Disabled`] maps to the longest TTL the C API can express rather
+/// than RocksDB's never-expire sentinel, for the reason on [`ttl_to_seconds`].
+fn cf_ttl_to_seconds(ttl: ColumnFamilyTtl, db_ttl: Duration) -> c_int {
+    match ttl {
+        ColumnFamilyTtl::Disabled => c_int::MAX,
+        ColumnFamilyTtl::Duration(duration) => ttl_to_seconds(duration),
+        ColumnFamilyTtl::SameAsDb => ttl_to_seconds(db_ttl),
+    }
+}
+
+/// Converts column family names to C strings, keeping the given order.
+///
+/// # Errors
+///
+/// Errors if a name contains an interior NUL byte.
+fn convert_cf_names<I, N>(names: I) -> Result<Vec<(String, CString)>, Error>
+where
+    I: IntoIterator<Item = N>,
+    N: AsRef<str>,
+{
+    names
+        .into_iter()
+        .map(|name| {
+            let name = name.as_ref();
+            let cname = CString::new(name).map_err(|err| {
+                Error::new(format!(
+                    "Failed to convert column family name to CString: {err}"
+                ))
+            })?;
+            Ok((name.to_owned(), cname))
+        })
+        .collect()
+}
+
+/// The option count as the `int` the C API takes.
+///
+/// # Errors
+///
+/// Errors rather than truncating if there are more options than an `int` can count.
+fn option_count(opts: &[(CString, CString)]) -> Result<c_int, Error> {
+    c_int::try_from(opts.len())
+        .map_err(|_| Error::new(format!("Too many options to set at once: {}", opts.len())))
+}
+
 fn convert_options(opts: &[(&str, &str)]) -> Result<Vec<(CString, CString)>, Error> {
     opts.iter()
         .map(|(name, value)| {
@@ -4322,6 +5835,88 @@ fn convert_options(opts: &[(&str, &str)]) -> Result<Vec<(CString, CString)>, Err
             Ok((cname, cvalue))
         })
         .collect()
+}
+
+/// Borrows each key as the pointer and length pair the multi-get calls want.
+///
+/// The returned pointers borrow `keys`, so `keys` has to outlive them.
+fn key_ptrs_and_sizes<K: AsRef<[u8]>>(keys: &[K]) -> (Vec<*const c_char>, Vec<usize>) {
+    keys.iter()
+        .map(|k| {
+            let key = k.as_ref();
+            (key.as_ptr().cast::<c_char>(), key.len())
+        })
+        .unzip()
+}
+
+/// The five output arrays `rocksdb_multi_get_*_with_ts` fills in.
+///
+/// Kept together because they are only ever allocated, passed and consumed as a set,
+/// and because the unsafe `set_len` after the call has to cover all five or none.
+struct MultiGetTsOut {
+    values: Vec<*mut c_char>,
+    values_sizes: Vec<usize>,
+    timestamps: Vec<*mut c_char>,
+    timestamps_sizes: Vec<usize>,
+    errors: Vec<*mut c_char>,
+}
+
+impl MultiGetTsOut {
+    fn with_capacity(n: usize) -> Self {
+        Self {
+            values: Vec::with_capacity(n),
+            values_sizes: Vec::with_capacity(n),
+            timestamps: Vec::with_capacity(n),
+            timestamps_sizes: Vec::with_capacity(n),
+            errors: Vec::with_capacity(n),
+        }
+    }
+
+    /// Publishes the `n` entries RocksDB wrote into the spare capacity.
+    ///
+    /// # Safety
+    ///
+    /// `n` must be the key count the call was given, and the call must have returned.
+    /// RocksDB writes every one of the five arrays at every index, either a pointer it
+    /// allocated or null (c.cc:2694-2711), so no element is left uninitialised.
+    unsafe fn assume_filled(&mut self, n: usize) {
+        unsafe {
+            self.values.set_len(n);
+            self.values_sizes.set_len(n);
+            self.timestamps.set_len(n);
+            self.timestamps_sizes.set_len(n);
+            self.errors.set_len(n);
+        }
+    }
+
+    /// Takes ownership of every buffer RocksDB allocated and pairs it with its key.
+    ///
+    /// A null value with no error is a key that was not found. An error is reported
+    /// with both buffers already null, so there is nothing to free on that path.
+    fn into_results(self) -> Vec<Result<Option<TimestampedValue>, Error>> {
+        self.values
+            .into_iter()
+            .zip(self.values_sizes)
+            .zip(self.timestamps.into_iter().zip(self.timestamps_sizes))
+            .zip(self.errors)
+            .map(|(((value, vallen), (ts, tslen)), err)| {
+                if !err.is_null() {
+                    return Err(convert_rocksdb_error(err));
+                }
+                if value.is_null() {
+                    return Ok(None);
+                }
+                // SAFETY: RocksDB allocated both with `CopyString` at the reported
+                // lengths and nothing else frees them.
+                unsafe {
+                    Ok(Some(TimestampedValue {
+                        value: CSlice::from_raw_parts(value, vallen),
+                        timestamp: CSlice::from_raw_parts(ts, tslen),
+                    }))
+                }
+            })
+            .collect()
+    }
 }
 
 pub(crate) fn convert_values(

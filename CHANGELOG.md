@@ -1,5 +1,90 @@
 # Changelog
 
+## 0.53.0 (unreleased)
+
+This release contains breaking API changes, marked `fix!` and `feat!`
+below, and needs a minor version bump. The ones most likely to reach you
+without a compiler error are the enum discriminant shifts: `StatsLevel`,
+`DBFlushReason` and `DBCompactionReason` all renumbered to match
+upstream, so a stored or transmuted discriminant no longer means what it
+did in 0.52.0.
+
+Most of the release is additive. Roughly 500 C API functions that had no
+safe binding are now reachable, and the audit that closed those gaps
+turned up bugs in code that was already shipping.
+
+### Correctness
+
+- fix!: `StatsLevel` was wrong from `ExceptHistogramOrTimers` up.
+  Upstream defines `kExceptTickers = kDisableAll`, so the variant after
+  `DisableAll` is 1 and not 2, and every variant above it was off by one.
+  Setting `ExceptHistogramOrTimers` selected RocksDB's `kExceptTimers`,
+  and because the C setter clamps to 0 through 5, asking for `All` quietly
+  got `kExceptTimeForMutex`. The discriminants now come
+  from the generated bindings, which also changes the representation from
+  `#[repr(u8)]` to `#[repr(u32)]` to match the type c.h gives those
+  constants.
+- fix!: `DBCompactionReason` was missing `KReadTriggered` and
+  `DBFlushReason` was missing `KMemtableMaxRangeDeletions`, so those two
+  events decoded to the `KNumOfReasons` sentinel and to `KUnknown`.
+  Adding them shifts `KNumOfReasons` from 20 to 21 and `KUnknown` from 15
+  to 16.
+- fix: enum discriminants now come from the generated bindings wherever
+  c.h defines a constant, so a RocksDB bump cannot renumber them
+  unnoticed. `tests/test_enum_drift.rs` parses the vendored headers and
+  checks the enums RocksDB only passes as plain ints against upstream's
+  own count sentinels. `PerfStatsLevel` keeps its literals on purpose:
+  c.h's perf level enum never gained `kEnableWait` or
+  `kEnableTimeAndCPUTimeExceptForMutex`, and `rocksdb_set_perf_level`
+  casts straight to `PerfLevel`, so the C++ header is what decides
+  behavior and the C constants would send the wrong level.
+
+### Memory safety
+
+- fix!: the comparator callback types `CompareFn`, `CompareTsFn` and
+  `CompareWithoutTsFn` now require `Send + Sync`. RocksDB shares a
+  comparator across background threads, and the trampolines were handing
+  out `&mut` to that shared state. They pass shared references now.
+- fix: `CompactionServiceOptionsOverride::create` left `table_factory`
+  null. `db_impl_secondary.cc` assigns it unconditionally and
+  `column_family.cc` dereferences it with no null check, so a remote
+  compaction segfaulted. `tests/test_compaction_service.rs` covers the
+  path with a worker that runs a real compaction.
+
+### Features
+
+- feat: every `rocksdb_*` function in 11.8.1's c.h has been audited
+  against these bindings. 487 are now reachable from Rust; the remaining
+  42 are unusable or redundant and each one is recorded with the reason it
+  is skipped. Highlights: 307 option setters and getters on the types the
+  crate already modelled, 203 accessors across 21 types including the
+  event listener fields for blob file counts, thread and job ids and the
+  aborted flag, and Env thread pool getters.
+- feat!: `BackupEngineInfo` gained an `app_metadata` field. Source
+  breaking for exhaustive struct literals, which is how a caller would
+  have built one before.
+- feat: doc comments on the new methods come from the matching field in
+  the upstream C++ headers rather than restating the method name, and
+  getters link to their setter so the description lives in one place.
+
+### Documentation
+
+- docs: `create_cfs` is not atomic. It stops at the first failure and
+  keeps the column families it already created.
+- docs: `enable_manual_compaction` is a counter rather than a flag, so it
+  has to be paired with `disable_manual_compaction`.
+- docs: point the README install snippet at the current release. It still
+  said `0.43`.
+
+### Testing
+
+- `tests/test_capi_options_roundtrip.rs` sets every new option and reads
+  it back through its getter, 191 assertions.
+- `tests/test_capi_accessor_roundtrip.rs` does the same for the new
+  accessors, 270 assertions. The event listener accessors cannot be set,
+  so `test_event_listener.rs` asserts on them against a live flush,
+  compaction and ingest instead.
+
 ## 0.52.0 (2026-08-08)
 
 This release contains breaking API changes, marked `fix!` and `feat!`

@@ -492,16 +492,19 @@ jobs:
   # what this detects mechanically, and it was being caught by a human reading
   # their own diff.
   #
-  # `continue-on-error` on purpose, for now. Breaking changes land here before
-  # the separate "Release X.Y.Z" commit bumps the version, so against the
-  # published baseline a legitimate PR looks like an unbumped breaking change.
-  # Drop this line to make it a gate once a breaking change and its version bump
-  # travel in the same PR.
+  # Advisory rather than a gate, because the version bump lives in the separate
+  # "Release X.Y.Z" commit. Between releases `Cargo.toml` still carries the
+  # published version, so every accumulated breaking change reads as an unbumped
+  # one and the job would sit red until the next release.
+  #
+  # Not `continue-on-error`: that hides a job that could not run at all just as
+  # thoroughly as it hides findings. The step reads the exit code instead, which
+  # cargo-semver-checks documents as 0 clean, 100 violations found, 101 could not
+  # complete. Only 100 is downgraded.
   semver:
     name: Semver checks
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    continue-on-error: true
     steps:
       - name: Checkout sources
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -526,10 +529,45 @@ jobs:
       # (needs liburing). This is the same set docs.rs builds, so it is the
       # public API as documented.
       - name: Check semver against the published version
+        env:
+          # The workflow sets `always` globally, which would put escape codes in
+          # the job summary.
+          CARGO_TERM_COLOR: never
         run: |
+          set -euo pipefail
+
+          status=0
           cargo semver-checks --package rust-rocksdb \
             --default-features \
-            --features serde1,multi-threaded-cf,raw-ptr
+            --features serde1,multi-threaded-cf,raw-ptr \
+            > semver.txt 2>&1 || status=$?
+          cat semver.txt
+
+          if [ "$status" -eq 0 ]; then
+            echo "No semver violations against the published version." \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if [ "$status" -ne 100 ]; then
+            echo "::error::cargo semver-checks could not complete (exit $status)"
+            exit "$status"
+          fi
+
+          # Exit 100. A notice rather than a warning: this fires on every PR
+          # between releases, and the point is a running tally to write the
+          # changelog from, not something to act on per-PR.
+          echo "::notice::Breaking changes accumulated since the published release; see the job summary."
+          {
+            echo "### Breaking changes since the published release"
+            echo
+            echo "\`Cargo.toml\` still carries the published version, so these"
+            echo "are the changes that decide the next version number."
+            echo
+            echo '```'
+            cat semver.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   test:
     name: ${{ matrix.build }}

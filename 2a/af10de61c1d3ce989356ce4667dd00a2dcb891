@@ -1,0 +1,33 @@
+.github/workflows/rust.yml
+  s_8cb235fe3711c4::t_05d89f946f0904 495-503,532-535,537-539,542-570
+Cargo.lock
+  s_589b2cd38faf7d::t_3d115e0d24e2d9 670
+Cargo.toml
+  s_589b2cd38faf7d::t_4bba55f5c6311a 4
+README.md
+  s_589b2cd38faf7d::t_a1f972ac8030e8 34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2aaf10de61c1d3ce989356ce4667dd00a2dcb891",
+  "prompts": {},
+  "sessions": {
+    "s_589b2cd38faf7d": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_febf879f4ffeIwqsfLzVxLi2r0",
+        "model": "claude-opus-5"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    },
+    "s_8cb235fe3711c4": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fea4d1c0affePNM6vxOTh75Vwt",
+        "model": "claude-opus-5"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    }
+  }
+}

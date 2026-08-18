@@ -7,7 +7,9 @@ authors = [
     "Karl Hobley <karlhobley10@gmail.com>",
     "Arkadiy Paronyan <arkadiy@ethcore.io>",
 ]
-license = "MIT/Apache-2.0/BSD-3-Clause"
+# Slash-separated licences are deprecated syntax. Cargo already read the old
+# form as OR, so this is the same choice-of-three expressed in valid SPDX.
+license = "MIT OR Apache-2.0 OR BSD-3-Clause"
 description = "Native bindings to librocksdb"
 readme = "README.md"
 repository = "https://github.com/zaidoon1/rust-rocksdb"

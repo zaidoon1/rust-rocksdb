@@ -1,0 +1,37 @@
+version: 2
+
+updates:
+  # audit.yml reports RUSTSEC advisories against the committed Cargo.lock but
+  # cannot fix them. This opens the PR that does.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      # The -sys crates share `cc` and `pkg-config`. Bumping them together
+      # means one RocksDB rebuild in CI instead of seven.
+      native-sys:
+        patterns:
+          - "*-sys"
+          - cc
+          - pkg-config
+          - bindgen
+      dev:
+        dependency-type: development
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      actions:
+        patterns:
+          - "*"

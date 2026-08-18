@@ -1,0 +1,211 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit runs on the free open-source plan, which needs no API key and no
+# subscription. Its value here is the reasoning pass over the unsafe FFI
+# boundary. It does not duplicate CI: CodeRabbit skips Clippy when a workflow
+# already runs it, and rust.yml does.
+#
+# Reference: https://docs.coderabbit.ai/reference/yaml-template
+
+language: en-US
+
+# Slop Detection below is an early-access feature and needs this flag. The flag
+# is global, so it opts into other early-access behaviour too. Set it to false
+# if a future CodeRabbit change starts producing noise.
+early_access: true
+
+reviews:
+  # `chill` over `assertive`. On a crate that is mostly unsafe FFI, an
+  # assertive reviewer flags every raw pointer and the signal drowns.
+  profile: chill
+
+  # A review must never gate a merge on this repo. rust.yml is the gate.
+  request_changes_workflow: false
+  fail_commit_status: false
+
+  high_level_summary: true
+  collapse_walkthrough: true
+  sequence_diagrams: false
+  poem: false
+  in_progress_fortune: false
+
+  # Public repo, and forks send AI-generated PRs. Flagging them in the
+  # walkthrough is cheaper than reading them.
+  slop_detection:
+    enabled: true
+    label: slop
+
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    # OSS PR reviews are rate limited per repo per hour. A PR that gets pushed
+    # to fifteen times should not spend the hour's budget on itself.
+    auto_pause_after_reviewed_commits: 2
+    drafts: false
+    ignore_title_keywords:
+      - wip
+      - "[skip review]"
+    ignore_usernames:
+      - dependabot[bot]
+
+  path_filters:
+    # Vendored upstream C++. Nothing here is ours to fix, and a submodule bump
+    # would otherwise blow past the OSS 100-300 file per-review limit.
+    - "!librocksdb-sys/rocksdb/**"
+    - "!librocksdb-sys/snappy/**"
+    - "!librocksdb-sys/rocksdb_lib_sources.txt"
+    # These filters also drive CodeRabbit's sparse checkout, so the exclusion
+    # above would leave the clang and cppcheck tools unable to resolve
+    # `rocksdb/db.h` and friends in `c-api-extensions/`, which is the one place
+    # those tools are worth running. Headers only, not the implementation.
+    - "librocksdb-sys/rocksdb/include/**"
+    # Machine-generated from the vendored headers by `make -C librocksdb-sys
+    # gen_statistics` and `gen_perf`. Review the generator, not its output.
+    - "!src/statistics_enum_ticker.rs"
+    - "!src/statistics_enum_histogram.rs"
+    - "!src/perf_enum.rs"
+    - "!Cargo.lock"
+    - "!CHANGELOG.md"
+
+  path_instructions:
+    - path: "src/**/*.rs"
+      instructions: |
+        This is the safe Rust wrapper over RocksDB's C API. Almost every
+        function crosses an FFI boundary, so raw pointers and `unsafe` are
+        expected and are not findings by themselves. Report a finding only
+        when you can name the concrete way it breaks.
+
+        Prioritise, in this order:
+
+        1. Ownership of memory that crosses the boundary. RocksDB returns
+           buffers allocated by its own allocator. Freeing one with Rust's
+           allocator, or reconstructing it as a `Vec`/`String`/`Box`, is heap
+           corruption. It must be freed with the matching `rocksdb_free` and
+           read through `slice::from_raw_parts` until then.
+        2. Lifetimes that let a borrow outlive the object that owns the memory.
+           Iterators, snapshots, pinnable slices, and write-batch-with-index
+           iterators all borrow from a parent. If a returned type's lifetime
+           parameter is not tied to the parent it reads from, it can be used
+           after the parent drops. This crate has shipped exactly this bug.
+        3. Use-after-free from destruction order. Column family handles,
+           snapshots, caches, and env objects must be destroyed before the DB
+           they belong to, and a handle must not be usable after the CF is
+           dropped.
+        4. Null and error-pointer handling. Every `char **errptr` output must
+           be checked and converted to `Err`, not ignored or leaked. A null
+           return that is treated as valid is a segfault.
+        5. Enum discriminants passed as plain ints. If a value is hardcoded
+           rather than taken from an `ffi::rocksdb_*` constant, it silently
+           reads the wrong RocksDB field when upstream inserts a variant.
+           `tests/test_enum_drift.rs` guards some of these; flag any new
+           hardcoded discriminant that it does not cover.
+        6. `Send`/`Sync` impls. A manual impl on a type holding a raw pointer
+           needs the corresponding RocksDB object to actually be thread safe.
+        7. Callback trampolines (comparators, merge operators, compaction
+           filters, event listeners, slice transforms). A Rust panic unwinding
+           into C++ is undefined behaviour, and the boxed state handed to
+           RocksDB must live until the destructor callback runs.
+        8. Avoidable allocation on hot paths (get, put, iteration, multi_get).
+           A `to_vec` or `CString::new` where a borrowed slice would do is
+           worth flagging.
+
+        Do not comment on formatting, and do not suggest replacing `unsafe`
+        with safe Rust where the FFI call requires it.
+
+    - path: "librocksdb-sys/c-api-extensions/*"
+      instructions: |
+        Hand-written C++ that extends RocksDB's C API with functions the
+        upstream header does not expose. Every function here is called from
+        Rust across the FFI boundary with no compiler checking either side.
+
+        Check that: pointer and length arithmetic cannot overflow or read out
+        of bounds; each allocation has exactly one documented owner and a
+        matching free on the Rust side; C++ exceptions cannot escape into
+        Rust; the signature in the `.h` matches the `.cc` and matches how
+        `src/` declares it in `extern "C"`; and the RocksDB APIs called are
+        used with the lifetimes upstream requires.
+
+    - path: "librocksdb-sys/build.rs"
+      instructions: |
+        Builds RocksDB and its compression dependencies from vendored source
+        across Linux, macOS, Windows/MSVC, FreeBSD, x86_64, aarch64 and
+        32-bit ARM. Most breakage here is platform specific and reaches users
+        before CI, because CI does not cross-compile.
+
+        Check that target detection is gated on the right thing (`target_os`,
+        `target_arch`, `target_env`, `is_msvc`) rather than the host, that
+        `-march`/`-mcpu`/`-msse`/NEON flags are only emitted for targets that
+        accept them, and that a new `cargo:rustc-*` directive or feature flag
+        is applied consistently for static and dynamic linking.
+
+    - path: "librocksdb-sys/*.bash"
+      instructions: |
+        Generators that parse vendored RocksDB C++ sources into
+        `src/statistics_enum_*.rs` and `src/perf_enum.rs`. The output is
+        integer discriminants read across the FFI, so a parsing miss does not
+        fail to compile, it silently reports the wrong counter. Check that
+        the parsing cannot skip or reorder an enumerator and that it fails
+        loudly rather than emitting a partial file.
+
+    - path: "tests/**/*.rs"
+      instructions: |
+        Integration tests against a real on-disk RocksDB. Check that each
+        test uses its own temporary directory and cannot collide with another
+        when run in parallel under nextest, that a test which is meant to
+        exercise a use-after-free or lifetime fix would actually fail without
+        the fix, and that resources are dropped in an order the C++ side
+        allows.
+
+    - path: ".github/workflows/*.yml"
+      instructions: |
+        Check for missing `permissions:` blocks, missing `timeout-minutes`,
+        unpinned third-party actions, and secrets reachable from
+        `pull_request_target`. Flag a new job that rebuilds RocksDB from
+        source when an existing job with the same feature set could run the
+        extra command instead, since each build costs several minutes.
+
+    - path: "**/Cargo.toml"
+      instructions: |
+        Two crates are published, `rust-rocksdb` and `rust-librocksdb-sys`,
+        and the root pins the sys crate by version. Check that a version bump
+        keeps that pin consistent, that a new feature is forwarded to the sys
+        crate if it needs to be, that `exclude` patterns match real paths,
+        and that a new feature is added to `docs.rs` metadata if its API
+        should appear in the docs.
+
+  tools:
+    # rust.yml already runs `cargo clippy --all-targets -D warnings`, so
+    # CodeRabbit skips Clippy automatically. Left on in case that changes.
+    clippy:
+      enabled: true
+    # The C++ shim in c-api-extensions is where FFI memory bugs live.
+    clang:
+      enabled: true
+    cppcheck:
+      enabled: true
+    # Workflow linting and workflow security analysis.
+    actionlint:
+      enabled: true
+    zizmor:
+      enabled: true
+    shellcheck:
+      enabled: true
+    yamllint:
+      enabled: true
+    github-checks:
+      enabled: true
+      timeout_ms: 900000
+    # Prose nitpicking on a 65 KB hand-written changelog is pure noise.
+    languagetool:
+      enabled: false
+    markdownlint:
+      enabled: false
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  learnings:
+    scope: local
+  issues:
+    scope: local

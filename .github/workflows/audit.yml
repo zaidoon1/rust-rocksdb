@@ -12,6 +12,10 @@ on:
     - cron: "0 2 * * *" # run at 2 AM UTC
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -26,11 +30,12 @@ jobs:
       contents: read # for actions/checkout to fetch code
       issues: write # for the action to file advisories it finds
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           cache: false
           rustflags: ""
@@ -40,6 +45,6 @@ jobs:
       # version, so the audit would cover versions nobody builds and would miss
       # a vulnerable pin that is actually in the lockfile.
       - name: Audit check
-        uses: actions-rust-lang/audit@v1
+        uses: actions-rust-lang/audit@72c09e02f132669d52284a3323acdb503cfc1a24 # v1.2.7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}

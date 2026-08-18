@@ -13,7 +13,23 @@ license = "Apache-2.0"
 categories = ["database"]
 keywords = ["database", "embedded", "LSM-tree", "persistence"]
 homepage = "https://github.com/zaidoon1/rust-rocksdb"
-exclude = [".gitignore", ".travis.yml", "deploy.sh", "test/**/*"]
+# Nothing here compiles for a downstream user. The integration tests need a
+# `tests/util` module and the bench needs criterion, neither of which a consumer
+# gets. This list replaced `test/**/*`, which matched nothing because the
+# directory is `tests/`.
+#
+# `scripts/` stays. The packaged README tells anyone enabling `coroutines` to
+# run `./scripts/build_folly.sh`, so shipping the instructions without the
+# script would be worse than shipping both.
+exclude = [
+    ".coderabbit.yaml",
+    ".github/**",
+    ".gitignore",
+    ".gitmodules",
+    ".vscode/**",
+    "benches/**",
+    "tests/**",
+]
 
 [workspace]
 members = ["librocksdb-sys"]

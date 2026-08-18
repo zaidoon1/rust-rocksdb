@@ -1,0 +1,37 @@
+version: 2
+
+updates:
+  # Version updates for the workspace. `librocksdb-sys` is a member and there is
+  # one Cargo.lock at the root, so `/` covers both manifests.
+  #
+  # Security advisories are handled separately by Dependabot security updates,
+  # which are enabled on the repository. Keeping versions moving here means
+  # audit.yml has less to report in the first place.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      # Everything feeding the native build: the compression -sys crates plus
+      # the build-dependencies. One PR means one RocksDB rebuild across the CI
+      # matrix instead of one per crate.
+      native-build:
+        patterns:
+          - "*-sys"
+          - bindgen
+          - cc
+          - glob
+          - pkg-config
+          - rustflags
+
+  # The workflows pin actions to commit SHAs. Dependabot moves the SHA and the
+  # trailing version comment together, which is the only practical way to keep
+  # pinned actions current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns:
+          - "*"

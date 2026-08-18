@@ -12,6 +12,10 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
 
+# Nothing here writes to the repository.
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     name: ${{ matrix.build }} (coroutines)
@@ -58,7 +62,7 @@ jobs:
             ca-certificates curl git sudo
 
       - name: Checkout sources
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           submodules: recursive
 
@@ -93,7 +97,7 @@ jobs:
           g++ --version
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           cache-key: "v1-rust-coroutines"
           # Populate the cache from master runs only, not from PR runs.
@@ -116,7 +120,7 @@ jobs:
 
       - name: Cache folly install
         id: cache-folly
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           # `build_folly.sh` uses --scratch-path so install artifacts live
           # inside the workspace at a predictable location. Cache both that
@@ -190,7 +194,9 @@ jobs:
           fi
           echo "LD_LIBRARY_PATH=$RUNTIME_LIBDIRS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
 
-      - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@5b4d68e2e660441203ab128a23676f1e4faf1532 # v2.86.3
+        with:
+          tool: nextest
 
       - name: cargo build --features coroutines,io-uring
         run: cargo build --release --features coroutines,io-uring

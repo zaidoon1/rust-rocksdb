@@ -9,6 +9,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# No job here writes to the repository. Fork pull requests get a read-only
+# token regardless, so this is what constrains the `push` runs on master, where
+# the token is live while vendored C++ compiles and `install-action` fetches a
+# binary.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -16,12 +23,13 @@ jobs:
   style:
     name: Rustfmt
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           components: rustfmt
           cache: false
@@ -30,52 +38,164 @@ jobs:
       - name: Run rustfmt
         run: cargo fmt --all -- --check
 
-  doc-check:
-    name: Rustdoc-check
+  # Everything checked here is generated from the vendored RocksDB source and
+  # committed, and `MAINTAINERSHIP.md` asks the maintainer to regenerate it on
+  # every submodule bump. Nothing verified that it happened.
+  #
+  # Staleness is silent in both directions. `Ticker` and `Histogram` are
+  # `#[repr(u32)]` with implicit discriminants, so an enumerator inserted
+  # upstream shifts every variant after it and the crate reports a different
+  # RocksDB counter than the caller asked for. 0.52.0 shipped exactly that
+  # shift. A stale `rocksdb_lib_sources.txt` instead drops newly added upstream
+  # sources from the build, since `build.rs` reads it with `include_str!`.
+  #
+  # `tests/test_enum_drift.rs` covers the enums parsed out of the C++ headers.
+  # This covers the generated files, which it cannot see.
+  #
+  # No RocksDB build, so a bad submodule bump fails here in about a minute
+  # rather than after the matrix finishes.
+  generated:
+    name: Generated files
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          submodules: recursive
+
+      # `rocksdb_lib_sources.txt` is a real file target, so make compares
+      # mtimes and does nothing after a fresh checkout, where every file shares
+      # the checkout timestamp. Delete it to force the rule to run.
+      - name: Regenerate everything derived from the submodule
+        run: |
+          make -C librocksdb-sys gen_statistics
+          make -C librocksdb-sys gen_perf
+          rm -f librocksdb-sys/rocksdb_lib_sources.txt
+          make -C librocksdb-sys rocksdb_lib_sources.txt
+
+      - name: Assert the committed files match the submodule
+        run: |
+          set -euo pipefail
+          if ! git diff --exit-code -- \
+              src/statistics_enum_ticker.rs \
+              src/statistics_enum_histogram.rs \
+              src/perf_enum.rs \
+              librocksdb-sys/rocksdb_lib_sources.txt; then
+            echo "::error::generated files are stale. Run the same commands as the step above and commit the result. Note the 'rm' before rocksdb_lib_sources.txt: make will not rebuild it otherwise."
+            exit 1
+          fi
+
+      # The `+` suffix on `rust-librocksdb-sys` is the only signal downstreams
+      # have about which RocksDB they are linking, and the submodule tracks a
+      # non-release commit. A bump that forgets the suffix misreports the
+      # version to every consumer, and cannot be corrected after publishing.
+      - name: Assert the version suffix matches the vendored RocksDB
+        run: |
+          set -euo pipefail
+          h=librocksdb-sys/rocksdb/include/rocksdb/version.h
+          major=$(sed -n 's/^#define ROCKSDB_MAJOR \([0-9]*\)$/\1/p' "$h")
+          minor=$(sed -n 's/^#define ROCKSDB_MINOR \([0-9]*\)$/\1/p' "$h")
+          patch=$(sed -n 's/^#define ROCKSDB_PATCH \([0-9]*\)$/\1/p' "$h")
+          if [ -z "$major" ] || [ -z "$minor" ] || [ -z "$patch" ]; then
+            echo "::error::could not read the RocksDB version from $h"
+            exit 1
+          fi
+          vendored="$major.$minor.$patch"
+
+          declared=$(sed -n 's/^version = ".*+\(.*\)"$/\1/p' librocksdb-sys/Cargo.toml)
+          if [ -z "$declared" ]; then
+            echo "::error::librocksdb-sys/Cargo.toml has no +rocksdb-version build metadata"
+            exit 1
+          fi
+
+          echo "vendored: $vendored, declared: $declared"
+          if [ "$vendored" != "$declared" ]; then
+            echo "::error::librocksdb-sys declares +$declared but the submodule is $vendored"
+            exit 1
+          fi
+
+  # Doc warnings and doctests share a job because both need a fully built
+  # `librocksdb-sys` and neither takes more than a moment once it exists.
+  # Running them as separate jobs paid for the same RocksDB build twice.
+  #
+  # Doctests are not in nextest: https://github.com/nextest-rs/nextest/issues/16
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           submodules: recursive
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           components: rust-docs
+          cache-key: "v1-rust-docs"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Run cargo rustdoc
         run: cargo rustdoc -- -D warnings
 
-  doctest: # doctest are no supported in cargo nextest yet. https://github.com/nextest-rs/nextest/issues/16
-    name: Doctests
+      - name: Run doctests
+        run: cargo test --doc
+
+  # docs.rs builds the feature set named in `[package.metadata.docs.rs]` with
+  # `--cfg docsrs`, which turns on the `doc_cfg` badges via `feature(doc_cfg)`
+  # in lib.rs. That combination is built nowhere else, so a broken intra-doc
+  # link inside a `serde1` or `raw-ptr` item first shows up as a red docs.rs
+  # build, and docs.rs cannot be retried without publishing a new version.
+  #
+  # Its own job rather than a step in `docs`, because `feature(doc_cfg)` needs
+  # nightly, and cargo keys the build-script output directory on the rustc
+  # version, so a nightly rustdoc run rebuilds RocksDB from scratch instead of
+  # reusing the stable build. Separate jobs at least run those two builds in
+  # parallel.
+  #
+  # Advisory, not a gate. Nightly is unpinned and `-D warnings` means a new
+  # rustdoc lint would otherwise turn every pull request red for a reason that
+  # has nothing to do with the change.
+  docsrs:
+    name: Docs (docs.rs configuration)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           submodules: recursive
 
-      - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install rust nightly
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
+          toolchain: nightly
+          components: rust-docs
+          cache-key: "v1-rust-docsrs"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      - name: Run doctests
-        run: cargo test --doc
+      - name: Run cargo doc as docs.rs builds it
+        env:
+          RUSTDOCFLAGS: --cfg docsrs -D warnings
+        run: |
+          cargo doc --no-deps \
+            --features serde1,multi-threaded-cf,raw-ptr
 
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           submodules: recursive
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           components: clippy
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
@@ -112,9 +232,10 @@ jobs:
   msrv:
     name: MSRV
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           submodules: recursive
 
@@ -131,7 +252,7 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
       - name: Install rust ${{ steps.msrv.outputs.version }}
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           toolchain: ${{ steps.msrv.outputs.version }}
           cache-key: "v1-rust-msrv"
@@ -150,6 +271,7 @@ jobs:
   build-tuned-cpu:
     name: Tuned CPU build - ${{ matrix.build }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -161,12 +283,12 @@ jobs:
             os: ubuntu-24.04-arm
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           submodules: recursive
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           # Nothing this job caches may contain machine code. `native` bakes
           # whatever the saving runner supported into every host artifact,
@@ -184,7 +306,9 @@ jobs:
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
           rustflags: ""
 
-      - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@5b4d68e2e660441203ab128a23676f1e4faf1532 # v2.86.3
+        with:
+          tool: nextest
 
       - name: Run tests with -Ctarget-cpu=native
         env:
@@ -198,6 +322,7 @@ jobs:
   build-feature-matrix:
     name: Feature build - ${{ matrix.name }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -218,12 +343,12 @@ jobs:
             features: "--features serde1,multi-threaded-cf"
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           submodules: recursive
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           cache-key: "v1-rust-features"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
@@ -246,14 +371,15 @@ jobs:
   package:
     name: Package verify
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           submodules: recursive
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           cache-key: "v1-rust-package"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
@@ -311,9 +437,142 @@ jobs:
 
           exit $fail
 
+      # The sys crate got all the packaging attention while the root crate got
+      # none. Its `exclude` list had been dead for years: it named `test/**/*`
+      # while the directory is `tests/`, so all 40 integration tests and the
+      # criterion bench shipped to crates.io, none of which a downstream can
+      # compile. That took the tarball from 123 files to 61.
+      #
+      # `--list` and not `cargo package`. Building the root tarball resolves
+      # `rust-librocksdb-sys` from the registry, which fails for the whole
+      # release-prep window between bumping the sys version and publishing it.
+      # `--list` reads the manifest without resolving, so it works then too.
+      - name: Assert the root crate tarball carries only what compiles
+        run: |
+          set -euo pipefail
+          cargo package --list -p rust-rocksdb > /tmp/root.txt
+          echo "packaged files: $(wc -l < /tmp/root.txt)"
+
+          fail=0
+          for pat in '^tests/' '^benches/' '^\.github/' '^\.vscode/'; do
+            n=$(grep -cE "$pat" /tmp/root.txt || true)
+            if [ "$n" -ne 0 ]; then
+              echo "::error::$n packaged files match $pat, which nothing downstream compiles"
+              fail=1
+            fi
+          done
+
+          # The opposite mistake: an exclude glob that eats something the crate
+          # needs. `build_folly.sh` is here because the packaged README tells
+          # `coroutines` users to run it, and the .md is pulled in by
+          # `include_str!` from src/db.rs.
+          for pat in '^src/lib\.rs$' '^src/db\.rs$' '^LICENSE$' '^README\.md$' \
+                     '^scripts/build_folly\.sh$' \
+                     '^src/db_create_column_family_with_import\.md$'; do
+            if ! grep -qE "$pat" /tmp/root.txt; then
+              echo "::error::nothing matches $pat, but the crate needs it"
+              fail=1
+            fi
+          done
+
+          exit $fail
+
+  # Both feature sets run in one job because `multi-threaded-cf = []` enables
+  # nothing in `rust-librocksdb-sys`, so the two builds link a byte-identical
+  # RocksDB. As separate jobs they paid for that C++ build twice on each of the
+  # four runners. Sharing one `target/` means the second `nextest` invocation
+  # only recompiles the root crate.
+  #
+  # `test-jemalloc` and `test-release` stay separate below: those genuinely
+  # change the native build.
+  # `MAINTAINERSHIP.md` commits to semver, and the 0.52.0 changelog is full of
+  # hand-classified `fix!` entries for lifetime and signature changes on
+  # `WriteBatchWithIndex::iterator_with_base`, `get_pinned_from_batch_and_db`
+  # and `Snapshot::iterator`. Lifetime breakage in a wrapper crate is exactly
+  # what this detects mechanically, and it was being caught by a human reading
+  # their own diff.
+  #
+  # Advisory rather than a gate, because the version bump lives in the separate
+  # "Release X.Y.Z" commit. Between releases `Cargo.toml` still carries the
+  # published version, so every accumulated breaking change reads as an unbumped
+  # one and the job would sit red until the next release.
+  #
+  # Not `continue-on-error`: that hides a job that could not run at all just as
+  # thoroughly as it hides findings. The step reads the exit code instead, which
+  # cargo-semver-checks documents as 0 clean, 100 violations found, 101 could not
+  # complete. Only 100 is downgraded.
+  semver:
+    name: Semver checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          submodules: recursive
+
+      - name: Install rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          cache-key: "v1-rust-semver"
+          cache-save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      - uses: taiki-e/install-action@5b4d68e2e660441203ab128a23676f1e4faf1532 # v2.86.3
+        with:
+          tool: cargo-semver-checks
+
+      # Only the root crate. `rust-librocksdb-sys` is bindgen output, where
+      # every RocksDB bump legitimately rewrites the API surface.
+      #
+      # The feature set is named rather than left to the default heuristic,
+      # which would enable `coroutines` (needs a folly install) and `io-uring`
+      # (needs liburing). This is the same set docs.rs builds, so it is the
+      # public API as documented.
+      - name: Check semver against the published version
+        env:
+          # The workflow sets `always` globally, which would put escape codes in
+          # the job summary.
+          CARGO_TERM_COLOR: never
+        run: |
+          set -euo pipefail
+
+          status=0
+          cargo semver-checks --package rust-rocksdb \
+            --default-features \
+            --features serde1,multi-threaded-cf,raw-ptr \
+            > semver.txt 2>&1 || status=$?
+          cat semver.txt
+
+          if [ "$status" -eq 0 ]; then
+            echo "No semver violations against the published version." \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if [ "$status" -ne 100 ]; then
+            echo "::error::cargo semver-checks could not complete (exit $status)"
+            exit "$status"
+          fi
+
+          # Exit 100. A notice rather than a warning: this fires on every PR
+          # between releases, and the point is a running tally to write the
+          # changelog from, not something to act on per-PR.
+          echo "::notice::Breaking changes accumulated since the published release; see the job summary."
+          {
+            echo "### Breaking changes since the published release"
+            echo
+            echo "\`Cargo.toml\` still carries the published version, so these"
+            echo "are the changes that decide the next version number."
+            echo
+            echo '```'
+            cat semver.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   test:
     name: ${{ matrix.build }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -329,16 +588,18 @@ jobs:
             os: windows-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           submodules: recursive
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@5b4d68e2e660441203ab128a23676f1e4faf1532 # v2.86.3
+        with:
+          tool: nextest
 
       - name: Remove msys64 # Workaround to resolve link error with C:\msys64\mingw64\bin\libclang.dll
         if: runner.os == 'Windows'
@@ -359,66 +620,20 @@ jobs:
       - name: Run rocksdb tests
         run: cargo nextest run --all
 
-      - name: Mark working directory as writable
-        if: runner.os == 'Linux'
-        run: chmod -R a+w .
-
-  test-multi-threaded-cf:
-    name: ${{ matrix.build }} (multi-threaded-cf)
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        build: [Linux, Linux-ARM, macOS, Windows]
-        include:
-          - build: Linux
-            os: ubuntu-latest
-          - build: Linux-ARM
-            os: ubuntu-24.04-arm
-          - build: macOS
-            os: macos-latest
-          - build: Windows
-            os: windows-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v5
-        with:
-          submodules: recursive
-
-      - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          cache-key: "v1-rust-multi-threaded-cf"
-          cache-save-if: ${{ github.ref == 'refs/heads/master' }}
-
-      - uses: taiki-e/install-action@nextest
-
-      - name: Remove msys64 # Workaround to resolve link error with C:\msys64\mingw64\bin\libclang.dll
-        if: runner.os == 'Windows'
-        run: Remove-Item -LiteralPath "C:\msys64\" -Force -Recurse
-
-      - name: Install dependencies
-        if: runner.os == 'Windows'
-        run: choco install llvm -y
-
-      - name: Mark working directory as read-only
-        if: runner.os == 'Linux'
-        run: |
-          mkdir -p target
-          touch Cargo.lock
-          chmod -R a-w .
-          chmod -R a+w target Cargo.lock
-
       - name: Run rocksdb tests (multi-threaded-cf)
         run: cargo nextest run --all --features multi-threaded-cf
 
+      # `always()` so a failing test still restores write permission. Without
+      # it the post-checkout and post-cache steps cannot write .git/config, and
+      # the real failure gets buried under a permissions error.
       - name: Mark working directory as writable
-        if: runner.os == 'Linux'
+        if: always() && runner.os == 'Linux'
         run: chmod -R a+w .
 
   test-jemalloc:
     name: Test with jemalloc - ${{ matrix.build }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -432,17 +647,19 @@ jobs:
             os: macos-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           submodules: recursive
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           cache-key: "v1-rust-jemalloc"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@5b4d68e2e660441203ab128a23676f1e4faf1532 # v2.86.3
+        with:
+          tool: nextest
 
       - name: Mark working directory as read-only
         if: runner.os == 'Linux'
@@ -455,8 +672,11 @@ jobs:
       - name: Run rocksdb tests with jemalloc
         run: cargo nextest run --all --features jemalloc
 
+      # `always()` so a failing test still restores write permission. Without
+      # it the post-checkout and post-cache steps cannot write .git/config, and
+      # the real failure gets buried under a permissions error.
       - name: Mark working directory as writable
-        if: runner.os == 'Linux'
+        if: always() && runner.os == 'Linux'
         run: chmod -R a+w .
 
   # Everything else runs the debug profile. Release turns on optimization and
@@ -465,19 +685,22 @@ jobs:
   test-release:
     name: Test release profile
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           submodules: recursive
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           cache-key: "v1-rust-release"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@5b4d68e2e660441203ab128a23676f1e4faf1532 # v2.86.3
+        with:
+          tool: nextest
 
       - name: Run rocksdb tests (release)
         run: cargo nextest run --all --release
@@ -485,14 +708,15 @@ jobs:
   test-sanitizers:
     name: Test with Address/LeakSanitizer
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           submodules: recursive
 
       - name: Install rust nightly
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           toolchain: nightly
           components: rust-src

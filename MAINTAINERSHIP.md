@@ -15,7 +15,16 @@ Maintainers are trusted to close issues, merge pull requests, and publish crates
     * breaking changes due to removed functionality in rocksdb
     * require 1 approval from another maintainer. if no maintainer is able to be reached for 2 weeks, then progress may be made anyway
     * patch (and post-1.0, minor) releases to crates.io that contain only the above work
-    * on each update of submodule rocksdb, run `make -C librocksdb-sys gen_statistics`
+    * on each update of submodule rocksdb, regenerate everything derived from it and commit the result:
+
+      ```sh
+      make -C librocksdb-sys gen_statistics
+      make -C librocksdb-sys gen_perf
+      rm -f librocksdb-sys/rocksdb_lib_sources.txt
+      make -C librocksdb-sys rocksdb_lib_sources.txt
+      ```
+
+      The `rm` is needed because that target is a real file, so make otherwise sees it as up to date. Also bump the `+rocksdb-version` suffix on `rust-librocksdb-sys` to match `rocksdb/include/rocksdb/version.h`. The `Generated files` CI job checks all of this.
 2. Major
     * breaking API changes that are not direct consequences of underlying rocksdb changes
     * refactoring, which should generally only be done for clearly functional reasons like to aid in the completion of a specific task

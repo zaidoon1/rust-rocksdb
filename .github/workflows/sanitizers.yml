@@ -25,6 +25,10 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
 
+# Nothing here writes to the repository.
+permissions:
+  contents: read
+
 jobs:
   ubsan:
     name: UndefinedBehaviorSanitizer
@@ -32,14 +36,15 @@ jobs:
     # jobs that already ran when the commit was pushed.
     if: github.event.action != 'labeled'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           submodules: recursive
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           cache-key: "v1-rust-ubsan"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
@@ -76,14 +81,15 @@ jobs:
     name: ThreadSanitizer
     if: github.event.action != 'labeled'
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           submodules: recursive
 
       - name: Install rust nightly
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           toolchain: nightly
           components: rust-src
@@ -122,14 +128,15 @@ jobs:
     # Nightly and on master, plus any pull request carrying the label.
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-sanitizers')
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           submodules: recursive
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           cache-key: "v1-rust-valgrind"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}

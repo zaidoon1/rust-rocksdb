@@ -1,0 +1,39 @@
+.coderabbit.yaml
+  s_c2cb259dd63613::t_8835bc5904d14b 1-211
+.github/workflows/coroutines.yml
+  s_589b2cd38faf7d::t_6c5fbcae322771 15-18,65,100,123,197-199
+.github/workflows/rust.yml
+  s_589b2cd38faf7d::t_31ed0bd763d91e 12-18,26,29,32,41-124,126,129,134,137,143-162,164-165,168,172-173,175-177,180-185,190,193,198,235,238,255,274,286,291,309-311,325,346,351,374,377,382,440-504,507,512,514,517-519,521-528,530-532,534-535,537,553,558,562-564,582-584,588-590,592,598,612,617,622-624,637-639,641,650,653,658,663-665,673,676,681
+.github/workflows/sanitizers.yml
+  s_589b2cd38faf7d::t_6829c93cee3e2c 28-31,39,42,47,84,87,92,131,134,139
+Cargo.toml
+  s_c2cb259dd63613::t_e1f470f589a069 16-32
+MAINTAINERSHIP.md
+  s_c2cb259dd63613::t_8193c32ee2a594 18-27
+librocksdb-sys/Cargo.toml
+  s_c2cb259dd63613::t_2e73916f6f98e7 10-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "466db8fcaf37a44b14759f827897d02e27647648",
+  "prompts": {},
+  "sessions": {
+    "s_589b2cd38faf7d": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_febf879f4ffeIwqsfLzVxLi2r0",
+        "model": "claude-opus-5"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    },
+    "s_c2cb259dd63613": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_03bc79ba5ffezFRBpQg23F7VXm",
+        "model": "claude-opus-5"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    }
+  }
+}

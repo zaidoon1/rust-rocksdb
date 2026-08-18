@@ -1,0 +1,21 @@
+Cargo.lock
+  s_589b2cd38faf7d::t_4eb09a2aa118c5 670
+Cargo.toml
+  s_589b2cd38faf7d::t_148eaccc7d775b 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "36ee3610bce885f8346a2b802e87dd28559bd1f8",
+  "prompts": {},
+  "sessions": {
+    "s_589b2cd38faf7d": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_febf879f4ffeIwqsfLzVxLi2r0",
+        "model": "claude-opus-5"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    }
+  }
+}

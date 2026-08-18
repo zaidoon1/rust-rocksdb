@@ -1,36 +1,36 @@
 version: 2
 
 updates:
-  # audit.yml reports RUSTSEC advisories against the committed Cargo.lock but
-  # cannot fix them. This opens the PR that does.
+  # Version updates for the workspace. `librocksdb-sys` is a member and there is
+  # one Cargo.lock at the root, so `/` covers both manifests.
+  #
+  # Security advisories are handled separately by Dependabot security updates,
+  # which are enabled on the repository. Keeping versions moving here means
+  # audit.yml has less to report in the first place.
   - package-ecosystem: cargo
     directory: /
     schedule:
       interval: weekly
-      day: monday
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: "chore(deps)"
     groups:
-      # The -sys crates share `cc` and `pkg-config`. Bumping them together
-      # means one RocksDB rebuild in CI instead of seven.
-      native-sys:
+      # Everything feeding the native build: the compression -sys crates plus
+      # the build-dependencies. One PR means one RocksDB rebuild across the CI
+      # matrix instead of one per crate.
+      native-build:
         patterns:
           - "*-sys"
-          - cc
-          - pkg-config
           - bindgen
-      dev:
-        dependency-type: development
+          - cc
+          - glob
+          - pkg-config
+          - rustflags
 
+  # The workflows pin actions to commit SHAs. Dependabot moves the SHA and the
+  # trailing version comment together, which is the only practical way to keep
+  # pinned actions current.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
-      day: monday
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: "chore(ci)"
     groups:
       actions:
         patterns:

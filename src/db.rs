@@ -187,9 +187,22 @@ impl GetIntoBufferResult {
     }
 }
 
+/// Read options tuned for prefix probes.
+fn prefix_probe_read_opts() -> ReadOptions {
+    let mut opts = ReadOptions::default();
+    opts.set_prefix_same_as_start(true);
+    opts
+}
+
 /// A reusable prefix probe that avoids per-call iterator creation/destruction.
 ///
 /// Use this when performing many prefix existence checks in a tight loop.
+///
+/// A prober reads the database as of the sequence number that was current when
+/// it was created, and it pins the memtables and SST files that were current
+/// then. Both are what [`refresh`](PrefixProber::refresh) exists to move
+/// forward. A prober that is only used for a single burst of probes and then
+/// dropped needs neither.
 pub struct PrefixProber<'a, D: DBAccess> {
     raw: DBRawIteratorWithThreadMode<'a, D>,
 }
@@ -197,15 +210,151 @@ pub struct PrefixProber<'a, D: DBAccess> {
 impl<D: DBAccess> PrefixProber<'_, D> {
     /// Returns true if any key exists with the given prefix.
     /// This performs a seek to the prefix and checks the current key.
+    ///
+    /// # Errors
+    ///
+    /// Returns the RocksDB error if the seek failed. A seek that hit an error
+    /// leaves the iterator invalid, so the key check below cannot observe one.
     pub fn exists(&mut self, prefix: &[u8]) -> Result<bool, Error> {
         self.raw.seek(prefix);
-        if self.raw.valid()
-            && let Some(k) = self.raw.key()
-        {
-            return Ok(k.starts_with(prefix));
+        if let Some(key) = self.raw.key() {
+            return Ok(key.starts_with(prefix));
         }
         self.raw.status()?;
         Ok(false)
+    }
+
+    /// Moves the probe to the latest committed state of the database.
+    ///
+    /// Call this before reusing a prober that has been sitting idle. Writes
+    /// that land after the prober was created or last refreshed are invisible
+    /// to it until then.
+    ///
+    /// This is cheap when RocksDB's superversion has not changed, because the
+    /// existing merge tree over the memtables and SST files is kept and only
+    /// the read sequence moves. A flush or a compaction bumps the superversion
+    /// and forces that tree to be rebuilt, which costs roughly what building a
+    /// new prober costs. Refreshing a prober that has not probed yet is a
+    /// pessimisation, because it builds the tree that the first
+    /// [`exists`](PrefixProber::exists) call would otherwise build lazily.
+    ///
+    /// Refreshing also releases the memtables and SST files the prober was
+    /// pinning, which is what lets a flush or a compaction reclaim them. A
+    /// cached prober that is never refreshed holds them for as long as it
+    /// lives, so pool them on a timer rather than on request arrival.
+    ///
+    /// Do not use this against a database that issues `delete_range`. RocksDB
+    /// does not refresh range tombstones correctly, so a refreshed probe can
+    /// report a deleted prefix as still present. See facebook/rocksdb#9255 and
+    /// facebook/rocksdb#7212, both open.
+    ///
+    /// # Errors
+    ///
+    /// Returns the RocksDB error if the refresh failed.
+    pub fn refresh(&mut self) -> Result<(), Error> {
+        self.raw.refresh()
+    }
+}
+
+/// A [`PrefixProber`] that keeps the database open instead of borrowing it.
+///
+/// Use this to cache a prober beyond the scope that built it, for example one
+/// per worker thread. [`PrefixProber`] borrows the database, so it cannot be
+/// held in a thread local or in shared state.
+///
+/// Everything [`PrefixProber`] documents about staleness and pinning applies
+/// here, and matters more, because the point of an owned prober is to outlive
+/// the request that created it. Refresh or drop cached probers on a timer. An
+/// idle one goes on pinning the memtables and SST files it was built over, and
+/// nothing will reclaim them.
+///
+/// `D` is `'static` because the wrapper owns the database rather than borrowing
+/// it. Every `DBWithThreadMode` satisfies that.
+pub struct OwnedPrefixProber<D: DBAccess + 'static> {
+    // Field order is load bearing. Fields drop in declaration order, so the
+    // iterator is destroyed while `_db` still holds the database open.
+    // Reordering these two is a use after free.
+    prober: PrefixProber<'static, D>,
+    _db: Arc<D>,
+}
+
+// No `Deref`/`DerefMut` to `PrefixProber`. `DerefMut` would let two owned
+// probers swap their inner probers, leaving each holding an iterator into the
+// other's database, and dropping one could then free a database the other still
+// points at.
+impl<D: DBAccess + 'static> OwnedPrefixProber<D> {
+    /// Creates an owned prober over the default column family, using read
+    /// options tuned for prefix probes.
+    pub fn new(db: Arc<D>) -> Self {
+        Self::with_opts(db, prefix_probe_read_opts())
+    }
+
+    /// Creates an owned prober over the default column family with the given
+    /// read options.
+    ///
+    /// The prober owns `readopts` so that any buffers it points at, such as
+    /// iterate bounds, stay alive for as long as the iterator.
+    pub fn with_opts(db: Arc<D>, readopts: ReadOptions) -> Self {
+        // A `'static` iterator stores no dangling reference: the database is
+        // recorded on `DBRawIteratorWithThreadMode` as a `PhantomData` lifetime
+        // and nothing reads through it. `_db` is what actually keeps the
+        // database alive, and the field order on the struct is what guarantees
+        // the iterator is destroyed first.
+        let raw = DBRawIteratorWithThreadMode::new(&*db, readopts);
+        Self {
+            prober: PrefixProber { raw },
+            _db: db,
+        }
+    }
+
+    /// Creates an owned prober over one column family, using read options tuned
+    /// for prefix probes.
+    pub fn new_cf(db: Arc<D>, cf_handle: &impl AsColumnFamilyRef) -> Self {
+        Self::cf_with_opts(db, cf_handle, prefix_probe_read_opts())
+    }
+
+    /// Creates an owned prober over one column family with the given read
+    /// options.
+    ///
+    /// `cf_handle` is only read while the iterator is being created. RocksDB
+    /// takes its own reference to the column family, so the handle itself does
+    /// not have to outlive the prober. Dropping the column family while a
+    /// prober over it is alive is still not supported: the prober keeps reading
+    /// the state it was built over, which is no longer meaningful.
+    pub fn cf_with_opts(
+        db: Arc<D>,
+        cf_handle: &impl AsColumnFamilyRef,
+        readopts: ReadOptions,
+    ) -> Self {
+        // See the safety note in `with_opts`.
+        let raw = DBRawIteratorWithThreadMode::new_cf_detached(&*db, cf_handle.inner(), readopts);
+        Self {
+            prober: PrefixProber { raw },
+            _db: db,
+        }
+    }
+
+    /// Returns true if any key exists with the given prefix.
+    ///
+    /// See [`PrefixProber::exists`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the RocksDB error if the seek failed.
+    pub fn exists(&mut self, prefix: &[u8]) -> Result<bool, Error> {
+        self.prober.exists(prefix)
+    }
+
+    /// Moves the probe to the latest committed state of the database.
+    ///
+    /// See [`PrefixProber::refresh`], including its warning about
+    /// `delete_range`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the RocksDB error if the refresh failed.
+    pub fn refresh(&mut self) -> Result<(), Error> {
+        self.prober.refresh()
     }
 }
 
@@ -3270,10 +3419,8 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
     /// need custom tuning (e.g. async IO, readahead, cache-only), use
     /// `prefix_prober_with_opts`.
     pub fn prefix_prober(&self) -> PrefixProber<'_, Self> {
-        let mut opts = ReadOptions::default();
-        opts.set_prefix_same_as_start(true);
         PrefixProber {
-            raw: DBRawIteratorWithThreadMode::new(self, opts),
+            raw: DBRawIteratorWithThreadMode::new(self, prefix_probe_read_opts()),
         }
     }
 
@@ -3292,10 +3439,12 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
     /// Creates a reusable prefix prober over the specified column family using
     /// read options optimized for prefix probes.
     pub fn prefix_prober_cf(&self, cf_handle: &impl AsColumnFamilyRef) -> PrefixProber<'_, Self> {
-        let mut opts = ReadOptions::default();
-        opts.set_prefix_same_as_start(true);
         PrefixProber {
-            raw: DBRawIteratorWithThreadMode::new_cf(self, cf_handle.inner(), opts),
+            raw: DBRawIteratorWithThreadMode::new_cf(
+                self,
+                cf_handle.inner(),
+                prefix_probe_read_opts(),
+            ),
         }
     }
 

@@ -128,6 +128,9 @@ pub struct DBRawIteratorWithThreadMode<'a, D: DBAccess> {
 }
 
 impl<'a, D: DBAccess> DBRawIteratorWithThreadMode<'a, D> {
+    /// Unlike [`new_cf`](Self::new_cf), the `db` borrow is not tied to `'a`.
+    /// That is what lets [`OwnedPrefixProber::with_opts`](crate::OwnedPrefixProber::with_opts)
+    /// build a `'static` iterator, so tying it would break that caller.
     pub(crate) fn new(db: &D, readopts: ReadOptions) -> Self {
         let inner = unsafe { db.create_iterator(&readopts) };
         Self::from_inner(inner, readopts)

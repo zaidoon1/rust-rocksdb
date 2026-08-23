@@ -49,6 +49,11 @@ reviews:
       - dependabot[bot]
 
   path_filters:
+    # One positive pattern makes this whole list an allowlist, and the
+    # `include/**` entry below is one. Without this catch-all, `src/` and
+    # `tests/` match no include, CodeRabbit reports them as "included by none",
+    # and the review is skipped entirely.
+    - "**"
     # Vendored upstream C++. Nothing here is ours to fix, and a submodule bump
     # would otherwise blow past the OSS 100-300 file per-review limit.
     - "!librocksdb-sys/rocksdb/**"

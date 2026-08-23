@@ -142,6 +142,22 @@ impl<'a, D: DBAccess> DBRawIteratorWithThreadMode<'a, D> {
         Self::from_inner(inner, readopts)
     }
 
+    /// Same as [`new_cf`](Self::new_cf), but the returned iterator's lifetime
+    /// parameter is not tied to the `db` borrow.
+    ///
+    /// Keeping `db` alive for at least as long as the iterator becomes the
+    /// caller's job, normally by holding an `Arc<D>` next to it and dropping
+    /// the iterator first. Prefer `new_cf` unless you are building an owning
+    /// wrapper such as [`OwnedPrefixProber`](crate::OwnedPrefixProber).
+    pub(crate) fn new_cf_detached(
+        db: &D,
+        cf_handle: *mut ffi::rocksdb_column_family_handle_t,
+        readopts: ReadOptions,
+    ) -> Self {
+        let inner = unsafe { db.create_iterator_cf(cf_handle, &readopts) };
+        Self::from_inner(inner, readopts)
+    }
+
     pub(crate) fn from_inner(
         inner: *mut ffi::rocksdb_iterator_t,
         readopts: impl Into<IterReadOptions>,

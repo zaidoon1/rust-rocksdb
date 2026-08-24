@@ -295,7 +295,20 @@ fn apply_platform_runtime_libs(target: &Target) {
         println!("cargo::rustc-link-lib=dylib=shlwapi");
     }
 
-    // riscv64 needs libatomic for some 64-bit atomic ops on this arch.
+    // RISC-V has no sub-word load-reserved/store-conditional, so GCC lowers
+    // the `compare_exchange_strong` on `db/write_thread.h`'s
+    // `std::atomic<uint8_t> state` to a `__atomic_compare_exchange_1` call
+    // into libatomic. Upstream's CMake probe only tests
+    // `std::atomic<uint64_t>`, which is lock-free on rv64gc, so it misses this
+    // and links nothing.
+    //
+    // Kept unconditional, which is what HEAD did. Narrowing it by libc or by
+    // compiler both guess wrong somewhere: GCC without `-minline-atomics` needs
+    // the library, current GCC and clang inline the sub-word CAS and do not. The
+    // failure this avoids is an undefined symbol at link; the failure it can
+    // cause is a missing libatomic on a minimal riscv64 sysroot. Upstream has
+    // the same open question at `CMakeLists.txt` ("TODO: Check if -latomic
+    // exists").
     if target.arch == "riscv64" {
         println!("cargo::rustc-link-lib=atomic");
     }
@@ -384,6 +397,19 @@ fn sanitizer_enabled() -> bool {
         .any(|flags| flags.to_string_lossy().contains("sanitize"))
 }
 
+/// Whether `cfg` will invoke `cl.exe` itself, as opposed to `clang-cl`.
+///
+/// ISA selection has to key on the compiler rather than on
+/// `CARGO_CFG_TARGET_ENV`, because `clang-cl` builds `*-windows-msvc` targets
+/// too but behaves like clang: it takes the GNU-style `-m` flags, turns them
+/// into real target features, and rejects an intrinsic whose `__target__`
+/// feature is not enabled no matter how the matching predefine got there.
+/// Handing it `-D__SSE4_2__=1` instead of `-msse4.2` does not build.
+fn compiles_with_cl_exe(cfg: &cc::Build) -> bool {
+    let compiler = cfg.get_compiler();
+    compiler.is_like_msvc() && !compiler.is_like_clang_cl()
+}
+
 // =========================================================================
 // Vendored build
 // =========================================================================
@@ -393,6 +419,19 @@ mod vendor {
 
     /// Compile RocksDB from the bundled submodule sources.
     pub(super) fn build(target: &Target) {
+        // Warned here rather than in `apply_optional_features`, which runs
+        // twice on aarch64. Silently ignoring it would make
+        // `optimize_filters_for_memory` quietly stop accounting for allocator
+        // slack.
+        if cfg!(feature = "malloc-usable-size") && !malloc_usable_size_supported(target) {
+            println!(
+                "cargo::warning=the `malloc-usable-size` feature is enabled but `{}` has \
+                 no `malloc_usable_size`; RocksDB will charge requested sizes instead of \
+                 allocated ones",
+                target.os
+            );
+        }
+
         let (mut cfg, layout) = configure(target, CpuBaseline::FromTargetCpu);
 
         // These are pulled out into their own build below when they need
@@ -485,7 +524,6 @@ mod vendor {
         }
 
         apply_native_dev_defaults(&mut cfg);
-        cfg.cpp(true);
         (cfg, layout)
     }
 
@@ -534,6 +572,13 @@ mod vendor {
     /// fully qualified path.
     fn base_cfg(target: &Target) -> cc::Build {
         let mut cfg = cc::Build::new();
+
+        // First, before anything reads the compiler back off `cfg`. cc-rs picks
+        // `CXX` or `CC` from this flag (`get_base_compiler`), so
+        // `compiles_with_cl_exe` and every `flag_if_supported` probe would
+        // otherwise inspect the C compiler: wrong tool family when only `CXX` is
+        // set, and probes that use `CFLAGS` and a `.c` file for a C++ build.
+        cfg.cpp(true);
 
         cfg.include("c-api-extensions/")
             .include("rocksdb/include/")
@@ -636,6 +681,16 @@ mod vendor {
         }
     }
 
+    /// Whether `port/malloc.h` can reach `malloc_usable_size` on this target.
+    ///
+    /// It includes `<malloc.h>`, or `<malloc_np.h>` under `OS_FREEBSD`. glibc,
+    /// musl and bionic all declare the function; Apple spells it `malloc_size`
+    /// and Windows has no equivalent, so those stay off. Upstream probes for
+    /// the symbol rather than listing platforms, which reaches the same set.
+    fn malloc_usable_size_supported(target: &Target) -> bool {
+        matches!(target.os.as_str(), "linux" | "android" | "freebsd")
+    }
+
     /// Other Cargo features that translate into preprocessor defines.
     fn apply_optional_features(cfg: &mut cc::Build, target: &Target) {
         if cfg!(feature = "rtti") || cfg!(feature = "coroutines") {
@@ -645,7 +700,9 @@ mod vendor {
         } else {
             cfg.flag_if_supported("-fno-rtti");
         }
-        if cfg!(feature = "malloc-usable-size") && target.os == "linux" {
+        // The unsupported case is warned about once in `build`, not here:
+        // aarch64 configures twice and would print it twice.
+        if cfg!(feature = "malloc-usable-size") && malloc_usable_size_supported(target) {
             cfg.define("ROCKSDB_MALLOC_USABLE_SIZE", Some("1"));
         }
         if cfg!(feature = "valgrind") {
@@ -659,6 +716,14 @@ mod vendor {
         let Some(cpu) = &target.rust_target_cpu else {
             return;
         };
+        // `cl.exe` has no `-march`/`-mcpu`. It names a baseline with `/arch:`
+        // instead, which `apply_x86_msvc` derives from the target features, so
+        // passing `-march=` here would only add a D9002 warning to each of the
+        // several hundred translation units. `clang-cl` does accept `-march=`,
+        // hence the compiler check rather than a target-env one.
+        if compiles_with_cl_exe(cfg) {
+            return;
+        }
         match target.arch.as_str() {
             "x86_64" | "x86" => {
                 cfg.flag_if_supported(format!("-march={cpu}"));
@@ -688,6 +753,61 @@ mod vendor {
     }
 
     fn apply_x86(cfg: &mut cc::Build, target: &Target) {
+        if compiles_with_cl_exe(cfg) {
+            apply_x86_msvc(cfg, target);
+        } else {
+            apply_x86_gnu(cfg, target);
+        }
+    }
+
+    /// Hint to `util/crc32c.cc` that the three-way pipelined CRC32C kernel is
+    /// not compilable here, without giving up hardware CRC32C.
+    ///
+    /// That kernel is gated on `__SSE4_2__ && __PCLMUL__` and nothing else,
+    /// then calls `_mm_clmulepi64_si128` and `_mm_crc32_u64` inside it. The
+    /// macro pair can be true in two configurations where those intrinsics do
+    /// not exist, and each is a hard compile error rather than a slow build:
+    ///
+    /// - `port/lang.h` back-fills both macros from `__AVX__`, but AVX does not
+    ///   imply PCLMUL. `-Ctarget-cpu=x86-64-v3` and `-v4` select AVX2 without
+    ///   it, and MSVC's `/arch:AVX` has no PCLMUL level at all.
+    /// - `_mm_crc32_u64` is 64-bit only. Clang keeps it behind
+    ///   `#ifdef __x86_64__` in `crc32intrin.h`, so any 32-bit x86 target that
+    ///   reaches the kernel fails, which `-Ctarget-cpu=westmere` or newer does
+    ///   on i686.
+    ///
+    /// `NO_PCLMUL` is RocksDB's own opt-out for this (`port/lang.h`). It costs
+    /// the pipelining and nothing else: `__SSE4_2__` still selects the hardware
+    /// `_mm_crc32_*` path in `DefaultCRC32`.
+    ///
+    /// It is decided from the rustc feature set, so it also overrides a compiler
+    /// that was pointed at PCLMUL some other way, such as
+    /// `CXXFLAGS=-march=native` on a machine that has it. `port/lang.h` applies
+    /// the opt-out as an `#undef`, which a command-line flag cannot win against.
+    /// `-Ctarget-cpu` and `-Ctarget-feature` are the supported way to raise the
+    /// baseline, because they move the Rust half too.
+    fn disable_three_way_crc(cfg: &mut cc::Build, target: &Target) {
+        cfg.define("NO_PCLMUL", None);
+        // Only worth a warning where adding the feature would change the
+        // outcome. On 32-bit and on android the answer is no regardless, and if
+        // PCLMULQDQ is already present then something else ruled the kernel out
+        // and telling the user to add it is just wrong.
+        let actionable = target.pointer_width == 64
+            && target.os != "android"
+            && target.has_feature("sse4.2")
+            && !target.has_feature("pclmulqdq");
+        if actionable {
+            println!(
+                "cargo::warning=this target has SSE4.2 but not PCLMULQDQ, so CRC32C \
+                 runs on the hardware instruction without three-way pipelining. \
+                 `-Ctarget-cpu=x86-64-v3` and `-v4` are the usual way to land here; \
+                 add `-Ctarget-feature=+pclmulqdq` or name a CPU such as \
+                 `-Ctarget-cpu=haswell` to get it"
+            );
+        }
+    }
+
+    fn apply_x86_gnu(cfg: &mut cc::Build, target: &Target) {
         // SSE4.2 enables hardware CRC32C (Intel Nehalem+ / AMD Bulldozer+).
         if target.has_feature("sse2") {
             cfg.flag_if_supported("-msse2");
@@ -712,7 +832,13 @@ mod vendor {
         // `BottomNBits` (util/math.h) stays off `bzhi` and the LOUDS trie
         // select stays off `pdep`, even for a user who explicitly asked for
         // `-Ctarget-feature=+bmi2`.
-        if target.has_feature("bmi2") {
+        //
+        // 64-bit only, for the same reason as `-mpclmul` below: `__BMI2__` opens
+        // the `sizeof(T) <= 8` arm of `BottomNBits`, which calls `_bzhi_u64`,
+        // and clang declares that one only under `__x86_64__`. `clock_cache.cc`
+        // instantiates `BottomNBits` on `uint64_t`, so i686 with
+        // `-Ctarget-cpu=haswell` fails to compile rather than running slower.
+        if target.pointer_width == 64 && target.has_feature("bmi2") {
             cfg.flag_if_supported("-mbmi2");
         }
         if target.has_feature("popcnt") {
@@ -721,16 +847,89 @@ mod vendor {
         if target.has_feature("lzcnt") {
             cfg.flag_if_supported("-mlzcnt");
         }
-        // Android targets don't define __PCLMUL__ even with the feature.
-        if target.os != "android" && target.has_feature("pclmulqdq") {
+        // The android term is inherited and its original justification, that
+        // android does not define `__PCLMUL__` even with the feature, does not
+        // hold: NDK clang defines it from `-mpclmul` like any other clang. Left
+        // alone because it only costs the pipelining and there is no android
+        // target in CI to confirm removing it is safe.
+        let pclmul =
+            target.pointer_width == 64 && target.os != "android" && target.has_feature("pclmulqdq");
+        if pclmul {
             cfg.flag_if_supported("-mpclmul");
+        } else {
+            disable_three_way_crc(cfg, target);
         }
-        // RocksDB <= 10.11.0 assumes AVX implies PCLMUL, which isn't true
-        // for x86-64-v3/-v4. Warn so the user knows the build may fail.
-        if target.has_feature("avx") && !target.has_feature("pclmulqdq") {
+    }
+
+    /// `cl.exe` has no `-m<feature>` options. It reports them as a D9002
+    /// warning, exits 0, and ignores them, so every GNU-style flag above was a
+    /// no-op on MSVC and left Windows builds on the software CRC32C table, the
+    /// scalar Bloom probe and the non-BMI2 `BottomNBits` no matter what the
+    /// user asked for.
+    ///
+    /// MSVC declares every x86 intrinsic regardless of `/arch:` and gates only
+    /// the feature macros RocksDB dispatches on: `port/lang.h` back-fills
+    /// `__SSE4_2__` and `__PCLMUL__` from `__AVX__`, then `__POPCNT__` from
+    /// `__SSE4_2__`, and `__AVX__` / `__AVX2__` appear only under `/arch:`.
+    ///
+    /// Upstream's CMake hardcodes `/arch:AVX2` when `PORTABLE=0`. We derive the
+    /// level from the target features instead so the C++ half never assumes
+    /// more than the baseline rustc compiled the Rust half for.
+    fn apply_x86_msvc(cfg: &mut cc::Build, target: &Target) {
+        // `/arch:` names one level rather than accumulating, so take the
+        // highest the target features justify. It stops at AVX2 on purpose:
+        // `/arch:AVX512` means F+CD+BW+DQ+VL to `cl.exe`, while rustc's
+        // `avx512f` does not imply the rest (`-Ctarget-cpu=knl` reports F and CD
+        // only), so keying that level on `avx512f` would tell the C++ half more
+        // than the Rust baseline supports. Nothing RocksDB dispatches on is lost
+        // by capping here; the only macro above `__AVX2__` read anywhere in the
+        // tree is `__AVX512F__` in the vendored xxhash, which picks a wider
+        // `XXH_VECTOR` and is a pure codegen choice.
+        //
+        // `flag()` rather than `flag_if_supported()` because the probe is
+        // useless here: `cl.exe` reports an unknown option as a D9002 warning
+        // and still exits 0, so `is_flag_supported` cannot tell an accepted
+        // option from an ignored one and would only cost an extra compile.
+        let level = if target.has_feature("avx2") {
+            Some("/arch:AVX2")
+        } else if target.has_feature("avx") {
+            Some("/arch:AVX")
+        } else {
+            None
+        };
+
+        if let Some(level) = level {
+            cfg.flag(level);
+        } else if target.has_feature("sse4.2") {
+            // There is no `/arch:` level for plain SSE4.2, so define the macro
+            // `port/lang.h` would have derived from `__AVX__`. `cl.exe`
+            // declares every x86 intrinsic regardless of `/arch:`, and
+            // `util/crc32c.cc` carries an MSVC-specific pragma inside the
+            // three-way branch, so this is a configuration upstream expects.
+            cfg.define("__SSE4_2__", Some("1"));
+        } else {
             println!(
-                r#"cargo::warning=RocksDB BUG: target arch missing -mpclmul; compile may fail: pass a named architecture e.g. -Ctarget-cpu=broadwell"#
+                r#"cargo::warning=compiling without AVX or SSE4.2: CRC will be slow (set RUSTFLAGS="-Ctarget-cpu=..." to optimize RocksDB e.g. -Ctarget-cpu=broadwell)"#
             );
+        }
+
+        // Decided explicitly in both directions, because neither branch above
+        // settles it: the `/arch:AVX*` levels get `__PCLMUL__` back-filled from
+        // `__AVX__` without PCLMULQDQ being implied, and the SSE4.2 branch says
+        // nothing about it either way. `-Ctarget-cpu=nehalem` and
+        // `-Ctarget-cpu=x86-64-v2` reach the SSE4.2 branch without PCLMULQDQ and
+        // `x86-64-v3` reaches `/arch:AVX2` without it. `cl.exe` emits the
+        // instruction regardless of `/arch:`, so getting this wrong is an
+        // illegal instruction at the first checksum, not a build error.
+        //
+        // `level.is_none()` below covers two sub-cases, the SSE4.2 branch and
+        // the no-features branch. In the second, `__PCLMUL__` lands without
+        // `__SSE4_2__` and `crc32c.cc` ignores it, since it needs both.
+        let pclmul = target.pointer_width == 64 && target.has_feature("pclmulqdq");
+        if !pclmul {
+            disable_three_way_crc(cfg, target);
+        } else if level.is_none() {
+            cfg.define("__PCLMUL__", Some("1"));
         }
     }
 
@@ -859,10 +1058,37 @@ mod vendor {
                 ] {
                     cfg.define(d, None);
                 }
-                if target.triple == "x86_64-pc-windows-gnu" {
-                    // MinGW needs localtime_r and Vista+ headers.
+                // Every MinGW target, not just x86_64: the previous exact-triple
+                // check missed i686, aarch64 and the `*-windows-gnullvm` set.
+                // Upstream gates all three of these on CMake's `MINGW`, which
+                // covers the lot. One `env_abi` arm is enough because the
+                // gnullvm targets also report `target_env = "gnu"`; they are
+                // distinguished by `target_abi = "llvm"`, which nothing here
+                // needs.
+                //
+                // `_WIN32_WINNT` is the one that matters. `env_win.cc` switches
+                // `AreFilesSame` to a `NotSupported` stub at
+                // `_WIN32_WINNT == _WIN32_WINNT_VISTA`; the other arm uses
+                // `FILE_ID_INFO` and `FileIdInfo`, which mingw-w64 only
+                // declares from `_WIN32_WINNT >= 0x0602`, so a header set that
+                // gates them fails to compile without this. The cost is that
+                // MinGW loses the real `AreFilesSame`, so RocksDB falls back to
+                // path comparison when detecting a doubly-opened DB. Upstream
+                // makes the same trade.
+                if target.env_abi == "gnu" {
+                    // Upstream parity only. The single reader in the tree is
+                    // `port/port_posix.cc`, which the Windows layout does not
+                    // compile, and it wants `>= 200112L` anyway.
                     cfg.define("_POSIX_C_SOURCE", Some("1"));
                     cfg.define("_WIN32_WINNT", Some("_WIN32_WINNT_VISTA"));
+                    // Some RocksDB translation units exceed the COFF section
+                    // limit under MinGW's assembler. Upstream passes this too.
+                    // GNU `as` registers `-mbig-obj` for PE on i386 and x86-64
+                    // and clang's integrated assembler accepts it everywhere I
+                    // could test, so the probe is belt and braces: on an
+                    // assembler that rejects it, dropping the flag is better
+                    // than failing the build.
+                    cfg.flag_if_supported("-Wa,-mbig-obj");
                 }
                 SourceLayout::Windows
             }
@@ -1193,20 +1419,73 @@ mod snappy {
     /// applied and snappy keeps its portable path. Setting the macro anyway
     /// would break the build rather than slow it down.
     ///
-    /// MSVC gets the macro with no flag: `cl.exe` exposes every intrinsic
-    /// regardless of `/arch:` and has no `-m` options. It also reports unknown
-    /// options as a D9002 *warning* and exits 0, so `is_flag_supported` cannot
-    /// tell an accepted flag from an ignored one there. Same reasoning as
-    /// `arm_crc32c_sources`.
-    fn enable_isa(cfg: &mut cc::Build, target: &Target, flag: &str, define: Option<&str>) {
-        if !target.is_msvc() {
-            if !cfg.is_flag_supported(flag).unwrap_or(false) {
-                return;
-            }
-            cfg.flag(flag);
+    /// Only reached for compilers that take `-m` flags, which includes
+    /// `clang-cl`. `cl.exe` returns earlier in [`apply_snappy_x86_isa`].
+    fn enable_isa(cfg: &mut cc::Build, flag: &str, define: Option<&str>) {
+        if !cfg.is_flag_supported(flag).unwrap_or(false) {
+            return;
         }
+        cfg.flag(flag);
         if let Some(define) = define {
             cfg.define(define, Some("1"));
+        }
+    }
+
+    /// Turn on snappy's x86 accelerated paths.
+    ///
+    /// `SNAPPY_HAVE_SSSE3` drives `SNAPPY_HAVE_VECTOR_BYTE_SHUFFLE` and the
+    /// vectorized pattern copy in `IncrementalCopy`. `SNAPPY_HAVE_X86_CRC32`
+    /// selects `_mm_crc32_u32` for the compressor's hash and
+    /// `SNAPPY_HAVE_BMI2` selects `_bzhi_u32` in `ExtractLowBytes`; snappy
+    /// derives those two from `__SSE4_2__` and `__BMI2__` itself.
+    fn apply_snappy_x86_isa(cfg: &mut cc::Build, target: &Target) {
+        if target.arch != "x86_64" && target.arch != "x86" {
+            return;
+        }
+
+        if compiles_with_cl_exe(cfg) {
+            // `cl.exe` has no `-m` options but declares every x86 intrinsic
+            // regardless of `/arch:`, so the macro is all that is needed.
+            // Upstream snappy reaches the same conclusion from the other end:
+            // its CMake probes compile those intrinsics with no ISA flag, which
+            // succeeds on MSVC.
+            //
+            // Still gated on the target features. `cl.exe` will emit `pshufb`
+            // and `crc32` for a baseline that does not include them, and the
+            // result faults on the first block rather than failing to build.
+            if target.has_feature("ssse3") {
+                cfg.define("SNAPPY_HAVE_SSSE3", Some("1"));
+            }
+            // Set by hand because snappy derives this one from `__SSE4_2__`
+            // alone and, unlike its `SNAPPY_HAVE_BMI2` case, carries no
+            // `_MSC_VER` fallback, and `cl.exe` never predefines `__SSE4_2__`.
+            if target.has_feature("sse4.2") {
+                cfg.define("SNAPPY_HAVE_X86_CRC32", Some("1"));
+            }
+            // `SNAPPY_HAVE_BMI2` is left off. snappy wants `_MSC_VER &&
+            // __AVX2__` for it, so reaching it would mean passing this build the
+            // same `/arch:` level the RocksDB build gets. That is a gap in our
+            // configuration rather than a limit of snappy, and closing it is a
+            // separate change from this one.
+            return;
+        }
+
+        // A `SNAPPY_HAVE_*` macro is not an optimization hint. Setting one
+        // makes `snappy-internal.h` call the matching intrinsic from a plain
+        // inline function, so on GCC and Clang the ISA has to be enabled on the
+        // command line or the translation unit fails to compile.
+        if target.has_feature("ssse3") {
+            enable_isa(cfg, "-mssse3", Some("SNAPPY_HAVE_SSSE3"));
+        }
+        // These two need the flag and no macro: without the flag the compiler
+        // never defines `__SSE4_2__` or `__BMI2__`, which left the CRC32
+        // compressor hash and `_bzhi_u32` off on every x86 build regardless of
+        // what the user asked for.
+        if target.has_feature("sse4.2") {
+            enable_isa(cfg, "-msse4.2", None);
+        }
+        if target.has_feature("bmi2") {
+            enable_isa(cfg, "-mbmi2", None);
         }
     }
 
@@ -1247,41 +1526,21 @@ mod snappy {
             cfg.define("HAVE_BUILTIN_CTZ", Some("1"));
             cfg.define("HAVE_BUILTIN_PREFETCH", Some("1"));
         }
-        // SNAPPY_HAVE_{SSSE3,NEON} drive SNAPPY_HAVE_VECTOR_BYTE_SHUFFLE, which
-        // selects the vectorized pattern copy in `IncrementalCopy`.
-        //
-        // A `SNAPPY_HAVE_*` macro is not an optimization hint. Setting one
-        // makes `snappy-internal.h` call the matching intrinsic from a plain
-        // inline function, so the ISA has to be enabled on the command line or
-        // the translation unit fails to compile. NEON is the exception: it is
-        // mandatory in AArch64, so the baseline already provides it.
+        // `SNAPPY_HAVE_NEON` drives `SNAPPY_HAVE_VECTOR_BYTE_SHUFFLE` and needs
+        // no flag: NEON is mandatory in AArch64, so the baseline provides it.
         //
         // The arch check is load-bearing. snappy's NEON path calls
         // `vqtbl1q_u8`, `vminvq_u8` and `vmaxvq_u8`, which only exist in
         // AArch64, but `neon` is also a target feature on 32-bit ARM, and the
         // `thumbv7neon-*` targets enable it by default. The feature check
         // narrows within AArch64 for the targets that build without SIMD.
-        //
-        // This build has its own `cc::Build` and never runs through
-        // `apply_x86`/`apply_target_cpu`, so nothing else here will supply the
-        // flag.
         if target.arch == "aarch64" && target.has_feature("neon") {
             cfg.define("SNAPPY_HAVE_NEON", Some("1"));
         }
-        if target.has_feature("ssse3") {
-            enable_isa(&mut cfg, target, "-mssse3", Some("SNAPPY_HAVE_SSSE3"));
-        }
-        // snappy.cc derives SNAPPY_HAVE_X86_CRC32 and SNAPPY_HAVE_BMI2 from
-        // __SSE4_2__ and __BMI2__ itself, so these need the flag and no macro.
-        // Without the flag the compiler never defines either predefine, which
-        // left the CRC32 compressor hash and `_bzhi_u32` off on every x86
-        // build regardless of what the user asked for.
-        if target.has_feature("sse4.2") {
-            enable_isa(&mut cfg, target, "-msse4.2", None);
-        }
-        if target.has_feature("bmi2") {
-            enable_isa(&mut cfg, target, "-mbmi2", None);
-        }
+        // This build has its own `cc::Build` and never runs through
+        // `apply_x86`/`apply_target_cpu`, so nothing else here supplies the x86
+        // flags.
+        apply_snappy_x86_isa(&mut cfg, target);
 
         for src in [
             "snappy/snappy.cc",

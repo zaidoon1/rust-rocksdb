@@ -1280,6 +1280,23 @@ impl<T: ThreadMode> DBWithThreadMode<T> {
         Ok(db)
     }
 
+    /// Manually, synchronously attempt to resume DB writes after a write failure
+    /// to the underlying filesystem. Returns OK if writes are successfully resumed,
+    /// or there was no outstanding error to recover from. Returns underlying write
+    /// error if it is not recoverable. Returns [`crate::ErrorKind::Busy`] if an
+    /// auto-resume is in progress, without waiting for it to complete.
+    ///
+    /// See <https://github.com/facebook/rocksdb/wiki/Background-Error-Handling>
+    /// See [`crate::Options::set_max_bgerror_resume_count`]
+    /// See [`crate::event_listener::EventListener::on_error_recovery_begin`]
+    pub fn resume(&self) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rust_rocksdb_resume(self.inner.inner()));
+        }
+
+        Ok(())
+    }
+
     /// Removes the database entries in the range `["from", "to")` using given write options.
     pub fn delete_range_cf_opt<K: AsRef<[u8]>>(
         &self,

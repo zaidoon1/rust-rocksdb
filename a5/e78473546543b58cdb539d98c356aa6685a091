@@ -1,0 +1,19 @@
+src/compaction_filter_factory.rs
+  s_895480266ece3b::t_b973d7189035ad 13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a5e78473546543b58cdb539d98c356aa6685a091",
+  "prompts": {},
+  "sessions": {
+    "s_895480266ece3b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a04a2e-f83f-7630-9990-ddfef9ce8edc",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    }
+  }
+}

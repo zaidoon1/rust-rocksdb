@@ -155,16 +155,32 @@ impl EnvPriority {
 
 /// Reads a raw `rocksdb::CompactionReason`.
 ///
-/// `None` covers `kReadTriggered`, which [`DBCompactionReason`] has no variant
-/// for, the `kNumOfReasons` count sentinel, and anything a newer RocksDB adds.
+/// `None` covers the `kNumOfReasons` count sentinel and anything a newer
+/// RocksDB adds.
 fn compaction_reason_from_raw(raw: c_int) -> Option<DBCompactionReason> {
-    // `DBCompactionReason` stops at `KRefitLevel`, which is 19 in
-    // `listener.h:113`, and its own `From<u32>` reads 20 as the count sentinel
-    // rather than as `kReadTriggered`. Only the range both agree on is mapped.
-    if !(0..=19).contains(&raw) {
+    if !(DBCompactionReason::KUnknown as c_int..DBCompactionReason::KNumOfReasons as c_int)
+        .contains(&raw)
+    {
         return None;
     }
     Some(DBCompactionReason::from(raw as u32))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_triggered_is_a_named_compaction_reason() {
+        assert_eq!(
+            compaction_reason_from_raw(DBCompactionReason::KReadTriggered as c_int),
+            Some(DBCompactionReason::KReadTriggered)
+        );
+        assert_eq!(
+            compaction_reason_from_raw(DBCompactionReason::KNumOfReasons as c_int),
+            None
+        );
+    }
 }
 
 /// Builds a slice from a pointer and length pair borrowed from C++.

@@ -20,6 +20,9 @@
 use std::env;
 use std::path::{Path, PathBuf};
 
+#[path = "build_support/x86.rs"]
+mod x86;
+
 // =========================================================================
 // Constants
 // =========================================================================
@@ -1462,11 +1465,13 @@ mod snappy {
             if target.has_feature("sse4.2") {
                 cfg.define("SNAPPY_HAVE_X86_CRC32", Some("1"));
             }
-            // `SNAPPY_HAVE_BMI2` is left off. snappy wants `_MSC_VER &&
-            // __AVX2__` for it, so reaching it would mean passing this build the
-            // same `/arch:` level the RocksDB build gets. That is a gap in our
-            // configuration rather than a limit of snappy, and closing it is a
-            // separate change from this one.
+            // Snappy normally infers BMI2 from MSVC's AVX2 macro. Rust treats
+            // those as independent target features, so select this path from
+            // BMI2 itself and do not raise the compiler's broader `/arch:`
+            // baseline.
+            if let Some(define) = x86::snappy_msvc_bmi2_define(&target.features) {
+                cfg.define(define, Some("1"));
+            }
             return;
         }
 

@@ -138,16 +138,18 @@ pub enum EnvPriority {
 
 impl EnvPriority {
     /// Reads a raw `Env::Priority`, or `None` for a value this crate does not
-    /// name.
+    /// name. The discriminant is the raw value — `env.h`,
+    /// `enum Priority { BOTTOM, LOW, HIGH, USER, TOTAL }` — so the enum is the
+    /// only place the mapping is written down and TOTAL reads back as `None`.
     fn try_from_raw(raw: c_int) -> Option<Self> {
-        // env.h:441, `enum Priority { BOTTOM, LOW, HIGH, USER, TOTAL }`.
-        match raw {
-            0 => Some(EnvPriority::Bottom),
-            1 => Some(EnvPriority::Low),
-            2 => Some(EnvPriority::High),
-            3 => Some(EnvPriority::User),
-            _ => None,
-        }
+        [
+            EnvPriority::Bottom,
+            EnvPriority::Low,
+            EnvPriority::High,
+            EnvPriority::User,
+        ]
+        .into_iter()
+        .find(|&candidate| raw == candidate as c_int)
     }
 }
 

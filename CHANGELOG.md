@@ -2,9 +2,9 @@
 
 ## 0.53.0 (2026-09-05)
 
-This release closes the usable gaps between the safe wrapper and the bundled
-RocksDB 11.8.1 C API. It also adds reusable prefix probes and fixes native CPU
-feature selection. Read the breaking changes before upgrading.
+This release adds broad safe-wrapper coverage for the bundled RocksDB 11.8.1 C
+API. It also adds reusable prefix probes and fixes native CPU feature selection.
+Read the breaking changes before upgrading.
 
 `rust-librocksdb-sys` moves to 0.48.1+11.8.1 to publish the native build fixes.
 The bundled RocksDB version stays at 11.8.1.
@@ -28,6 +28,10 @@ The bundled RocksDB version stays at 11.8.1.
   concurrent background use. Closures that capture non-thread-safe state must
   move that state behind a thread-safe type.
   ([#268](https://github.com/zaidoon1/rust-rocksdb/pull/268))
+- feat!: system-linked builds now require RocksDB 11.8.x headers and library.
+  New option wrappers bind C functions introduced in 11.8, so RocksDB 11.6 and
+  11.7 no longer compile. Vendored builds still use RocksDB 11.8.1.
+  ([#266](https://github.com/zaidoon1/rust-rocksdb/pull/266))
 
 ### New APIs
 
@@ -59,17 +63,6 @@ The bundled RocksDB version stays at 11.8.1.
 - feat: expose `Cache::disown_data` as an unsafe operation. Every database using
   the cache must be destroyed before the call, and the cache must not be used
   afterward. ([#268](https://github.com/zaidoon1/rust-rocksdb/pull/268),
-  [#284](https://github.com/zaidoon1/rust-rocksdb/pull/284))
-
-### Correctness
-
-- fix: initialize the table factory in `CompactionServiceOptionsOverride`.
-  Remote compaction dereferenced the previous null factory and crashed.
-  ([#268](https://github.com/zaidoon1/rust-rocksdb/pull/268))
-- fix: derive C API enum values from the generated bindings where possible and
-  check the remaining mappings against the vendored headers. This prevents a
-  RocksDB update from silently decoding a new value as the wrong Rust variant.
-  ([#268](https://github.com/zaidoon1/rust-rocksdb/pull/268),
   [#284](https://github.com/zaidoon1/rust-rocksdb/pull/284))
 
 ### Native build fixes

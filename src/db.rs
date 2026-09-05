@@ -342,8 +342,7 @@ impl<D: DBAccess + 'static> OwnedPrefixProber<D> {
 
     /// Moves the probe to the latest committed state of the database.
     ///
-    /// See [`PrefixProber::refresh`], including its warning about
-    /// `delete_range`.
+    /// See [`PrefixProber::refresh`].
     ///
     /// # Errors
     ///

@@ -413,6 +413,41 @@ fn compiles_with_cl_exe(cfg: &cc::Build) -> bool {
     compiler.is_like_msvc() && !compiler.is_like_clang_cl()
 }
 
+/// Whether the C++ compiler already predefines `__PCLMUL__` under the flags
+/// currently on `cfg`, including environment flags such as `-march=native`.
+///
+/// GCC and Clang use `-dM`; clang-cl requires `/clang:-dM`. The probe runs
+/// after `apply_target_cpu`, so it also sees a `-march=` derived from Rust's
+/// `-Ctarget-cpu` setting.
+///
+/// Returns `false` for cl.exe and on probe failure. Those paths keep the
+/// conservative Rust target-feature decision.
+fn compiler_defines_pclmul(cfg: &cc::Build) -> bool {
+    let compiler = cfg.get_compiler();
+    let style = if compiler.is_like_clang_cl() {
+        x86::MacroDumpStyle::ClangCl
+    } else if compiler.is_like_gnu() || compiler.is_like_clang() {
+        x86::MacroDumpStyle::GnuLike
+    } else {
+        return false;
+    };
+    let args = x86::pclmul_macro_dump_args(style);
+    let Ok(out) = compiler
+        .to_command()
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .output()
+    else {
+        return false;
+    };
+    out.status.success()
+        && String::from_utf8_lossy(&out.stdout).lines().any(|line| {
+            line.split_whitespace()
+                .take(2)
+                .eq(["#define", "__PCLMUL__"])
+        })
+}
+
 // =========================================================================
 // Vendored build
 // =========================================================================
@@ -783,20 +818,17 @@ mod vendor {
     /// the pipelining and nothing else: `__SSE4_2__` still selects the hardware
     /// `_mm_crc32_*` path in `DefaultCRC32`.
     ///
-    /// It is decided from the rustc feature set, so it also overrides a compiler
-    /// that was pointed at PCLMUL some other way, such as
-    /// `CXXFLAGS=-march=native` on a machine that has it. `port/lang.h` applies
-    /// the opt-out as an `#undef`, which a command-line flag cannot win against.
-    /// `-Ctarget-cpu` and `-Ctarget-feature` are the supported way to raise the
-    /// baseline, because they move the Rust half too.
+    /// A macro-dump-capable compiler pointed at PCLMUL through the environment
+    /// keeps this kernel. cl.exe stays keyed to Rust's PCLMUL feature because
+    /// its `/arch:AVX*` levels do not promise PCLMUL and RocksDB has no x86
+    /// runtime dispatch for this implementation.
     fn disable_three_way_crc(cfg: &mut cc::Build, target: &Target) {
         cfg.define("NO_PCLMUL", None);
         // Only worth a warning where adding the feature would change the
-        // outcome. On 32-bit and on android the answer is no regardless, and if
+        // outcome. On 32-bit the kernel cannot compile at all, and if
         // PCLMULQDQ is already present then something else ruled the kernel out
         // and telling the user to add it is just wrong.
         let actionable = target.pointer_width == 64
-            && target.os != "android"
             && target.has_feature("sse4.2")
             && !target.has_feature("pclmulqdq");
         if actionable {
@@ -850,16 +882,19 @@ mod vendor {
         if target.has_feature("lzcnt") {
             cfg.flag_if_supported("-mlzcnt");
         }
-        // The android term is inherited and its original justification, that
-        // android does not define `__PCLMUL__` even with the feature, does not
-        // hold: NDK clang defines it from `-mpclmul` like any other clang. Left
-        // alone because it only costs the pipelining and there is no android
-        // target in CI to confirm removing it is safe.
-        let pclmul =
-            target.pointer_width == 64 && target.os != "android" && target.has_feature("pclmulqdq");
-        if pclmul {
+        // NDK clang defines `__PCLMUL__` from `-mpclmul` like any other clang,
+        // so android needs no carve-out.
+        let rust_has_pclmul = target.has_feature("pclmulqdq");
+        if target.pointer_width == 64 && rust_has_pclmul {
             cfg.flag_if_supported("-mpclmul");
-        } else {
+        }
+        let compiler_has_pclmul =
+            target.pointer_width == 64 && !rust_has_pclmul && compiler_defines_pclmul(cfg);
+        if x86::should_disable_three_way_crc(
+            target.pointer_width,
+            rust_has_pclmul,
+            compiler_has_pclmul,
+        ) {
             disable_three_way_crc(cfg, target);
         }
     }
@@ -925,11 +960,11 @@ mod vendor {
         // instruction regardless of `/arch:`, so getting this wrong is an
         // illegal instruction at the first checksum, not a build error.
         //
-        // `level.is_none()` below covers two sub-cases, the SSE4.2 branch and
+        // `level.is_none()` below covers two cases, the SSE4.2 branch and
         // the no-features branch. In the second, `__PCLMUL__` lands without
         // `__SSE4_2__` and `crc32c.cc` ignores it, since it needs both.
-        let pclmul = target.pointer_width == 64 && target.has_feature("pclmulqdq");
-        if !pclmul {
+        let rust_has_pclmul = target.has_feature("pclmulqdq");
+        if x86::should_disable_three_way_crc(target.pointer_width, rust_has_pclmul, false) {
             disable_three_way_crc(cfg, target);
         } else if level.is_none() {
             cfg.define("__PCLMUL__", Some("1"));

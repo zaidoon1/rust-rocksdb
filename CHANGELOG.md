@@ -1,5 +1,110 @@
 # Changelog
 
+## 0.53.0 (2026-09-05)
+
+This release closes the usable gaps between the safe wrapper and the bundled
+RocksDB 11.8.1 C API. It also adds reusable prefix probes and fixes native CPU
+feature selection. Read the breaking changes before upgrading.
+
+`rust-librocksdb-sys` moves to 0.48.1+11.8.1 to publish the native build fixes.
+The bundled RocksDB version stays at 11.8.1.
+
+### Breaking changes
+
+- fix!: `StatsLevel` now matches RocksDB. Its representation changes from `u8`
+  to `u32`, and the values from `ExceptHistogramOrTimers` through `All` move
+  from `2..=6` to `1..=5`. The four intermediate variants previously selected
+  the next more detailed level. `All` still selected `All` because the C API
+  clamped its old value. Migrate any stored, transmitted, or cast numeric values.
+  ([#268](https://github.com/zaidoon1/rust-rocksdb/pull/268))
+- fix!: `DBCompactionReason` adds `KReadTriggered`, moving `KNumOfReasons` from
+  20 to 21. `DBFlushReason` adds `KMemtableMaxRangeDeletions`, moving `KUnknown`
+  from 15 to 16. Add arms to exhaustive matches and migrate persisted sentinel
+  values. ([#268](https://github.com/zaidoon1/rust-rocksdb/pull/268))
+- feat!: `BackupEngineInfo` adds `app_metadata: Vec<u8>`. Struct literals must
+  initialize the new field.
+  ([#268](https://github.com/zaidoon1/rust-rocksdb/pull/268))
+- fix!: comparator callbacks now require `Send + Sync`, matching RocksDB's
+  concurrent background use. Closures that capture non-thread-safe state must
+  move that state behind a thread-safe type.
+  ([#268](https://github.com/zaidoon1/rust-rocksdb/pull/268))
+
+### New APIs
+
+- feat: add 307 missing option methods across the existing database, column
+  family, table, read, write, transaction, backup, restore, flush, ingest,
+  compact, and wait option types.
+  ([#266](https://github.com/zaidoon1/rust-rocksdb/pull/266))
+- feat: add 203 accessors across 21 existing types. Event listeners can now
+  read blob file counts, thread and job IDs, aborted state, ingest sequence
+  numbers, and other flush, compaction, and ingest details.
+  ([#267](https://github.com/zaidoon1/rust-rocksdb/pull/267))
+- feat: add typed APIs for explicit file compaction, remote compaction services,
+  `open_and_compact`, column family creation with TTL, background work control,
+  checksum verification, and manual compaction control.
+  ([#268](https://github.com/zaidoon1/rust-rocksdb/pull/268))
+- feat: add backup metadata and callbacks, optimistic transaction checkpoints,
+  timestamp-aware gets and multi-gets, history trimming, optimistic concurrency
+  options, transaction multi-get-for-update, and write batch savepoints and
+  range operations. ([#268](https://github.com/zaidoon1/rust-rocksdb/pull/268))
+- feat: add typed access to live file and column family metadata, table
+  properties, WAL files and filters, query, I/O, and block cache tracing, trace
+  replay, `EnvOptions`, file checksum factories, SST partitioners, cache
+  allocators, and cache configuration.
+  ([#268](https://github.com/zaidoon1/rust-rocksdb/pull/268))
+- feat: add `PrefixProber::refresh` and `OwnedPrefixProber` for cached probes
+  that can advance to the latest committed sequence and keep their database
+  alive. `exists` now makes one iterator validity call instead of two.
+  ([#276](https://github.com/zaidoon1/rust-rocksdb/pull/276))
+- feat: expose `Cache::disown_data` as an unsafe operation. Every database using
+  the cache must be destroyed before the call, and the cache must not be used
+  afterward. ([#268](https://github.com/zaidoon1/rust-rocksdb/pull/268),
+  [#284](https://github.com/zaidoon1/rust-rocksdb/pull/284))
+
+### Correctness
+
+- fix: initialize the table factory in `CompactionServiceOptionsOverride`.
+  Remote compaction dereferenced the previous null factory and crashed.
+  ([#268](https://github.com/zaidoon1/rust-rocksdb/pull/268))
+- fix: derive C API enum values from the generated bindings where possible and
+  check the remaining mappings against the vendored headers. This prevents a
+  RocksDB update from silently decoding a new value as the wrong Rust variant.
+  ([#268](https://github.com/zaidoon1/rust-rocksdb/pull/268),
+  [#284](https://github.com/zaidoon1/rust-rocksdb/pull/284))
+
+### Native build fixes
+
+- fix: match RocksDB and Snappy CPU features to the Rust target and active C++
+  compiler. This fixes `x86-64-v3`, `x86-64-v4`, and 32-bit x86 builds, enables
+  supported MSVC paths, and handles clang-cl separately from `cl.exe`.
+  ([#278](https://github.com/zaidoon1/rust-rocksdb/pull/278))
+- fix: honor PCLMUL enabled through GCC or Clang `CXXFLAGS`. For `cl.exe`, use
+  Rust's explicit `pclmulqdq` feature because `/arch:AVX*` does not prove
+  PCLMUL support. Enable Snappy's BMI2 path only when Rust enables `bmi2`.
+  ([#284](https://github.com/zaidoon1/rust-rocksdb/pull/284))
+- fix: apply the MinGW configuration to every MinGW target and support
+  `malloc-usable-size` on Android and FreeBSD.
+  ([#278](https://github.com/zaidoon1/rust-rocksdb/pull/278))
+
+### Packaging and documentation
+
+- fix: stop publishing integration tests, the benchmark, and stale repository
+  files in the root crate. The package drops from 123 files to 62.
+  ([#269](https://github.com/zaidoon1/rust-rocksdb/pull/269))
+- fix: express the `rust-librocksdb-sys` license as valid SPDX,
+  `MIT OR Apache-2.0 OR BSD-3-Clause`. This keeps the existing choice of
+  licenses while fixing the package metadata.
+  ([#269](https://github.com/zaidoon1/rust-rocksdb/pull/269))
+- docs: add private vulnerability reporting instructions and document which
+  safe wrapper failures belong in a security report.
+  ([#269](https://github.com/zaidoon1/rust-rocksdb/pull/269))
+- docs: fix the docs.rs build on current nightly by removing a redundant
+  explicit rustdoc link target.
+  ([#283](https://github.com/zaidoon1/rust-rocksdb/pull/283))
+- docs: remove the obsolete `delete_range` warning from
+  `PrefixProber::refresh`. Bundled RocksDB has contained the upstream range
+  tombstone refresh fix since 2022.
+
 ## 0.52.0 (2026-08-08)
 
 This release contains breaking API changes, marked `fix!` and `feat!`

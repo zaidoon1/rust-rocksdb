@@ -31,7 +31,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rust-rocksdb = "0.43"
+rust-rocksdb = "0.53"
 ```
 
 ### Basic Example

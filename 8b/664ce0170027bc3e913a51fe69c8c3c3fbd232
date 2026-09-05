@@ -1,0 +1,23 @@
+Cargo.toml
+  s_4ec205917f1281::t_5eeb7afcfbf91b 4,78
+README.md
+  s_4ec205917f1281::t_212198110de37a 34
+librocksdb-sys/Cargo.toml
+  s_4ec205917f1281::t_b8671c3ea67df8 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8b664ce0170027bc3e913a51fe69c8c3c3fbd232",
+  "prompts": {},
+  "sessions": {
+    "s_4ec205917f1281": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a072b3-4141-7392-956f-281d55cb8d98",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+src/compaction_service.rs
+  s_aa36d7d7d9ba6c::t_a6d6897a049258 141-143,145-152
+src/db_options.rs
+  s_aa36d7d7d9ba6c::t_9ec53db17ccd54 509-515
+src/metadata.rs
+  s_aa36d7d7d9ba6c::t_b42e8a58d55118 424-440,442
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4d95f10c51ab508644087378e4b2ce84bb9cadba",
+  "prompts": {},
+  "sessions": {
+    "s_aa36d7d7d9ba6c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a06f70-a320-7bd3-b07a-34929514c7d7",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    }
+  }
+}

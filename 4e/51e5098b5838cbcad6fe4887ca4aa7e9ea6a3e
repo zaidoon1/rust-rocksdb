@@ -1,0 +1,21 @@
+src/compaction_service.rs
+  s_4ec205917f1281::t_02c948f3934f14 158-159,161-163,169-185
+src/db.rs
+  s_4ec205917f1281::t_22be785a0db9ca 345
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4e51e5098b5838cbcad6fe4887ca4aa7e9ea6a3e",
+  "prompts": {},
+  "sessions": {
+    "s_4ec205917f1281": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a072b3-4141-7392-956f-281d55cb8d98",
+        "model": "unknown"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    }
+  }
+}

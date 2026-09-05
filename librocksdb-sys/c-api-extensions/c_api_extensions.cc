@@ -403,16 +403,26 @@ static constexpr size_t kRustRocksDbBatchError =
     std::numeric_limits<size_t>::max() - 1;
 #endif
 
-#ifndef RUST_ROCKSDB_SYSTEM_BACKEND
 static DB* RustRocksDbRep(rocksdb_t* db) {
   return *reinterpret_cast<DB**>(db);
 }
 
+#ifndef RUST_ROCKSDB_SYSTEM_BACKEND
 static ColumnFamilyHandle* RustRocksDbColumnFamilyRep(
     rocksdb_column_family_handle_t* column_family) {
   return *reinterpret_cast<ColumnFamilyHandle**>(column_family);
 }
 #endif
+
+extern "C" void rust_rocksdb_resume(rocksdb_t* db, char** errptr) {
+  try {
+    RustSaveError(errptr, RustRocksDbRep(db)->Resume());
+  } catch (const std::exception& error) {
+    RustSaveMessage(errptr, error.what());
+  } catch (...) {
+    RustSaveMessage(errptr, "unknown C++ exception in DB::Resume");
+  }
+}
 
 extern "C" rust_rocksdb_pinnable_batch_t*
 rust_rocksdb_batched_multi_get_pinned(

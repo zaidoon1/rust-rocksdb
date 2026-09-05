@@ -243,11 +243,6 @@ impl<D: DBAccess> PrefixProber<'_, D> {
     /// cached prober that is never refreshed holds them for as long as it
     /// lives, so pool them on a timer rather than on request arrival.
     ///
-    /// Do not use this against a database that issues `delete_range`. RocksDB
-    /// does not refresh range tombstones correctly, so a refreshed probe can
-    /// report a deleted prefix as still present. See facebook/rocksdb#9255 and
-    /// facebook/rocksdb#7212, both open.
-    ///
     /// # Errors
     ///
     /// Returns the RocksDB error if the refresh failed.
@@ -347,8 +342,7 @@ impl<D: DBAccess + 'static> OwnedPrefixProber<D> {
 
     /// Moves the probe to the latest committed state of the database.
     ///
-    /// See [`PrefixProber::refresh`], including its warning about
-    /// `delete_range`.
+    /// See [`PrefixProber::refresh`].
     ///
     /// # Errors
     ///

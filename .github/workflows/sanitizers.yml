@@ -44,7 +44,7 @@ jobs:
           submodules: recursive
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           cache-key: "v1-rust-ubsan"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
@@ -89,7 +89,7 @@ jobs:
           submodules: recursive
 
       - name: Install rust nightly
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           toolchain: nightly
           components: rust-src
@@ -136,7 +136,7 @@ jobs:
           submodules: recursive
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           cache-key: "v1-rust-valgrind"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}

@@ -12,7 +12,6 @@ repository = "https://github.com/zaidoon1/rust-rocksdb"
 license = "Apache-2.0"
 categories = ["database"]
 keywords = ["database", "embedded", "LSM-tree", "persistence"]
-homepage = "https://github.com/zaidoon1/rust-rocksdb"
 # Nothing here compiles for a downstream user. The integration tests need a
 # `tests/util` module and the bench needs criterion, neither of which a consumer
 # gets. This list replaced `test/**/*`, which matched nothing because the

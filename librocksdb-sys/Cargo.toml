@@ -11,7 +11,6 @@ authors = [
 # form as OR, so this is the same choice-of-three expressed in valid SPDX.
 license = "MIT OR Apache-2.0 OR BSD-3-Clause"
 description = "Native bindings to librocksdb"
-readme = "README.md"
 repository = "https://github.com/zaidoon1/rust-rocksdb"
 keywords = ["bindings", "ffi", "rocksdb"]
 categories = ["api-bindings", "database", "external-ffi-bindings"]

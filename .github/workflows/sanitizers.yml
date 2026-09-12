@@ -49,6 +49,13 @@ jobs:
           cache-key: "v1-rust-ubsan"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
           rustflags: ""
+          # Empty for the same reason as `rustflags`. Through v1 the action's
+          # `-D warnings` rode in on RUSTFLAGS, so `rustflags: ""` was the whole
+          # opt-out; v2.0.0 moved it to `build.warnings`, which also denies
+          # cargo's own diagnostics. These two run unpinned nightly, where a new
+          # cargo lint would otherwise fail a job that exists to find memory and
+          # thread errors.
+          build-warnings: ""
 
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y llvm clang
@@ -96,6 +103,7 @@ jobs:
           cache-key: "v1-rust-tsan"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
           rustflags: ""
+          build-warnings: ""
 
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y llvm clang

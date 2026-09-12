@@ -34,6 +34,12 @@ jobs:
           components: rustfmt
           cache: false
           rustflags: ""
+          # Empty for the same reason as `rustflags`. Through v1 the action's
+          # `-D warnings` rode in on RUSTFLAGS, so `rustflags: ""` was the whole
+          # opt-out; v2.0.0 moved it to `build.warnings`, which also denies
+          # cargo's own diagnostics. Both have to be empty to keep the warning
+          # policy where the job put it.
+          build-warnings: ""
 
       - name: Run rustfmt
         run: cargo fmt --all -- --check
@@ -305,6 +311,7 @@ jobs:
           cache-bin: false
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
           rustflags: ""
+          build-warnings: ""
 
       - uses: taiki-e/install-action@c3ec0de9ae7f1019cea21aa96aa0a895b9552063 # v2.87.9
         with:
@@ -723,6 +730,7 @@ jobs:
           cache-key: "v1-rust-asan"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
           rustflags: ""
+          build-warnings: ""
 
       - name: Install dependencies
         run: |

@@ -39,6 +39,11 @@ jobs:
         with:
           cache: false
           rustflags: ""
+          # Empty for the same reason as `rustflags`. Through v1 the action's
+          # `-D warnings` rode in on RUSTFLAGS, so `rustflags: ""` was the whole
+          # opt-out; v2.0.0 moved it to `build.warnings`, which also denies
+          # cargo's own diagnostics. Nothing here compiles, so neither belongs.
+          build-warnings: ""
 
       # No `cargo generate-lockfile` here. Cargo.lock is committed, and
       # regenerating it re-resolves every dependency to the newest compatible

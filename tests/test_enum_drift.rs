@@ -34,6 +34,7 @@ use rust_rocksdb::event_listener::{
 };
 use rust_rocksdb::perf::PerfStatsLevel;
 use rust_rocksdb::statistics::StatsLevel;
+use rust_rocksdb::{EnvPriority, FileType};
 
 /// One entry of a C++ enum, with its computed value.
 #[derive(Debug, PartialEq, Eq)]
@@ -235,6 +236,56 @@ fn status_severity_matches_the_cpp_header() {
 }
 
 #[test]
+fn env_priority_matches_the_cpp_header() {
+    let Some(header) = read_header("include/rocksdb/env.h") else {
+        return;
+    };
+    let cpp = parse_cpp_enum(&header, "enum Priority");
+
+    // TOTAL counts the pools rather than naming one, so a pool inserted
+    // anywhere shifts it, exactly like the count sentinels above.
+    assert_value(&cpp, "BOTTOM", EnvPriority::Bottom as i64);
+    assert_value(&cpp, "LOW", EnvPriority::Low as i64);
+    assert_value(&cpp, "HIGH", EnvPriority::High as i64);
+    assert_value(&cpp, "USER", EnvPriority::User as i64);
+    assert_value(&cpp, "TOTAL", EnvPriority::User as i64 + 1);
+}
+
+#[test]
+fn file_type_matches_the_cpp_header() {
+    let Some(header) = read_header("include/rocksdb/types.h") else {
+        return;
+    };
+    let cpp = parse_cpp_enum(&header, "enum FileType");
+
+    // Check every mapping. A reorder in the middle can leave a few anchors and
+    // the highest value unchanged while still breaking raw-value decoding.
+    assert_value(&cpp, "kWalFile", FileType::WalFile as i64);
+    assert_value(&cpp, "kDBLockFile", FileType::DBLockFile as i64);
+    assert_value(&cpp, "kTableFile", FileType::TableFile as i64);
+    assert_value(&cpp, "kDescriptorFile", FileType::DescriptorFile as i64);
+    assert_value(&cpp, "kCurrentFile", FileType::CurrentFile as i64);
+    assert_value(&cpp, "kTempFile", FileType::TempFile as i64);
+    assert_value(&cpp, "kInfoLogFile", FileType::InfoLogFile as i64);
+    assert_value(&cpp, "kMetaDatabase", FileType::MetaDatabase as i64);
+    assert_value(&cpp, "kIdentityFile", FileType::IdentityFile as i64);
+    assert_value(&cpp, "kOptionsFile", FileType::OptionsFile as i64);
+    assert_value(&cpp, "kBlobFile", FileType::BlobFile as i64);
+    assert_value(
+        &cpp,
+        "kCompactionProgressFile",
+        FileType::CompactionProgressFile as i64,
+    );
+    // FileType has no count sentinel, so also catch an appended variant.
+    let highest = cpp.iter().map(|e| e.value).max().expect("no entries");
+    assert_eq!(
+        FileType::CompactionProgressFile as i64,
+        highest,
+        "upstream FileType now goes up to {highest}, past what this crate names"
+    );
+}
+
+#[test]
 fn stats_level_matches_the_cpp_header() {
     let Some(header) = read_header("include/rocksdb/statistics.h") else {
         return;
@@ -373,4 +424,32 @@ fn flush_reason_decodes_every_variant() {
             "raw {raw} should decode to {reason:?}"
         );
     }
+}
+
+#[test]
+fn file_type_decodes_every_variant() {
+    let all = [
+        FileType::WalFile,
+        FileType::DBLockFile,
+        FileType::TableFile,
+        FileType::DescriptorFile,
+        FileType::CurrentFile,
+        FileType::TempFile,
+        FileType::InfoLogFile,
+        FileType::MetaDatabase,
+        FileType::IdentityFile,
+        FileType::OptionsFile,
+        FileType::BlobFile,
+        FileType::CompactionProgressFile,
+    ];
+    for file_type in all {
+        let raw = file_type as i32;
+        assert_eq!(
+            FileType::from(raw),
+            file_type,
+            "raw {raw} should decode to {file_type:?}"
+        );
+    }
+    // Anything past the last upstream value falls into the catch-all.
+    assert_eq!(FileType::from(FileType::Unknown as i32), FileType::Unknown);
 }

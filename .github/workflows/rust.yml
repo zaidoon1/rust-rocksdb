@@ -29,11 +29,17 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           components: rustfmt
           cache: false
           rustflags: ""
+          # Empty for the same reason as `rustflags`. Through v1 the action's
+          # `-D warnings` rode in on RUSTFLAGS, so `rustflags: ""` was the whole
+          # opt-out; v2.0.0 moved it to `build.warnings`, which also denies
+          # cargo's own diagnostics. Both have to be empty to keep the warning
+          # policy where the job put it.
+          build-warnings: ""
 
       - name: Run rustfmt
         run: cargo fmt --all -- --check
@@ -131,7 +137,7 @@ jobs:
           submodules: recursive
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           components: rust-docs
           cache-key: "v1-rust-docs"
@@ -170,7 +176,7 @@ jobs:
           submodules: recursive
 
       - name: Install rust nightly
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           toolchain: nightly
           components: rust-docs
@@ -195,7 +201,7 @@ jobs:
           submodules: recursive
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           components: clippy
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
@@ -252,7 +258,7 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
       - name: Install rust ${{ steps.msrv.outputs.version }}
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           toolchain: ${{ steps.msrv.outputs.version }}
           cache-key: "v1-rust-msrv"
@@ -288,7 +294,7 @@ jobs:
           submodules: recursive
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           # Nothing this job caches may contain machine code. `native` bakes
           # whatever the saving runner supported into every host artifact,
@@ -305,8 +311,9 @@ jobs:
           cache-bin: false
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
           rustflags: ""
+          build-warnings: ""
 
-      - uses: taiki-e/install-action@5b4d68e2e660441203ab128a23676f1e4faf1532 # v2.86.3
+      - uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab # v2.87.13
         with:
           tool: nextest
 
@@ -348,7 +355,7 @@ jobs:
           submodules: recursive
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           cache-key: "v1-rust-features"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
@@ -379,7 +386,7 @@ jobs:
           submodules: recursive
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           cache-key: "v1-rust-package"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
@@ -512,12 +519,12 @@ jobs:
           submodules: recursive
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           cache-key: "v1-rust-semver"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      - uses: taiki-e/install-action@5b4d68e2e660441203ab128a23676f1e4faf1532 # v2.86.3
+      - uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab # v2.87.13
         with:
           tool: cargo-semver-checks
 
@@ -593,11 +600,11 @@ jobs:
           submodules: recursive
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      - uses: taiki-e/install-action@5b4d68e2e660441203ab128a23676f1e4faf1532 # v2.86.3
+      - uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab # v2.87.13
         with:
           tool: nextest
 
@@ -652,12 +659,12 @@ jobs:
           submodules: recursive
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           cache-key: "v1-rust-jemalloc"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      - uses: taiki-e/install-action@5b4d68e2e660441203ab128a23676f1e4faf1532 # v2.86.3
+      - uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab # v2.87.13
         with:
           tool: nextest
 
@@ -693,12 +700,12 @@ jobs:
           submodules: recursive
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           cache-key: "v1-rust-release"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      - uses: taiki-e/install-action@5b4d68e2e660441203ab128a23676f1e4faf1532 # v2.86.3
+      - uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab # v2.87.13
         with:
           tool: nextest
 
@@ -716,13 +723,14 @@ jobs:
           submodules: recursive
 
       - name: Install rust nightly
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           toolchain: nightly
           components: rust-src
           cache-key: "v1-rust-asan"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
           rustflags: ""
+          build-warnings: ""
 
       - name: Install dependencies
         run: |

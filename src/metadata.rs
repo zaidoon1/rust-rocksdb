@@ -421,21 +421,25 @@ pub enum FileType {
 
 impl From<i32> for FileType {
     fn from(value: i32) -> Self {
-        match value {
-            0 => FileType::WalFile,
-            1 => FileType::DBLockFile,
-            2 => FileType::TableFile,
-            3 => FileType::DescriptorFile,
-            4 => FileType::CurrentFile,
-            5 => FileType::TempFile,
-            6 => FileType::InfoLogFile,
-            7 => FileType::MetaDatabase,
-            8 => FileType::IdentityFile,
-            9 => FileType::OptionsFile,
-            10 => FileType::BlobFile,
-            11 => FileType::CompactionProgressFile,
-            _ => FileType::Unknown,
+        for candidate in [
+            FileType::WalFile,
+            FileType::DBLockFile,
+            FileType::TableFile,
+            FileType::DescriptorFile,
+            FileType::CurrentFile,
+            FileType::TempFile,
+            FileType::InfoLogFile,
+            FileType::MetaDatabase,
+            FileType::IdentityFile,
+            FileType::OptionsFile,
+            FileType::BlobFile,
+            FileType::CompactionProgressFile,
+        ] {
+            if value == candidate as i32 {
+                return candidate;
+            }
         }
+        FileType::Unknown
     }
 }
 

@@ -139,17 +139,23 @@ impl Cache {
     /// faster on a large cache, where walking and freeing every entry costs
     /// real time and nothing is going to reuse the memory anyway.
     ///
-    /// The cache keeps working normally after this call, so this is only worth
-    /// doing shortly before the process exits. Anything that would have reused
-    /// the memory later cannot, because it is leaked for the remaining lifetime
-    /// of the process.
-    ///
     /// [`Cache`] is a reference-counted handle, so this affects the shared cache
     /// and every other clone of it, not just this handle.
     ///
     /// Under ASAN or valgrind RocksDB ignores the request and frees the entries
     /// as usual, so the leak is not reported there.
-    pub fn disown_data(&mut self) {
+    ///
+    /// # Safety
+    ///
+    /// Every database and every other user of this cache must be dropped
+    /// before this call — RocksDB's contract is: "Always delete the DB object
+    /// before calling this method!" (`advanced_cache.h`). Nothing may read
+    /// from or write to the cache after this call; RocksDB documents any use
+    /// after disowning as unsupported. Anything that would have reused the
+    /// memory later cannot, because it is leaked for the remaining lifetime of
+    /// the process, which makes this call worth doing only shortly before the
+    /// process exits.
+    pub unsafe fn disown_data(&mut self) {
         unsafe {
             ffi::rocksdb_cache_disown_data(self.0.inner.as_ptr());
         }

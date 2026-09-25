@@ -1,6 +1,6 @@
 [package]
 name = "rust-librocksdb-sys"
-version = "0.48.0+11.8.1"
+version = "0.48.1+11.8.1"
 edition = "2024"
 rust-version = "1.91.0"
 authors = [
@@ -11,7 +11,6 @@ authors = [
 # form as OR, so this is the same choice-of-three expressed in valid SPDX.
 license = "MIT OR Apache-2.0 OR BSD-3-Clause"
 description = "Native bindings to librocksdb"
-readme = "README.md"
 repository = "https://github.com/zaidoon1/rust-rocksdb"
 keywords = ["bindings", "ffi", "rocksdb"]
 categories = ["api-bindings", "database", "external-ffi-bindings"]
@@ -116,7 +115,7 @@ uuid = { version = "1", features = ["v4"] }
 
 [build-dependencies]
 cc = { version = "1.2", features = ["parallel"] }
-bindgen = { version = "0.72", default-features = false }
+bindgen = { version = "0.73", default-features = false }
 glob = "0.3"
 pkg-config = "0.3"
 rustflags = "0.1"

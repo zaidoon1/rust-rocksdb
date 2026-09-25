@@ -506,21 +506,13 @@ unsafe fn borrowed_string(ptr: *const c_char, len: usize) -> String {
 /// on any value above `kBlobFile`. [`FileType::CompactionProgressFile`] and
 /// [`FileType::Unknown`] sit above it and have no representation in the set.
 fn checksum_handoff_file_type_raw(file_type: FileType) -> Option<c_int> {
-    let raw = match file_type {
-        FileType::WalFile => 0,
-        FileType::DBLockFile => 1,
-        FileType::TableFile => 2,
-        FileType::DescriptorFile => 3,
-        FileType::CurrentFile => 4,
-        FileType::TempFile => 5,
-        FileType::InfoLogFile => 6,
-        FileType::MetaDatabase => 7,
-        FileType::IdentityFile => 8,
-        FileType::OptionsFile => 9,
-        FileType::BlobFile => 10,
-        FileType::CompactionProgressFile | FileType::Unknown => return None,
-    };
-    Some(raw)
+    // Variants below `kBlobFile` are their own `rocksdb::FileType` value, so
+    // the discriminant is the raw int; the enum is the only place the mapping
+    // is written down.
+    match file_type {
+        FileType::CompactionProgressFile | FileType::Unknown => None,
+        representable => Some(representable as c_int),
+    }
 }
 
 impl BlockBasedOptions {

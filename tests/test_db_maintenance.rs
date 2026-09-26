@@ -16,10 +16,12 @@
 
 mod util;
 
+use std::{io::Write, path::Path};
+
 use pretty_assertions::assert_eq;
 use rust_rocksdb::{
-    AsColumnFamilyRef, DB, FlushWalOptions, IoPriority, Options, ReadOptions,
-    checkpoint::Checkpoint, file_checksum::FileChecksumGenFactory,
+    AsColumnFamilyRef, DB, ErrorKind, FlushWalOptions, IoPriority, Options, ReadOptions,
+    SstFileManager, checkpoint::Checkpoint, file_checksum::FileChecksumGenFactory,
 };
 use util::DBPath;
 
@@ -337,4 +339,63 @@ fn column_family_handles_report_their_id_and_name() {
         assert_eq!(first.name(), b"first".to_vec());
         assert_eq!(first.id(), first.id());
     }
+}
+
+#[test]
+fn test_db_resume() {
+    let path = DBPath::new("_rust_rocksdb_db_resume");
+
+    {
+        // Resume on a healthy DB should succeed
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        let db = DB::open(&opts, &path).unwrap();
+        db.resume().unwrap();
+    }
+
+    {
+        // Resume on an auto-recovering full disk error should fail with Busy
+        let sfm = SstFileManager::new();
+        sfm.set_max_allowed_space_usage(1);
+
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        opts.set_sst_file_manager(&sfm);
+        let db = DB::open(&opts, &path).unwrap();
+
+        for i in 0..200 {
+            db.put(format!("key{i:04}"), format!("value{i}")).unwrap();
+        }
+        let err = db.flush().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::IOError);
+
+        let err = db.resume().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Busy);
+    }
+
+    {
+        // Resume on a hard corruption error should fail with original error
+        let db = filled_db(&path);
+
+        corrupt_sst_file(&db, &path);
+        for i in 1..5 {
+            db.put(format!("{i:04}").as_bytes(), b"value").unwrap();
+        }
+        db.compact_range(None::<&[u8]>, None::<&[u8]>);
+
+        let err = db.resume().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Corruption);
+    }
+}
+
+fn corrupt_sst_file<P: AsRef<Path>>(db: &DB, path: P) {
+    let files = db.live_files().unwrap();
+    let mut file_name = files.first().unwrap().name.clone();
+    file_name.remove(0);
+
+    let sst_path = path.as_ref().to_path_buf().join(file_name);
+
+    let mut file = std::fs::File::create(sst_path).unwrap();
+    file.write_all(b"sad").unwrap();
+    file.sync_all().unwrap();
 }

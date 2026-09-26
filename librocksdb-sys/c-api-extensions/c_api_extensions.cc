@@ -315,6 +315,7 @@ extern "C" void rust_rocksdb_options_add_eventlistener(
 // The opaque-handle types the C API hands out are defined at file scope in
 // `rocksdb/db/c.cc` as POD wrappers around a single C++ class:
 //
+//   struct rocksdb_t { DB* rep; };
 //   struct rocksdb_readoptions_t { ReadOptions rep; /* trailing Slices */ };
 //   struct rocksdb_options_t { Options rep; };
 //   struct rocksdb_writebatch_t { WriteBatch rep; };
@@ -330,10 +331,11 @@ extern "C" void rust_rocksdb_options_add_eventlistener(
 // If upstream ever adds a field BEFORE `rep` in any of these wrappers,
 // every path through one of these casts writes to one offset while
 // rocksdb's internal code reads from another, so the value never makes it
-// across. `tests/test_event_listener.rs`, `tests/test_multiget_pinned.rs`,
-// `tests/test_batched_pinned_multiget.rs` and, for the `rocksdb_snapshot_t`
-// cast below, `transaction_snapshot_sequence_number_without_set_snapshot`
-// in `tests/test_transaction_db.rs` each exercise one of these casts, so a
+// across. `tests/test_db_maintenance.rs`, `tests/test_event_listener.rs`,
+// `tests/test_multiget_pinned.rs`, `tests/test_batched_pinned_multiget.rs`
+// and, for the `rocksdb_snapshot_t` cast below,
+// `transaction_snapshot_sequence_number_without_set_snapshot` in
+// `tests/test_transaction_db.rs` each exercise one of these casts, so a
 // layout regression is detectable.
 
 // -----------------------------------------------------------------------------
@@ -403,16 +405,30 @@ static constexpr size_t kRustRocksDbBatchError =
     std::numeric_limits<size_t>::max() - 1;
 #endif
 
-#ifndef RUST_ROCKSDB_SYSTEM_BACKEND
 static DB* RustRocksDbRep(rocksdb_t* db) {
   return *reinterpret_cast<DB**>(db);
 }
 
+#ifndef RUST_ROCKSDB_SYSTEM_BACKEND
 static ColumnFamilyHandle* RustRocksDbColumnFamilyRep(
     rocksdb_column_family_handle_t* column_family) {
   return *reinterpret_cast<ColumnFamilyHandle**>(column_family);
 }
 #endif
+
+// -----------------------------------------------------------------------------
+// DB recovery
+// -----------------------------------------------------------------------------
+
+extern "C" void rust_rocksdb_resume(rocksdb_t* db, char** errptr) {
+  try {
+    RustSaveError(errptr, RustRocksDbRep(db)->Resume());
+  } catch (const std::exception& error) {
+    RustSaveMessage(errptr, error.what());
+  } catch (...) {
+    RustSaveMessage(errptr, "unknown C++ exception in DB::Resume");
+  }
+}
 
 extern "C" rust_rocksdb_pinnable_batch_t*
 rust_rocksdb_batched_multi_get_pinned(

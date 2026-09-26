@@ -1552,6 +1552,26 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         Ok(())
     }
 
+    /// Manually, synchronously attempt to resume DB writes after a write failure
+    /// to the underlying filesystem. Returns OK if writes are successfully resumed,
+    /// or there was no outstanding error to recover from. Returns underlying write
+    /// error if it is not recoverable. Returns [`Busy`] if an
+    /// auto-resume is in progress, without waiting for it to complete.
+    ///
+    /// * See <https://github.com/facebook/rocksdb/wiki/Background-Error-Handling>
+    /// * See [`Options::set_max_bgerror_resume_count`]
+    /// * See [`EventListener::on_error_recovery_begin`]
+    ///
+    /// [`Busy`]: crate::ErrorKind::Busy
+    /// [`EventListener::on_error_recovery_begin`]: crate::event_listener::EventListener::on_error_recovery_begin
+    pub fn resume(&self) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rust_rocksdb_resume(self.inner.inner()));
+        }
+
+        Ok(())
+    }
+
     pub fn path(&self) -> &Path {
         self.path.as_path()
     }

@@ -45,6 +45,14 @@ extern ROCKSDB_LIBRARY_API unsigned char
 rust_rocksdb_options_get_open_files_async(rocksdb_options_t*);
 
 /* -------------------------------------------------------------------------
+ * DB recovery
+ *
+ * Upstream PR: https://github.com/facebook/rocksdb/pull/15272
+ * ------------------------------------------------------------------------- */
+
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_resume(rocksdb_t*, char**);
+
+/* -------------------------------------------------------------------------
  * Batch-owned pinned MultiGet results
  *
  * The upstream batched C API allocates one rocksdb_pinnableslice_t wrapper

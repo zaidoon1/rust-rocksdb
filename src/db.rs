@@ -1552,6 +1552,52 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         Ok(())
     }
 
+    /// Tries to clear a background error and resume writes.
+    ///
+    /// Returns `Ok` right away if no background error is stopping writes or
+    /// background work. Recovering waits for running flushes and compactions to
+    /// finish and then flushes every column family, so this can block for a
+    /// while.
+    ///
+    /// Out of space is the only kind of I/O error this can recover from on the
+    /// built-in filesystems: a full disk, or going over
+    /// [`SstFileManager::set_max_allowed_space_usage`]. Other I/O errors are
+    /// fatal with the default `paranoid_checks` and corruption is unrecoverable,
+    /// so for those this returns the error and the DB has to be reopened.
+    ///
+    /// RocksDB normally recovers from out-of-space errors on its own. Every DB
+    /// gets an [`SstFileManager`] even if you don't set one, and it retries
+    /// every few seconds until enough space is free. While that is running this
+    /// returns [`Busy`]. To recover manually instead, set the `&mut bool` passed
+    /// to [`EventListener::on_error_recovery_begin`] to `false`, and only call
+    /// this once space has been freed. A recovery flush that fails because the
+    /// disk is still full can make the error fatal, and then only reopening
+    /// helps.
+    ///
+    /// [`Options::set_max_bgerror_resume_count`] only applies to errors a
+    /// filesystem marks as retryable, and the built-in ones never produce any
+    /// that take that path.
+    ///
+    /// See also <https://github.com/facebook/rocksdb/wiki/Background-Error-Handling>.
+    ///
+    /// # Errors
+    ///
+    /// - [`Busy`] if automatic recovery is running. This doesn't wait for it.
+    /// - The stored background error if it is fatal or unrecoverable.
+    /// - The new error if the recovery flush fails, e.g. the disk is still full.
+    ///
+    /// [`Busy`]: crate::ErrorKind::Busy
+    /// [`SstFileManager`]: crate::SstFileManager
+    /// [`SstFileManager::set_max_allowed_space_usage`]: crate::SstFileManager::set_max_allowed_space_usage
+    /// [`EventListener::on_error_recovery_begin`]: crate::event_listener::EventListener::on_error_recovery_begin
+    pub fn resume(&self) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rust_rocksdb_resume(self.inner.inner()));
+        }
+
+        Ok(())
+    }
+
     pub fn path(&self) -> &Path {
         self.path.as_path()
     }

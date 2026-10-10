@@ -313,7 +313,7 @@ jobs:
           rustflags: ""
           build-warnings: ""
 
-      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: nextest
 
@@ -524,7 +524,7 @@ jobs:
           cache-key: "v1-rust-semver"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-semver-checks
 
@@ -604,7 +604,7 @@ jobs:
         with:
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: nextest
 
@@ -664,7 +664,7 @@ jobs:
           cache-key: "v1-rust-jemalloc"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: nextest
 
@@ -705,7 +705,7 @@ jobs:
           cache-key: "v1-rust-release"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: nextest
 

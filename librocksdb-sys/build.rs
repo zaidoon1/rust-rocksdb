@@ -53,6 +53,8 @@ struct Target {
     os: String,
     /// e.g. `x86_64`, `aarch64`, `riscv64`.
     arch: String,
+    /// e.g. `unknown`, `pc`, `apple`.
+    vendor: String,
     /// e.g. `gnu`, `musl`, `msvc`, or empty.
     env_abi: String,
     /// 32 or 64.
@@ -78,6 +80,7 @@ impl Target {
             triple: env::var("TARGET").expect("TARGET is always set by Cargo"),
             os: env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS"),
             arch: env::var("CARGO_CFG_TARGET_ARCH").expect("CARGO_CFG_TARGET_ARCH"),
+            vendor: env::var("CARGO_CFG_TARGET_VENDOR").expect("CARGO_CFG_TARGET_VENDOR"),
             env_abi: env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default(),
             pointer_width: env::var("CARGO_CFG_TARGET_POINTER_WIDTH")
                 .ok()
@@ -417,8 +420,7 @@ fn compiles_with_cl_exe(cfg: &cc::Build) -> bool {
 /// currently on `cfg`, including environment flags such as `-march=native`.
 ///
 /// GCC and Clang use `-dM`; clang-cl requires `/clang:-dM`. The probe runs
-/// after `apply_target_cpu`, so it also sees a `-march=` derived from Rust's
-/// `-Ctarget-cpu` setting.
+/// after `apply_target_cpu`, so it also sees the `-march=` picked there.
 ///
 /// Returns `false` for cl.exe and on probe failure. Those paths keep the
 /// conservative Rust target-feature decision.
@@ -446,6 +448,67 @@ fn compiler_defines_pclmul(cfg: &cc::Build) -> bool {
                 .take(2)
                 .eq(["#define", "__PCLMUL__"])
         })
+}
+
+/// Pin the C/C++ compiler to the CPU the Rust half is compiled for, as
+/// `-march=` or `-mcpu=`. Shared by the RocksDB and snappy builds so both get
+/// the same baseline.
+///
+/// That is `-Ctarget-cpu` when it is set. Without it, the compiler's own
+/// default is no stand-in for the Rust target's: a distribution can configure
+/// GCC with a higher one. RHEL 9 defaults to `x86-64-v2`, and the gcc-15 from
+/// Ubuntu's `amd64v3` variant, which GitHub's ubuntu-26.04 image installs, to
+/// `x86-64-v3`. Left alone, a build for plain x86-64 got AVX2, BMI2 and SSE4.2
+/// code in both libraries, which would fault on CPUs that run the Rust half.
+/// [`x86::baseline_cpu`] names the CPU to pin instead.
+///
+/// A compiler that rejects the flag keeps its own default, and the build warns,
+/// because that default may be the raised one. zig is one: it spells the CPU
+/// `x86_64`, and cargo-zigbuild before 0.23.4 hands it `-march=x86-64` as is.
+/// cc-rs puts `CFLAGS`/`CXXFLAGS` after builder flags, so a `-march=` there
+/// still wins either way.
+fn apply_target_cpu(cfg: &mut cc::Build, target: &Target) {
+    // Called once per library with the same inputs, so warn once.
+    static WARNED: std::sync::Once = std::sync::Once::new();
+    let Some(cpu) = target
+        .rust_target_cpu
+        .as_deref()
+        .or_else(|| x86::baseline_cpu(&target.arch, &target.vendor))
+    else {
+        return;
+    };
+    // `cl.exe` has no `-march`/`-mcpu`. It names a baseline with `/arch:`
+    // instead, which `apply_x86_msvc` derives from the target features, so
+    // passing `-march=` here would only add a D9002 warning to each of the
+    // several hundred translation units. `clang-cl` does accept `-march=`,
+    // hence the compiler check rather than a target-env one.
+    if compiles_with_cl_exe(cfg) {
+        return;
+    }
+    let flag = match target.arch.as_str() {
+        "x86_64" | "x86" => format!("-march={cpu}"),
+        "aarch64" | "arm" => format!("-mcpu={cpu}"),
+        other => {
+            WARNED.call_once(|| {
+                println!(
+                    "cargo::warning=unknown target architecture: \
+                     {other}; C/C++ target-cpu flag not passed through"
+                );
+            });
+            return;
+        }
+    };
+    if cfg.is_flag_supported(&flag).unwrap_or(false) {
+        cfg.flag(flag);
+    } else {
+        WARNED.call_once(|| {
+            println!(
+                "cargo::warning=the C/C++ compiler rejected `{flag}`, so the \
+                 vendored C++ builds for the compiler's default CPU, which can \
+                 be above the Rust target's; set the equivalent in CXXFLAGS"
+            );
+        });
+    }
 }
 
 // =========================================================================
@@ -522,10 +585,11 @@ mod vendor {
         }
     }
 
-    /// Whether a `configure` call should forward the user's `-Ctarget-cpu`.
+    /// Whether a `configure` call should pin the Rust target's CPU.
     #[derive(Copy, Clone, PartialEq, Eq)]
     enum CpuBaseline {
-        /// Pass `-Ctarget-cpu` through as `-march`/`-mcpu`, as usual.
+        /// Pass `-Ctarget-cpu`, or the target's default CPU where the compiler
+        /// needs telling, as `-march`/`-mcpu`. See [`apply_target_cpu`].
         FromTargetCpu,
         /// Ignore `-Ctarget-cpu`. Used for the aarch64 CRC32C translation
         /// units, which pin their own `-march` and would otherwise end up with
@@ -745,36 +809,6 @@ mod vendor {
         }
         if cfg!(feature = "valgrind") {
             cfg.define("ROCKSDB_VALGRIND_RUN", Some("1"));
-        }
-    }
-
-    /// Pass `-Ctarget-cpu=...` through to the C/C++ compiler as `-march=` /
-    /// `-mcpu=` so the C++ side benefits from the same CPU baseline.
-    fn apply_target_cpu(cfg: &mut cc::Build, target: &Target) {
-        let Some(cpu) = &target.rust_target_cpu else {
-            return;
-        };
-        // `cl.exe` has no `-march`/`-mcpu`. It names a baseline with `/arch:`
-        // instead, which `apply_x86_msvc` derives from the target features, so
-        // passing `-march=` here would only add a D9002 warning to each of the
-        // several hundred translation units. `clang-cl` does accept `-march=`,
-        // hence the compiler check rather than a target-env one.
-        if compiles_with_cl_exe(cfg) {
-            return;
-        }
-        match target.arch.as_str() {
-            "x86_64" | "x86" => {
-                cfg.flag_if_supported(format!("-march={cpu}"));
-            }
-            "aarch64" | "arm" => {
-                cfg.flag_if_supported(format!("-mcpu={cpu}"));
-            }
-            other => {
-                println!(
-                    "cargo::warning=unknown target architecture: \
-                     {other}; C/C++ target-cpu flag not passed through"
-                );
-            }
         }
     }
 
@@ -1578,8 +1612,10 @@ mod snappy {
             cfg.define("SNAPPY_HAVE_NEON", Some("1"));
         }
         // This build has its own `cc::Build` and never runs through
-        // `apply_x86`/`apply_target_cpu`, so nothing else here supplies the x86
-        // flags.
+        // `apply_x86`, so it takes RocksDB's CPU baseline here and its own x86
+        // flags after that. Without the baseline, snappy alone kept the
+        // compiler's default and its `SNAPPY_HAVE_*` paths followed it.
+        apply_target_cpu(&mut cfg, target);
         apply_snappy_x86_isa(&mut cfg, target);
 
         for src in [

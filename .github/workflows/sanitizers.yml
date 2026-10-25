@@ -43,10 +43,14 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Identify the runner image
+        id: image
+        uses: ./.github/actions/runner-image
+
       - name: Install rust
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
-          cache-key: "v1-rust-ubsan"
+          cache-key: "v1-rust-ubsan-${{ steps.image.outputs.id }}"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
           rustflags: ""
           # Empty for the same reason as `rustflags`. Through v1 the action's
@@ -95,12 +99,16 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Identify the runner image
+        id: image
+        uses: ./.github/actions/runner-image
+
       - name: Install rust nightly
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           toolchain: nightly
           components: rust-src
-          cache-key: "v1-rust-tsan"
+          cache-key: "v1-rust-tsan-${{ steps.image.outputs.id }}"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
           rustflags: ""
           build-warnings: ""
@@ -143,10 +151,14 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Identify the runner image
+        id: image
+        uses: ./.github/actions/runner-image
+
       - name: Install rust
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
-          cache-key: "v1-rust-valgrind"
+          cache-key: "v1-rust-valgrind-${{ steps.image.outputs.id }}"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Install dependencies

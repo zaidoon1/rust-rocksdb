@@ -1,0 +1,19 @@
+.github/workflows/ci-2604-probe.yml
+  s_2f17648a237fd2::t_4e6a4ec00bc816 1-41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2aaf289f8347a534ac2046e081385f4930844f27",
+  "prompts": {},
+  "sessions": {
+    "s_2f17648a237fd2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fceecf42-dca3-48a5-873d-6b1bd70ecde1",
+        "model": "unknown"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    }
+  }
+}

@@ -33,6 +33,17 @@ pub(crate) fn should_disable_three_way_crc(
     pointer_width != 64 || !(rust_has_pclmul || compiler_has_pclmul)
 }
 
+/// The CPU to pin the C++ compiler to when `-Ctarget-cpu` is not set: the one
+/// rustc compiles this target for, wherever the compiler's own default can
+/// differ from it.
+///
+/// That is `x86-64` on every non-Apple x86_64 target. Apple clang already picks
+/// `penryn` from the deployment target, as rustc does. 32-bit x86 is out of
+/// scope; cc-rs pins `i686` and `pentium` for those on Linux.
+pub(crate) fn baseline_cpu(arch: &str, vendor: &str) -> Option<&'static str> {
+    (arch == "x86_64" && vendor != "apple").then_some("x86-64")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,5 +92,22 @@ mod tests {
     #[test]
     fn compiler_pclmul_enables_three_way_crc_on_x64() {
         assert!(!should_disable_three_way_crc(64, false, true));
+    }
+
+    #[test]
+    fn non_apple_x86_64_pins_rustcs_default_cpu() {
+        assert_eq!(baseline_cpu("x86_64", "unknown"), Some("x86-64"));
+        assert_eq!(baseline_cpu("x86_64", "pc"), Some("x86-64"));
+    }
+
+    #[test]
+    fn other_architectures_keep_the_compiler_default() {
+        assert_eq!(baseline_cpu("x86", "unknown"), None);
+        assert_eq!(baseline_cpu("aarch64", "unknown"), None);
+    }
+
+    #[test]
+    fn apple_x86_64_keeps_the_compiler_default() {
+        assert_eq!(baseline_cpu("x86_64", "apple"), None);
     }
 }

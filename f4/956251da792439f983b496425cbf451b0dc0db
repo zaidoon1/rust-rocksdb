@@ -1,0 +1,25 @@
+.github/actions/runner-image/action.yml
+  s_2f17648a237fd2::t_3096b0cd6d000d 1-30
+.github/workflows/coroutines.yml
+  s_2f17648a237fd2::t_1aaa47c288a9be 99-102,106
+.github/workflows/rust.yml
+  s_2f17648a237fd2::t_f9b63f680d3ca0 139-142,147,182-185,191,211-214,219,273-276,281,313-316,330,378-381,385,413-416,420,550-553,557,635-638,642,699-702,706,744-747,751,771-774,780
+.github/workflows/sanitizers.yml
+  s_2f17648a237fd2::t_af86985b9153e6 46-49,53,102-105,111,154-157,161
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f4956251da792439f983b496425cbf451b0dc0db",
+  "prompts": {},
+  "sessions": {
+    "s_2f17648a237fd2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fceecf42-dca3-48a5-873d-6b1bd70ecde1",
+        "model": "unknown"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    }
+  }
+}

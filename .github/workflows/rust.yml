@@ -136,11 +136,15 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Identify the runner image
+        id: image
+        uses: ./.github/actions/runner-image
+
       - name: Install rust
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           components: rust-docs
-          cache-key: "v1-rust-docs"
+          cache-key: "v1-rust-docs-${{ steps.image.outputs.id }}"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Run cargo rustdoc
@@ -175,12 +179,16 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Identify the runner image
+        id: image
+        uses: ./.github/actions/runner-image
+
       - name: Install rust nightly
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           toolchain: nightly
           components: rust-docs
-          cache-key: "v1-rust-docsrs"
+          cache-key: "v1-rust-docsrs-${{ steps.image.outputs.id }}"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Run cargo doc as docs.rs builds it
@@ -200,10 +208,15 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Identify the runner image
+        id: image
+        uses: ./.github/actions/runner-image
+
       - name: Install rust
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           components: clippy
+          cache-key: ${{ steps.image.outputs.id }}
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Install dependencies
@@ -257,11 +270,15 @@ jobs:
           echo "declared MSRV: $v"
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
+      - name: Identify the runner image
+        id: image
+        uses: ./.github/actions/runner-image
+
       - name: Install rust ${{ steps.msrv.outputs.version }}
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           toolchain: ${{ steps.msrv.outputs.version }}
-          cache-key: "v1-rust-msrv"
+          cache-key: "v1-rust-msrv-${{ steps.image.outputs.id }}"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Check on the declared MSRV
@@ -293,6 +310,10 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Identify the runner image
+        id: image
+        uses: ./.github/actions/runner-image
+
       - name: Install rust
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
@@ -306,7 +327,7 @@ jobs:
           # 6m05s warm, because the cache never covered the RocksDB build in the
           # first place: `librocksdb-sys` is a workspace member, and it was 5m17s
           # of that warm run.
-          cache-key: "v2-rust-tuned-cpu"
+          cache-key: "v2-rust-tuned-cpu-${{ steps.image.outputs.id }}"
           cache-targets: false
           cache-bin: false
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
@@ -354,10 +375,14 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Identify the runner image
+        id: image
+        uses: ./.github/actions/runner-image
+
       - name: Install rust
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
-          cache-key: "v1-rust-features"
+          cache-key: "v1-rust-features-${{ steps.image.outputs.id }}"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
       # `--no-default-features` drops `bindgen-runtime`, and with neither
@@ -385,10 +410,14 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Identify the runner image
+        id: image
+        uses: ./.github/actions/runner-image
+
       - name: Install rust
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
-          cache-key: "v1-rust-package"
+          cache-key: "v1-rust-package-${{ steps.image.outputs.id }}"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
       # No `--no-verify`: the point of this job is that cargo unpacks the
@@ -518,10 +547,14 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Identify the runner image
+        id: image
+        uses: ./.github/actions/runner-image
+
       - name: Install rust
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
-          cache-key: "v1-rust-semver"
+          cache-key: "v1-rust-semver-${{ steps.image.outputs.id }}"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
@@ -585,8 +618,10 @@ jobs:
       matrix:
         build: [Linux, Linux-ARM, macOS, Windows]
         include:
+          # Pinned, not `-latest`: the archive check below needs a C++ compiler
+          # that defaults above x86-64, and ubuntu-26.04's does.
           - build: Linux
-            os: ubuntu-latest
+            os: ubuntu-26.04
           - build: Linux-ARM
             os: ubuntu-24.04-arm
           - build: macOS
@@ -599,9 +634,24 @@ jobs:
         with:
           submodules: recursive
 
+      # Fails before the build rather than letting the archive check pass on an
+      # image where there was nothing to catch.
+      - name: Require a C++ compiler that defaults above x86-64
+        if: matrix.build == 'Linux'
+        run: |
+          if ! echo | c++ -dM -E -x c++ - | grep -q '__AVX2__'; then
+            echo "::error::c++ on this image defaults to plain x86-64, so the archive check tests nothing; pin the Linux entry to an image whose compiler defaults higher"
+            exit 1
+          fi
+
+      - name: Identify the runner image
+        id: image
+        uses: ./.github/actions/runner-image
+
       - name: Install rust
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
+          cache-key: ${{ steps.image.outputs.id }}
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
@@ -626,6 +676,39 @@ jobs:
 
       - name: Run rocksdb tests
         run: cargo nextest run --all
+
+      # The C++ half of the CPU baseline. ubuntu-26.04 enables Ubuntu's
+      # `amd64v3` variant, whose gcc-15 defaults to `-march=x86-64-v3`. Until
+      # `build.rs` pinned `-march=x86-64`, that put thousands of AVX2, BMI2,
+      # SSE4.2 and POPCNT instructions into `librocksdb.a`, and some into
+      # `libsnappy.a`, for a target that promises none of them.
+      # `test_crc32_build` above sees one translation unit of that, through
+      # RocksDB's own log. This covers all of both libraries. A baseline build
+      # has none of these, so any hit is code the target CPU may not have.
+      - name: Assert the vendored archives stay at x86-64
+        if: matrix.build == 'Linux'
+        run: |
+          set -euo pipefail
+          mapfile -t archives < <(find target/debug/build -path '*/rust-librocksdb-sys-*/out/*' \
+            \( -name librocksdb.a -o -name libsnappy.a \))
+          for lib in librocksdb.a libsnappy.a; do
+            if ! printf '%s\n' "${archives[@]}" | grep -q "/$lib\$"; then
+              echo "::error::$lib not found under target/debug/build"
+              exit 1
+            fi
+          done
+
+          fail=0
+          for a in "${archives[@]}"; do
+            n=$(objdump -d --no-show-raw-insn "$a" \
+              | grep -cE $'\t(crc32[bwlq]?|popcnt|bzhi|pdep) |%[yz]mm' || true)
+            echo "$a: $n instructions above x86-64"
+            if [ "$n" -ne 0 ]; then
+              echo "::error::$(basename "$a") has $n SSE4.2/POPCNT/BMI2/AVX instructions in a build for plain x86-64"
+              fail=1
+            fi
+          done
+          exit $fail
 
       - name: Run rocksdb tests (multi-threaded-cf)
         run: cargo nextest run --all --features multi-threaded-cf
@@ -658,10 +741,14 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Identify the runner image
+        id: image
+        uses: ./.github/actions/runner-image
+
       - name: Install rust
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
-          cache-key: "v1-rust-jemalloc"
+          cache-key: "v1-rust-jemalloc-${{ steps.image.outputs.id }}"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
@@ -699,10 +786,14 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Identify the runner image
+        id: image
+        uses: ./.github/actions/runner-image
+
       - name: Install rust
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
-          cache-key: "v1-rust-release"
+          cache-key: "v1-rust-release-${{ steps.image.outputs.id }}"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
@@ -722,12 +813,16 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Identify the runner image
+        id: image
+        uses: ./.github/actions/runner-image
+
       - name: Install rust nightly
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           toolchain: nightly
           components: rust-src
-          cache-key: "v1-rust-asan"
+          cache-key: "v1-rust-asan-${{ steps.image.outputs.id }}"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
           rustflags: ""
           build-warnings: ""

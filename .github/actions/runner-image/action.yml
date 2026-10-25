@@ -1,0 +1,30 @@
+# rust-cache keys on the OS family and CPU (`Linux-x64`) but not the release,
+# so a `target/` saved on one runner image restores as a full match onto the
+# next. Build-script output survives that: clang-sys records the absolute
+# libclang path it found and never asks to rerun, so the feature-matrix jobs
+# went on linking `/usr/lib/llvm-18` from ubuntu-24.04 on an ubuntu-26.04
+# runner that only has LLVM 20 to 22. Upstream is Swatinem/rust-cache#214.
+#
+# Every rust-cache key in these workflows appends this id. It follows
+# actions/setup-python and ruby/setup-ruby, which key their caches on the same
+# `/etc/os-release` fields. That file is read rather than `ImageOS` on Linux
+# because a `container:` job builds against the container's userland, not the
+# host's.
+name: Runner image
+description: The OS release a job builds on, for cache keys.
+outputs:
+  id:
+    description: "`<ID>-<VERSION_ID>` on Linux, e.g. `ubuntu-26.04`; `ImageOS` elsewhere, e.g. `macos15`."
+    value: ${{ steps.image.outputs.id }}
+runs:
+  using: composite
+  steps:
+    - id: image
+      shell: bash
+      run: |
+        if [ "$RUNNER_OS" = Linux ]; then
+          id=$(. /etc/os-release && echo "$ID-${VERSION_ID:-}")
+        else
+          id=${ImageOS:-$RUNNER_OS}
+        fi
+        echo "id=$id" >> "$GITHUB_OUTPUT"

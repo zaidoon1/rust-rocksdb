@@ -96,10 +96,14 @@ jobs:
           gcc --version
           g++ --version
 
+      - name: Identify the runner image
+        id: image
+        uses: ./.github/actions/runner-image
+
       - name: Install rust
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
-          cache-key: "v1-rust-coroutines"
+          cache-key: "v1-rust-coroutines-${{ steps.image.outputs.id }}"
           # Populate the cache from master runs only, not from PR runs.
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 

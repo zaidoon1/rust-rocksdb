@@ -1,0 +1,25 @@
+README.md
+  s_2f17648a237fd2::t_f9a905316a3eca 417-444
+librocksdb-sys/build_support/x86.rs
+  s_2f17648a237fd2::t_7d4c7888d92d17 36-46,96-112
+.github/workflows/rust.yml
+  s_2f17648a237fd2::t_233e533b00d875 621-622,624,637-646,680-712
+librocksdb-sys/build.rs
+  s_2f17648a237fd2::t_569f3a9caefa07 56-57,83,423,453-513,588,591-592,1615-1618
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "93bf2e6d384a1b3ed490b83e704707df9530d02a",
+  "prompts": {},
+  "sessions": {
+    "s_2f17648a237fd2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fceecf42-dca3-48a5-873d-6b1bd70ecde1",
+        "model": "unknown"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    }
+  }
+}

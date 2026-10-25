@@ -618,8 +618,10 @@ jobs:
       matrix:
         build: [Linux, Linux-ARM, macOS, Windows]
         include:
+          # Pinned, not `-latest`: the archive check below needs a C++ compiler
+          # that defaults above x86-64, and ubuntu-26.04's does.
           - build: Linux
-            os: ubuntu-latest
+            os: ubuntu-26.04
           - build: Linux-ARM
             os: ubuntu-24.04-arm
           - build: macOS
@@ -631,6 +633,16 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
+
+      # Fails before the build rather than letting the archive check pass on an
+      # image where there was nothing to catch.
+      - name: Require a C++ compiler that defaults above x86-64
+        if: matrix.build == 'Linux'
+        run: |
+          if ! echo | c++ -dM -E -x c++ - | grep -q '__AVX2__'; then
+            echo "::error::c++ on this image defaults to plain x86-64, so the archive check tests nothing; pin the Linux entry to an image whose compiler defaults higher"
+            exit 1
+          fi
 
       - name: Identify the runner image
         id: image
@@ -664,6 +676,39 @@ jobs:
 
       - name: Run rocksdb tests
         run: cargo nextest run --all
+
+      # The C++ half of the CPU baseline. ubuntu-26.04 enables Ubuntu's
+      # `amd64v3` variant, whose gcc-15 defaults to `-march=x86-64-v3`. Until
+      # `build.rs` pinned `-march=x86-64`, that put thousands of AVX2, BMI2,
+      # SSE4.2 and POPCNT instructions into `librocksdb.a`, and some into
+      # `libsnappy.a`, for a target that promises none of them.
+      # `test_crc32_build` above sees one translation unit of that, through
+      # RocksDB's own log. This covers all of both libraries. A baseline build
+      # has none of these, so any hit is code the target CPU may not have.
+      - name: Assert the vendored archives stay at x86-64
+        if: matrix.build == 'Linux'
+        run: |
+          set -euo pipefail
+          mapfile -t archives < <(find target/debug/build -path '*/rust-librocksdb-sys-*/out/*' \
+            \( -name librocksdb.a -o -name libsnappy.a \))
+          for lib in librocksdb.a libsnappy.a; do
+            if ! printf '%s\n' "${archives[@]}" | grep -q "/$lib\$"; then
+              echo "::error::$lib not found under target/debug/build"
+              exit 1
+            fi
+          done
+
+          fail=0
+          for a in "${archives[@]}"; do
+            n=$(objdump -d --no-show-raw-insn "$a" \
+              | grep -cE $'\t(crc32[bwlq]?|popcnt|bzhi|pdep) |%[yz]mm' || true)
+            echo "$a: $n instructions above x86-64"
+            if [ "$n" -ne 0 ]; then
+              echo "::error::$(basename "$a") has $n SSE4.2/POPCNT/BMI2/AVX instructions in a build for plain x86-64"
+              fail=1
+            fi
+          done
+          exit $fail
 
       - name: Run rocksdb tests (multi-threaded-cf)
         run: cargo nextest run --all --features multi-threaded-cf

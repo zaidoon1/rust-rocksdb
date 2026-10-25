@@ -414,6 +414,34 @@ Do not stack both cache wrappers around the same compiler. Cache misses are
 expected when the compiler, target, RocksDB sources, native features, or compiler
 flags change.
 
+### CPU Baseline
+
+The bundled RocksDB and Snappy are compiled for the same CPU as your Rust code:
+the one named by `-Ctarget-cpu`, or else the target's default. On non-Apple
+x86_64 targets that default is plain `x86-64`, and the build passes
+`-march=x86-64` rather than relying on the C++ compiler's own default, which
+some distributions raise. RHEL 9 raises it to `x86-64-v2`, and Ubuntu's
+`amd64v3` variant, which GitHub's `ubuntu-26.04` runners use, to `x86-64-v3`.
+
+To build both halves for a newer CPU, name it for Rust and it carries over:
+
+```bash
+RUSTFLAGS="-Ctarget-cpu=x86-64-v3" cargo build --release
+```
+
+Builds on those hosts used to pick up the raised level, hardware CRC32C
+included, without asking. Pass that level to `-Ctarget-cpu` to keep it.
+
+An explicit `-march=` in `CXXFLAGS` still takes precedence on the C++ side. A
+compiler that rejects the flag the build picks keeps its own default, and the
+build warns. zig does, under cargo-zigbuild before 0.23.4: it spells the CPU
+`x86_64`. Set the flag in `CXXFLAGS`, in that compiler's spelling, instead.
+
+The compression libraries (`zstd`, `lz4`, `zlib`, `bzip2`) and jemalloc are
+built by their own `-sys` crates and keep the compiler's default. On a host
+like those above, also set `CFLAGS=-march=x86-64`, or the level you passed to
+`-Ctarget-cpu`, if the binary has to run on older CPUs.
+
 ### Using an Existing RocksDB Installation
 
 By default, `rust-rocksdb` builds RocksDB from the bundled submodule. Controlled

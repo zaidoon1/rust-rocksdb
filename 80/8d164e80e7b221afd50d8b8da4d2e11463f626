@@ -1,0 +1,21 @@
+README.md
+  s_2f17648a237fd2::t_f9a905316a3eca 417-438
+librocksdb-sys/build_support/x86.rs
+  s_2f17648a237fd2::t_7d4c7888d92d17 36-46,96-112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "808d164e80e7b221afd50d8b8da4d2e11463f626",
+  "prompts": {},
+  "sessions": {
+    "s_2f17648a237fd2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fceecf42-dca3-48a5-873d-6b1bd70ecde1",
+        "model": "unknown"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    }
+  }
+}

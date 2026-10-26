@@ -1,0 +1,23 @@
+Cargo.lock
+  s_1fe41c7c8dc703::t_5d6048d90e3883 669
+Cargo.toml
+  s_1fe41c7c8dc703::t_01cb5626b95366 4
+README.md
+  s_1fe41c7c8dc703::t_eeaf9598834d57 34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1da7e9815634f8e0f499ce9f2b12928008367ee1",
+  "prompts": {},
+  "sessions": {
+    "s_1fe41c7c8dc703": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "745d95ca-5626-43d7-aa77-a86c6faacb32",
+        "model": "unknown"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    }
+  }
+}

@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.54.0 (2026-10-26)
+
+This release moves the bundled RocksDB from 11.8.1 to 11.12.0 and adds
+`resume` for recovering from background errors. On x86_64 it also stops the
+vendored C++ from silently taking a newer CPU level than your Rust code.
+Read the breaking changes and the CPU baseline note before upgrading.
+
+`rust-librocksdb-sys` moves to 0.49.0+11.12.0.
 
 ### Breaking changes
 
@@ -11,6 +18,7 @@
   option has defaulted to false since RocksDB 8.0, so ingestion records the
   global sequence number in the MANIFEST rather than rewriting the file.
   Files written the old way remain readable.
+  ([#310](https://github.com/zaidoon1/rust-rocksdb/pull/310))
 - breaking: `open_and_compact` and `open_and_compact_with_options` now
   resolve `output_directory` under the source DB. RocksDB 11.11 changed
   `DB::OpenAndCompact` so a bare name becomes `db_path/<name>`, and a path
@@ -19,21 +27,84 @@
   path outside the DB now fails with `IO error: No such file or
   directory` when RocksDB tries to create that path inside the DB
   directory. Pass a directory name, or a path under `db_path`.
+  ([#310](https://github.com/zaidoon1/rust-rocksdb/pull/310))
 
-### Features
+### New APIs
 
-- feat(librocksdb-sys): upgrade the bundled RocksDB submodule to 11.12.0.
-  Adds the four `BlobDbLazy*` tickers to the generated enums. Upstream
-  tagged this release `v11.12`, and `version.h` reads 11.12.0, so that is
-  what the library reports. Release notes:
+- feat: add `resume` to `DB` and `OptimisticTransactionDB`. It clears a
+  background error and resumes writes, or returns `Ok` right away when there
+  is none. On the built-in filesystems only out-of-space errors are
+  recoverable. While RocksDB's own automatic recovery is running it returns
+  `Busy`, and for fatal or unrecoverable errors it returns the error and the
+  DB has to be reopened. The rustdoc covers how to take over recovery from
+  RocksDB. (Kirollos Morkos)
+  ([#279](https://github.com/zaidoon1/rust-rocksdb/pull/279))
+
+### RocksDB 11.12
+
+- feat(librocksdb-sys): upgrade the bundled RocksDB submodule to 11.12.0,
+  which also covers 11.9, 11.10 and 11.11. Upstream never tagged those
+  three, so this is the first release of this crate to include their fixes.
+  Adds the four `BlobDbLazy*` tickers to the generated enums. Release notes:
   [11.9.0 through 11.12.0](https://github.com/facebook/rocksdb/blob/v11.12/HISTORY.md).
+  ([#310](https://github.com/zaidoon1/rust-rocksdb/pull/310))
 
-### Build
+These upstream changes are visible through this crate's API:
 
-- build: `scripts/build_folly.sh` now applies the libaio manifest fix from
-  RocksDB 11.12's `folly.mk`. Pagure was decommissioned, so getdeps' libaio
-  download 404s and a cold `coroutines` folly build fails. The script now
-  fetches Debian's copy of the same release archive, as upstream does.
+- behavior: `multi_get` and its variants with
+  `ReadOptions::set_read_tier(ReadTier::BlockCache)` now return an
+  `Incomplete` error for a key whose data block is not in the block cache.
+  They used to read the block from disk, unlike `get`.
+- behavior: on a secondary DB, `refresh` on the iterators returned by
+  `raw_iterators_cf` now returns `NotSupported`, because those iterators are
+  pinned to one view across column families. Call `raw_iterators_cf` again
+  after `try_catch_up_with_primary` instead. They also no longer come from
+  different database states when a catch-up runs at the same time.
+- behavior: `Replayer::replay` with `ReplayOptions::set_num_threads` above 1
+  now returns the first error from a trace record, like single-threaded
+  replay does, instead of returning `Ok`. Replay now always includes the
+  default column family, so reads on it no longer fail with
+  `Corruption: Invalid Column Family ID` when `new_default_replayer` is given
+  other column families but not the default.
+- behavior: `TableProperties::uncompressed_data_size` is now stored in the
+  SST file. It used to be known only while the file was being written and
+  read back as 0 afterwards, which is still what files written by earlier
+  versions report.
+- fix: an iterator that called `seek` and then `seek_to_first` could end the
+  scan early and silently skip keys. This needed `prefix_same_as_start`,
+  `auto_readahead_size` (on by default) and `async_io`. Without `async_io`
+  the scan ran with readahead turned off.
+- fix: BlobDB garbage-collection compactions reported the SST path instead
+  of the blob file path to `SstFileManager`, which skewed space accounting
+  and could fail compactions on filesystems where the SST was not visible
+  yet ([facebook/rocksdb#14897](https://github.com/facebook/rocksdb/issues/14897)).
+- fix: recovery from background errors no longer leaves a DB stuck in
+  recovery while writes keep requesting flushes, and no longer partially
+  recovers a write batch spanning several column families after a failed
+  recovery flush. A secondary DB no longer serves stale values replayed from
+  a WAL the primary had already flushed.
+
+### Native build fixes
+
+- fix: on x86_64, build the bundled RocksDB and Snappy for the same CPU as the
+  Rust code, which is the `-Ctarget-cpu` value or else plain `x86-64`. The
+  build used to pass no `-march` and take the C++ compiler's default, which
+  RHEL 9 raises to `x86-64-v2` and Ubuntu's `amd64v3` variant (GitHub's
+  `ubuntu-26.04` runners) to `x86-64-v3`. On those hosts the binary could hit
+  SIGILL on older CPUs that ran the Rust half fine. If you relied on the
+  raised level, including hardware CRC32C, pass it explicitly:
+  `RUSTFLAGS="-Ctarget-cpu=x86-64-v3"`. An explicit `-Ctarget-cpu` now also
+  reaches Snappy, and a compiler that rejects the flag gets a build warning
+  instead of a silent fallback. Apple targets are unchanged. The README's new
+  CPU Baseline section covers the compression `-sys` crates and jemalloc,
+  which still follow the compiler's default.
+- build(librocksdb-sys): require `bindgen` 0.73 (was 0.72).
+  ([#289](https://github.com/zaidoon1/rust-rocksdb/pull/289))
+- build: `scripts/build_folly.sh`, used by the `coroutines` feature, now
+  applies the libaio fix from RocksDB 11.12's `folly.mk`. Pagure was
+  decommissioned, so the libaio download 404ed and a fresh folly build
+  failed. The script now fetches Debian's copy of the same release archive,
+  as upstream does. ([#310](https://github.com/zaidoon1/rust-rocksdb/pull/310))
 
 ## 0.53.0 (2026-09-05)
 

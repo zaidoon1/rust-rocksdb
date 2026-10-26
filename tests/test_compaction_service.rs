@@ -105,18 +105,15 @@ struct LocalWorkerService {
     /// Source DB the worker reopens read only, which is the directory the primary
     /// has open. A real worker would fetch this.
     db_path: PathBuf,
-    /// Parent for the per-job output directories.
-    work_root: PathBuf,
     behavior: WorkerBehavior,
     state: Arc<WorkerState>,
 }
 
 impl LocalWorkerService {
-    fn new(db_path: &DBPath, work_root: &DBPath, behavior: WorkerBehavior) -> Self {
+    fn new(db_path: &DBPath, behavior: WorkerBehavior) -> Self {
         Self {
             name: CString::new("local-worker").unwrap(),
             db_path: db_path.as_ref().to_path_buf(),
-            work_root: work_root.as_ref().to_path_buf(),
             behavior,
             state: Arc::new(WorkerState::default()),
         }
@@ -127,12 +124,11 @@ impl LocalWorkerService {
         Arc::clone(&self.state)
     }
 
-    /// A fresh empty directory per job, because `open_and_compact` requires an
-    /// empty output directory unless resumption is allowed.
-    fn output_dir_for(&self, job_id: &str) -> PathBuf {
-        let dir = self.work_root.join(format!("job_{job_id}"));
-        std::fs::create_dir_all(&dir).expect("could not create the job output directory");
-        dir
+    /// A fresh directory name per job, because `open_and_compact` requires an
+    /// empty output directory unless resumption is allowed. RocksDB resolves it
+    /// under the source DB and creates it.
+    fn output_dir_for(job_id: &str) -> PathBuf {
+        PathBuf::from(format!("job_{job_id}"))
     }
 
     /// The worker's own view of how to open the column family.
@@ -155,7 +151,7 @@ impl LocalWorkerService {
 
     /// Runs the compaction the way this behavior asks for.
     fn run_job(&self, job_id: &str, input: &[u8]) -> Result<Vec<u8>, rust_rocksdb::Error> {
-        let output_dir = self.output_dir_for(job_id);
+        let output_dir = Self::output_dir_for(job_id);
         let override_options = self.override_options();
 
         if self.behavior == WorkerBehavior::CompactCancelled {
@@ -276,12 +272,8 @@ fn primary_options() -> Options {
 }
 
 /// Opens a primary DB wired to a fresh worker, and returns the shared state.
-fn open_with_worker(
-    path: &DBPath,
-    work: &DBPath,
-    behavior: WorkerBehavior,
-) -> (DB, Arc<WorkerState>) {
-    let service = LocalWorkerService::new(path, work, behavior);
+fn open_with_worker(path: &DBPath, behavior: WorkerBehavior) -> (DB, Arc<WorkerState>) {
+    let service = LocalWorkerService::new(path, behavior);
     let state = service.state();
     let mut opts = primary_options();
     opts.set_compaction_service(service);
@@ -337,10 +329,9 @@ fn assert_all_keys_readable(db: &DB) {
 #[test]
 fn remote_compaction_round_trip_installs_the_workers_output() {
     let path = DBPath::new("_rust_rocksdb_compaction_service_round_trip");
-    let work = DBPath::new("_rust_rocksdb_compaction_service_round_trip_work");
 
     {
-        let (db, state) = open_with_worker(&path, &work, WorkerBehavior::Compact);
+        let (db, state) = open_with_worker(&path, WorkerBehavior::Compact);
 
         seed_overlapping_sst_files(&db);
         assert_all_keys_readable(&db);
@@ -387,6 +378,12 @@ fn remote_compaction_round_trip_installs_the_workers_output() {
             expected_db_name.to_string_lossy(),
             "the job should name the primary DB"
         );
+        // The worker passed the bare name `job_0`, which RocksDB resolves under the
+        // source DB. Nothing removes the directory after installation.
+        assert!(
+            expected_db_name.join("job_0").is_dir(),
+            "a bare output directory name should resolve under the source DB"
+        );
 
         // The data survived being compacted somewhere else.
         assert_all_keys_readable(&db);
@@ -404,9 +401,8 @@ fn a_freshly_created_override_can_run_a_compaction() {
     // family's options and then dereferences the table factory without checking it.
     // `create` fills that in, so passing one straight through has to work.
     let path = DBPath::new("_rust_rocksdb_compaction_service_default_override");
-    let work = DBPath::new("_rust_rocksdb_compaction_service_default_override_work");
 
-    let (db, state) = open_with_worker(&path, &work, WorkerBehavior::Compact);
+    let (db, state) = open_with_worker(&path, WorkerBehavior::Compact);
     seed_overlapping_sst_files(&db);
     db.compact_range(None::<&[u8]>, None::<&[u8]>);
 
@@ -424,9 +420,8 @@ fn a_configured_override_can_run_a_compaction() {
     // Covers the other constructor and a few setters on the path that actually
     // uses them, so a setter that stored the wrong thing shows up as a failure.
     let path = DBPath::new("_rust_rocksdb_compaction_service_configured_override");
-    let work = DBPath::new("_rust_rocksdb_compaction_service_configured_override_work");
 
-    let (db, state) = open_with_worker(&path, &work, WorkerBehavior::CompactWithConfiguredOverride);
+    let (db, state) = open_with_worker(&path, WorkerBehavior::CompactWithConfiguredOverride);
     seed_overlapping_sst_files(&db);
     db.compact_range(None::<&[u8]>, None::<&[u8]>);
 
@@ -447,9 +442,8 @@ fn a_configured_override_can_run_a_compaction() {
 #[test]
 fn use_local_at_schedule_time_makes_the_primary_compact() {
     let path = DBPath::new("_rust_rocksdb_compaction_service_use_local");
-    let work = DBPath::new("_rust_rocksdb_compaction_service_use_local_work");
 
-    let (db, state) = open_with_worker(&path, &work, WorkerBehavior::RefuseWithUseLocal);
+    let (db, state) = open_with_worker(&path, WorkerBehavior::RefuseWithUseLocal);
     seed_overlapping_sst_files(&db);
     db.compact_range(None::<&[u8]>, None::<&[u8]>);
 
@@ -469,9 +463,8 @@ fn use_local_at_schedule_time_makes_the_primary_compact() {
 #[test]
 fn a_failing_worker_leaves_the_data_intact() {
     let path = DBPath::new("_rust_rocksdb_compaction_service_worker_failure");
-    let work = DBPath::new("_rust_rocksdb_compaction_service_worker_failure_work");
 
-    let (db, state) = open_with_worker(&path, &work, WorkerBehavior::FailInWait);
+    let (db, state) = open_with_worker(&path, WorkerBehavior::FailInWait);
     seed_overlapping_sst_files(&db);
     // The compaction fails remotely. That comes back through the compaction's own
     // status rather than as a panic, and it must not lose data.
@@ -484,9 +477,8 @@ fn a_failing_worker_leaves_the_data_intact() {
 #[test]
 fn a_cancelled_token_stops_the_worker_without_losing_data() {
     let path = DBPath::new("_rust_rocksdb_compaction_service_cancelled");
-    let work = DBPath::new("_rust_rocksdb_compaction_service_cancelled_work");
 
-    let (db, state) = open_with_worker(&path, &work, WorkerBehavior::CompactCancelled);
+    let (db, state) = open_with_worker(&path, WorkerBehavior::CompactCancelled);
     seed_overlapping_sst_files(&db);
     db.compact_range(None::<&[u8]>, None::<&[u8]>);
 
@@ -502,10 +494,9 @@ fn a_cancelled_token_stops_the_worker_without_losing_data() {
 #[test]
 fn shutting_down_the_primary_tells_the_service_to_stop_waiting() {
     let path = DBPath::new("_rust_rocksdb_compaction_service_cancel_awaiting");
-    let work = DBPath::new("_rust_rocksdb_compaction_service_cancel_awaiting_work");
 
     let state = {
-        let (db, state) = open_with_worker(&path, &work, WorkerBehavior::Compact);
+        let (db, state) = open_with_worker(&path, WorkerBehavior::Compact);
         seed_overlapping_sst_files(&db);
         db.compact_range(None::<&[u8]>, None::<&[u8]>);
         assert!(state.wait_count() > 0);

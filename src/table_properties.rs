@@ -228,12 +228,6 @@ impl<'a> TableProperties<'a> {
         unsafe { ffi::rocksdb_table_properties_fast_compression_estimated_data_size(self.inner) }
     }
 
-    /// Offset within the file of the external SST file global seqno value, 0 when the file has
-    /// no such property.
-    pub fn external_sst_file_global_seqno_offset(&self) -> u64 {
-        unsafe { ffi::rocksdb_table_properties_external_sst_file_global_seqno_offset(self.inner) }
-    }
-
     /// Offset where the tail of the file begins, meaning every block after the data blocks.
     pub fn tail_start_offset(&self) -> u64 {
         unsafe { ffi::rocksdb_table_properties_tail_start_offset(self.inner) }

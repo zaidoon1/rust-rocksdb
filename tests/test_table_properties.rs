@@ -76,7 +76,6 @@ struct PropsSnapshot {
     file_creation_time: u64,
     slow_compression_estimated_data_size: u64,
     fast_compression_estimated_data_size: u64,
-    external_sst_file_global_seqno_offset: u64,
     tail_start_offset: u64,
     key_largest_seqno: u64,
     key_smallest_seqno: u64,
@@ -174,7 +173,6 @@ fn snapshot(props: &TableProperties<'_>) -> PropsSnapshot {
         file_creation_time: props.file_creation_time(),
         slow_compression_estimated_data_size: props.slow_compression_estimated_data_size(),
         fast_compression_estimated_data_size: props.fast_compression_estimated_data_size(),
-        external_sst_file_global_seqno_offset: props.external_sst_file_global_seqno_offset(),
         tail_start_offset: props.tail_start_offset(),
         key_largest_seqno: props.key_largest_seqno(),
         key_smallest_seqno: props.key_smallest_seqno(),
@@ -478,10 +476,9 @@ fn flush_table_properties_count_what_was_written() {
     assert_ne!(p.key_smallest_seqno, u64::MAX, "a real sequence number");
     assert_ne!(p.key_largest_seqno, u64::MAX, "a real sequence number");
 
-    // Nothing here writes a partitioned index or ingests an external file.
+    // Nothing here writes a partitioned index.
     assert_eq!(p.index_partitions, 0);
     assert_eq!(p.top_level_index_size, 0);
-    assert_eq!(p.external_sst_file_global_seqno_offset, 0);
     // sample_for_compression is off by default, so neither estimate is taken.
     assert_eq!(p.slow_compression_estimated_data_size, 0);
     assert_eq!(p.fast_compression_estimated_data_size, 0);

@@ -787,7 +787,7 @@ impl BlockBasedOptions {
 
     /// Format version, reserved for backward compatibility.
     ///
-    /// See full [list](https://github.com/facebook/rocksdb/blob/v11.8.1/include/rocksdb/table.h#L702-L731)
+    /// See full [list](https://github.com/facebook/rocksdb/blob/v11.12/include/rocksdb/table.h#L726-L760)
     /// of the supported versions.
     ///
     /// Default: 7, which needs RocksDB 10.4.0 or newer to read. Lower it if
@@ -9238,7 +9238,6 @@ impl IngestExternalFileOptions {
     ///   other, you can set `fail_if_not_bottommost_level` to true. If ingested files
     ///   overlap with each other, some file will be placed above Lmax, failing the
     ///   ingestion if the option is set.
-    /// - `write_global_seqno` must be false (sequence numbers cannot be reassigned).
     pub fn set_allow_db_generated_files(&mut self, val: bool) {
         unsafe {
             ffi::rocksdb_ingestexternalfileoptions_set_allow_db_generated_files(
@@ -9460,26 +9459,6 @@ impl IngestExternalFileOptions {
     /// Returns the value of the `verify_file_checksum` option.
     pub fn get_verify_file_checksum(&self) -> bool {
         unsafe { ffi::rocksdb_ingestexternalfileoptions_get_verify_file_checksum(self.inner) != 0 }
-    }
-
-    /// DEPRECATED - Set to true if you would like to write global_seqno to the external SST
-    /// file on ingestion for backward compatibility before RocksDB 5.16.0. Such old versions
-    /// of RocksDB expect any global_seqno to be written to the SST file rather than recorded
-    /// in the DB manifest. This functionality was deprecated because (a) random writes might
-    /// be costly or unsupported on some FileSystems, and (b) the file checksum changes with
-    /// such a write.
-    pub fn set_write_global_seqno(&mut self, val: bool) {
-        unsafe {
-            ffi::rocksdb_ingestexternalfileoptions_set_write_global_seqno(
-                self.inner,
-                c_uchar::from(val),
-            );
-        }
-    }
-
-    /// Returns the value of the `write_global_seqno` option.
-    pub fn get_write_global_seqno(&self) -> bool {
-        unsafe { ffi::rocksdb_ingestexternalfileoptions_get_write_global_seqno(self.inner) != 0 }
     }
 
     /// Set to TRUE if user wants file to be ingested to the last level. An error of

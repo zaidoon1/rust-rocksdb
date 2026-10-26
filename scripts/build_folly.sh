@@ -8,7 +8,7 @@
 # (see folly's `build/fbcode_builder/getdeps/buildopts.py:setup_build_options`),
 # which is unstable across machines and impossible to cache cleanly in CI.
 # Instead, we replicate the few things `make build_folly` does (clone + pin
-# folly, apply two upstream patches, run getdeps, patchelf libglog) and pass
+# folly, apply three upstream patches, run getdeps, patchelf libglog) and pass
 # `--scratch-path` so the install lands at a predictable location.
 #
 # Usage:
@@ -148,13 +148,18 @@ fi
 (cd "$FOLLY_DIR" && git reset --hard --quiet "$FOLLY_COMMIT_HASH")
 
 echo ">>> Applying upstream patches..."
-# These match the two `perl -pi -e` invocations in RocksDB's folly.mk
-# `checkout_folly` target; the upstream folly commit needs them to compile
-# cleanly against a modern toolchain. They are idempotent across re-runs.
+# These match the three `perl -pi -e` invocations in RocksDB's folly.mk
+# `checkout_folly` target. The first two let the upstream folly commit compile
+# cleanly against a modern toolchain. The third points getdeps' libaio
+# manifest at Debian's copy of the release archive, because Pagure was
+# decommissioned and the original URL now 404s; folly needs libaio on Linux
+# and getdeps builds it from source. They are idempotent across re-runs.
 perl -pi -e 's/(#include <atomic>)/$1\n#include <cstring>/ unless /#include <cstring>/' \
     "$FOLLY_DIR/folly/lang/Exception.h"
 perl -pi -e 's/: environ/: (const char**)(environ)/ unless /\(const char\*\*\)\(environ\)/' \
     "$FOLLY_DIR/folly/Subprocess.cpp"
+perl -pi -e 's|https://pagure.io/libaio/archive/libaio-0.3.113/libaio-libaio-0.3.113.tar.gz|https://deb.debian.org/debian/pool/main/liba/libaio/libaio_0.3.113.orig.tar.gz|; s|716c7059703247344eb066b54ecbc3ca2134f0103307192e6c2b7dab5f9528ab|2c44d1c5fd0d43752287c9ae1eb9c023f04ef848ea8d4aafa46e9aedb678200b|; s|subdir = libaio-libaio-0.3.113|subdir = libaio-0.3.113|' \
+    "$FOLLY_DIR/build/fbcode_builder/manifests/libaio"
 
 # getdeps pulls autoconf/automake/libtool from ftpmirror.gnu.org, which
 # intermittently serves an empty archive. getdeps checks the sha256 and dies

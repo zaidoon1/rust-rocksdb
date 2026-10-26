@@ -1,0 +1,39 @@
+Cargo.lock
+  s_1fe41c7c8dc703::t_579d1c2e95d0b3 650
+Cargo.toml
+  s_1fe41c7c8dc703::t_1a2a9804b103b1 77
+librocksdb-sys/Cargo.toml
+  s_1fe41c7c8dc703::t_227e49d171f279 3
+librocksdb-sys/build_version.cc
+  s_1fe41c7c8dc703::t_b92dbf01c580b6 11-12,17,21
+librocksdb-sys/rocksdb
+  s_1fe41c7c8dc703::t_6b72af47945e4a 1
+librocksdb-sys/rocksdb_lib_sources.txt
+  s_1fe41c7c8dc703::t_1698c5b4f6b595 50,87,103,105,191,225
+src/db_options.rs
+  s_1fe41c7c8dc703::t_6aabe5117d962a 790
+src/statistics.rs
+  s_1fe41c7c8dc703::t_73974b5bea87c4 206
+src/statistics_enum_ticker.rs
+  s_1fe41c7c8dc703::t_eb3db3d38c4494 271-274
+tests/test_db.rs
+  s_1fe41c7c8dc703::t_c5e5df237ea9b1 1863
+tests/test_table_properties.rs
+  s_1fe41c7c8dc703::t_b24ed7cf088874 479
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6966dd7701e3a9b4ecba7822f9baa7a736c2ea17",
+  "prompts": {},
+  "sessions": {
+    "s_1fe41c7c8dc703": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "745d95ca-5626-43d7-aa77-a86c6faacb32",
+        "model": "unknown"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    }
+  }
+}

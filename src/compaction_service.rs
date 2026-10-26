@@ -1306,10 +1306,17 @@ impl Drop for OpenAndCompactOptions {
 /// returned bytes are what [`CompactionService::wait`] should write into its
 /// result.
 ///
-/// `db_path` is the source DB, opened read only. `output_directory` is where
-/// the new SST files are written, and the primary renames them out of there
-/// when it installs the result. It must be empty going in, because this
-/// entry point has no
+/// `db_path` is the source DB, opened read only. `output_directory` names the
+/// directory under `db_path` where the new SST files are written, and the
+/// primary renames them out of there when it installs the result. A bare name
+/// such as `job_17` resolves to `db_path/job_17`, and a path that already
+/// starts with `db_path/` is used as is. Anything else is treated as a name
+/// too, so an absolute path outside `db_path` ends up nested inside it rather
+/// than where it points. With the `use_session_tmp_dir_for_remote_compaction`
+/// DB option on, it must be a bare name, and resolves under
+/// `db_path/session_tmp/`.
+///
+/// The directory must be empty going in, because this entry point has no
 /// [`allow_resumption`](OpenAndCompactOptions::set_allow_resumption) control
 /// and upstream requires an empty directory without it.
 ///

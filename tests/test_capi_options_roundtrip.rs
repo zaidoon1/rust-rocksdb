@@ -320,18 +320,6 @@ fn roundtrip_ingest_external_file_options() {
         !o.get_verify_file_checksum(),
         "IngestExternalFileOptions::verify_file_checksum"
     );
-    let mut o = IngestExternalFileOptions::default();
-    o.set_write_global_seqno(true);
-    assert!(
-        o.get_write_global_seqno(),
-        "IngestExternalFileOptions::write_global_seqno"
-    );
-    let mut o = IngestExternalFileOptions::default();
-    o.set_write_global_seqno(false);
-    assert!(
-        !o.get_write_global_seqno(),
-        "IngestExternalFileOptions::write_global_seqno"
-    );
 }
 
 #[test]

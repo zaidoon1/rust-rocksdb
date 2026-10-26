@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+### Breaking changes
+
+- breaking: remove `IngestExternalFileOptions::set_write_global_seqno`,
+  `IngestExternalFileOptions::get_write_global_seqno` and
+  `TableProperties::external_sst_file_global_seqno_offset`. RocksDB 11.12
+  removed the option and the table property along with their C API. The
+  option has defaulted to false since RocksDB 8.0, so ingestion records the
+  global sequence number in the MANIFEST rather than rewriting the file.
+  Files written the old way remain readable.
+- breaking: `open_and_compact` and `open_and_compact_with_options` now
+  resolve `output_directory` under the source DB. RocksDB 11.11 changed
+  `DB::OpenAndCompact` so a bare name becomes `db_path/<name>`, and a path
+  already under `db_path/` is used as is. Anything else is treated as a
+  name and appended to `db_path`, so a worker that wrote to an absolute
+  path outside the DB now fails with `IO error: No such file or
+  directory` when RocksDB tries to create that path inside the DB
+  directory. Pass a directory name, or a path under `db_path`.
+
+### Features
+
+- feat(librocksdb-sys): upgrade the bundled RocksDB submodule to 11.12.0.
+  Adds the four `BlobDbLazy*` tickers to the generated enums. Upstream
+  tagged this release `v11.12`, and `version.h` reads 11.12.0, so that is
+  what the library reports. Release notes:
+  [11.9.0 through 11.12.0](https://github.com/facebook/rocksdb/blob/v11.12/HISTORY.md).
+
 ## 0.53.0 (2026-09-05)
 
 This release adds broad safe-wrapper coverage for the bundled RocksDB 11.8.1 C

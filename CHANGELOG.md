@@ -28,6 +28,13 @@
   what the library reports. Release notes:
   [11.9.0 through 11.12.0](https://github.com/facebook/rocksdb/blob/v11.12/HISTORY.md).
 
+### Build
+
+- build: `scripts/build_folly.sh` now applies the libaio manifest fix from
+  RocksDB 11.12's `folly.mk`. Pagure was decommissioned, so getdeps' libaio
+  download 404s and a cold `coroutines` folly build fails. The script now
+  fetches Debian's copy of the same release archive, as upstream does.
+
 ## 0.53.0 (2026-09-05)
 
 This release adds broad safe-wrapper coverage for the bundled RocksDB 11.8.1 C

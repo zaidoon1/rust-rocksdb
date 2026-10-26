@@ -1,0 +1,21 @@
+CHANGELOG.md
+  s_1fe41c7c8dc703::t_dfc448350d8eee 31-37
+scripts/build_folly.sh
+  s_1fe41c7c8dc703::t_8be4cd9234c7f8 11,151-156,161-162
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "43a7a5b4413b4ceb48e019f4c5ac060bfeaef024",
+  "prompts": {},
+  "sessions": {
+    "s_1fe41c7c8dc703": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "745d95ca-5626-43d7-aa77-a86c6faacb32",
+        "model": "unknown"
+      },
+      "human_author": "zaidoon <zaidoon@cloudflare.com>"
+    }
+  }
+}

@@ -5228,9 +5228,10 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
 
     /// Builds a replayer that replays the trace at `trace_path` against this DB.
     ///
-    /// `column_families` must name every column family the trace touched, or
-    /// replay fails with `Corruption: Invalid Column Family ID.`. An empty list
-    /// means the default column family only.
+    /// `column_families` must name every column family other than the default
+    /// that the trace touched, or replay fails with
+    /// `Corruption: Invalid Column Family ID.`. The default column family is
+    /// always included, so an empty list replays it alone.
     ///
     /// # Errors
     ///

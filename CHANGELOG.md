@@ -12,6 +12,7 @@
   so only direct users of `rust-librocksdb-sys` that enable `zlib` without
   `static` were exposed. If an exposed build ran with secrets in its
   environment, clear any cached `target/` directories and rotate the secrets.
+  ([#313](https://github.com/zaidoon1/rust-rocksdb/pull/313))
 
 ## 0.54.0 (2026-10-26)
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Security
+
+- fix(librocksdb-sys): require `libz-sys` 1.1.31 (was 1.1). Earlier versions
+  print the whole build environment, secrets included, to their build script
+  output under `target/` when built with `cc` 1.6 or later on a Unix host
+  ([RUSTSEC-2026-0418](https://rustsec.org/advisories/RUSTSEC-2026-0418)).
+  `rust-rocksdb` always links zlib statically, which skips the leaking probe,
+  so only direct users of `rust-librocksdb-sys` that enable `zlib` without
+  `static` were exposed. If an exposed build ran with secrets in its
+  environment, clear any cached `target/` directories and rotate the secrets.
+  ([#313](https://github.com/zaidoon1/rust-rocksdb/pull/313))
+
 ## 0.54.0 (2026-10-26)
 
 This release moves the bundled RocksDB from 11.8.1 to 11.12.0 and adds

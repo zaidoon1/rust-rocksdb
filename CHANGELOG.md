@@ -25,7 +25,7 @@
   unchanged and still create a private limiter per `Options`.
   `rust-librocksdb-sys` adds the `rust_rocksdb_ratelimiter_*` C API
   extensions behind it, since RocksDB's C API cannot change a limiter's rate.
-  (Zhixin Wen) ([#PR](https://github.com/zaidoon1/rust-rocksdb/pull/PR))
+  (Zhixin Wen) ([#317](https://github.com/zaidoon1/rust-rocksdb/pull/317))
 
 ## 0.54.0 (2026-10-26)
 

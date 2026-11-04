@@ -20,6 +20,7 @@
 #include "rocksdb/db.h"
 #include "rocksdb/listener.h"
 #include "rocksdb/options.h"
+#include "rocksdb/rate_limiter.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/version.h"
 #include "rocksdb/write_batch.h"
@@ -33,6 +34,7 @@ using ROCKSDB_NAMESPACE::ExternalFileIngestionInfo;
 using ROCKSDB_NAMESPACE::FlushJobInfo;
 using ROCKSDB_NAMESPACE::Options;
 using ROCKSDB_NAMESPACE::PinnableSlice;
+using ROCKSDB_NAMESPACE::RateLimiter;
 using ROCKSDB_NAMESPACE::ReadOptions;
 using ROCKSDB_NAMESPACE::Slice;
 using ROCKSDB_NAMESPACE::Snapshot;
@@ -319,6 +321,7 @@ extern "C" void rust_rocksdb_options_add_eventlistener(
 //   struct rocksdb_readoptions_t { ReadOptions rep; /* trailing Slices */ };
 //   struct rocksdb_options_t { Options rep; };
 //   struct rocksdb_writebatch_t { WriteBatch rep; };
+//   struct rocksdb_ratelimiter_t { std::shared_ptr<RateLimiter> rep; };
 //
 // In every case the `rep` field is the FIRST member, so a pointer to the
 // opaque C type also points at the start of its embedded C++ `rep` field.
@@ -332,8 +335,8 @@ extern "C" void rust_rocksdb_options_add_eventlistener(
 // every path through one of these casts writes to one offset while
 // rocksdb's internal code reads from another, so the value never makes it
 // across. `tests/test_db_maintenance.rs`, `tests/test_event_listener.rs`,
-// `tests/test_multiget_pinned.rs`, `tests/test_batched_pinned_multiget.rs`
-// and, for the `rocksdb_snapshot_t` cast below,
+// `tests/test_multiget_pinned.rs`, `tests/test_batched_pinned_multiget.rs`,
+// `tests/test_rate_limiter.rs` and, for the `rocksdb_snapshot_t` cast below,
 // `transaction_snapshot_sequence_number_without_set_snapshot` in
 // `tests/test_transaction_db.rs` each exercise one of these casts, so a
 // layout regression is detectable.
@@ -921,4 +924,40 @@ extern "C" unsigned char rust_rocksdb_snapshot_try_get_sequence_number(
   }
   *seqno = rep->GetSequenceNumber();
   return 1;
+}
+
+// -----------------------------------------------------------------------------
+// Runtime-adjustable RateLimiter
+//
+// `rocksdb_ratelimiter_t` is `struct { std::shared_ptr<RateLimiter> rep; }`
+// (db/c.cc), so a pointer to the opaque handle is also a pointer to its `rep`
+// field. See the layout note above for why this file uses a reinterpret_cast
+// rather than re-declaring the struct. `tests/test_rate_limiter.rs` checks
+// that a rate set here is the rate RocksDB reports back.
+// -----------------------------------------------------------------------------
+
+static RateLimiter* RustRocksDbRateLimiterRep(rocksdb_ratelimiter_t* limiter) {
+  return reinterpret_cast<std::shared_ptr<RateLimiter>*>(limiter)->get();
+}
+
+extern "C" void rust_rocksdb_ratelimiter_set_bytes_per_second(
+    rocksdb_ratelimiter_t* limiter, int64_t bytes_per_second) {
+  RustRocksDbRateLimiterRep(limiter)->SetBytesPerSecond(bytes_per_second);
+}
+
+extern "C" int64_t rust_rocksdb_ratelimiter_get_bytes_per_second(
+    rocksdb_ratelimiter_t* limiter) {
+  return RustRocksDbRateLimiterRep(limiter)->GetBytesPerSecond();
+}
+
+extern "C" int64_t rust_rocksdb_ratelimiter_get_total_bytes_through(
+    rocksdb_ratelimiter_t* limiter) {
+  return RustRocksDbRateLimiterRep(limiter)->GetTotalBytesThrough(
+      ROCKSDB_NAMESPACE::Env::IO_TOTAL);
+}
+
+extern "C" int64_t rust_rocksdb_ratelimiter_get_total_requests(
+    rocksdb_ratelimiter_t* limiter) {
+  return RustRocksDbRateLimiterRep(limiter)->GetTotalRequests(
+      ROCKSDB_NAMESPACE::Env::IO_TOTAL);
 }

@@ -27,6 +27,7 @@ use crate::event_listener::{EventListener, new_event_listener};
 use crate::ffi_util::from_cstr_and_free;
 use crate::file_checksum::FileChecksumGenFactory;
 use crate::metadata::FileType;
+use crate::rate_limiter::RateLimiter;
 use crate::sst_file_manager::SstFileManager;
 use crate::sst_partitioner::SstPartitionerFactory;
 use crate::statistics::{Histogram, HistogramData, StatsLevel};
@@ -74,6 +75,7 @@ pub(crate) struct OptionsMustOutliveDB {
     block_based: Option<BlockBasedOptionsMustOutliveDB>,
     write_buffer_manager: Option<WriteBufferManager>,
     sst_file_manager: Option<SstFileManager>,
+    rate_limiter: Option<RateLimiter>,
     log_callback: Option<Arc<LogCallback>>,
     comparator: Option<Arc<Comparator>>,
     compaction_filter: Option<Arc<OwnedCompactionFilter>>,
@@ -93,6 +95,7 @@ impl OptionsMustOutliveDB {
                 .map(BlockBasedOptionsMustOutliveDB::clone),
             write_buffer_manager: self.write_buffer_manager.clone(),
             sst_file_manager: self.sst_file_manager.clone(),
+            rate_limiter: self.rate_limiter.clone(),
             log_callback: self.log_callback.clone(),
             comparator: self.comparator.clone(),
             compaction_filter: self.compaction_filter.clone(),
@@ -4583,6 +4586,10 @@ impl Options {
     ///
     /// Default: disable
     ///
+    /// This creates a limiter private to these options whose rate cannot be
+    /// changed later. To share one limiter across DBs or adjust its rate at
+    /// runtime, use [`Options::set_rate_limiter`] with a [`RateLimiter`].
+    ///
     /// # Examples
     ///
     /// ```
@@ -4610,6 +4617,10 @@ impl Options {
     /// If rate limiter is enabled, bytes_per_sync is set to 1MB by default.
     ///
     /// Default: disable
+    ///
+    /// This creates a limiter private to these options whose rate cannot be
+    /// changed later. To share one limiter across DBs or adjust its rate at
+    /// runtime, use [`Options::set_rate_limiter`] with a [`RateLimiter`].
     pub fn set_auto_tuned_ratelimiter(
         &mut self,
         rate_bytes_per_sec: i64,
@@ -4654,6 +4665,11 @@ impl Options {
     /// auto_tuned: Enables dynamic adjustment of rate limit within the range
     ///              `[rate_bytes_per_sec / 20, rate_bytes_per_sec]`, according to
     ///              the recent demand for background I/O.
+    ///
+    /// Despite the description above, the limiter created here is private to
+    /// these options and its rate cannot be changed later. To share one
+    /// limiter across DBs or adjust its rate at runtime, use
+    /// [`Options::set_rate_limiter`] with a [`RateLimiter`].
     pub fn set_ratelimiter_with_mode(
         &mut self,
         rate_bytes_per_sec: i64,
@@ -4673,6 +4689,42 @@ impl Options {
             ffi::rocksdb_options_set_ratelimiter(self.inner, ratelimiter);
             ffi::rocksdb_ratelimiter_destroy(ratelimiter);
         }
+    }
+
+    /// Sets a shared [`RateLimiter`] to control the I/O rate of flush and
+    /// compaction.
+    ///
+    /// The same limiter can be set on the options of many DBs, which then
+    /// share one I/O budget. Changing the rate with
+    /// [`RateLimiter::set_bytes_per_second`] takes effect for all of them
+    /// immediately. The limiter stays alive as long as these options or any
+    /// DB opened with them, even if every `RateLimiter` handle is dropped.
+    ///
+    /// Replaces any limiter set earlier, including one set with
+    /// [`Options::set_ratelimiter`].
+    /// If rate limiter is enabled, bytes_per_sync is set to 1MB by default.
+    ///
+    /// Default: disable
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_rocksdb::{Options, RateLimiter};
+    ///
+    /// let limiter = RateLimiter::new(1024 * 1024, 100 * 1000, 10);
+    /// let mut options = Options::default();
+    /// options.set_rate_limiter(&limiter);
+    ///
+    /// // Later, from anywhere holding a clone of `limiter`:
+    /// limiter.set_bytes_per_second(2 * 1024 * 1024);
+    /// ```
+    pub fn set_rate_limiter(&mut self, limiter: &RateLimiter) {
+        unsafe {
+            // Copies the C++ shared_ptr into the options, so RocksDB holds its
+            // own reference; the handle itself is not consumed.
+            ffi::rocksdb_options_set_ratelimiter(self.inner, limiter.0.inner.as_ptr());
+        }
+        self.outlive.rate_limiter = Some(limiter.clone());
     }
 
     /// Sets the maximal size of the info log file.

@@ -101,7 +101,7 @@ jobs:
         uses: ./.github/actions/runner-image
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
         with:
           cache-key: "v1-rust-coroutines-${{ steps.image.outputs.id }}"
           # Populate the cache from master runs only, not from PR runs.
@@ -198,7 +198,7 @@ jobs:
           fi
           echo "LD_LIBRARY_PATH=$RUNTIME_LIBDIRS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
 
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: nextest
 

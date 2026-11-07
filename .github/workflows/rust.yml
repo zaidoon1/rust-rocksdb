@@ -29,7 +29,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
         with:
           components: rustfmt
           cache: false
@@ -141,7 +141,7 @@ jobs:
         uses: ./.github/actions/runner-image
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
         with:
           components: rust-docs
           cache-key: "v1-rust-docs-${{ steps.image.outputs.id }}"
@@ -184,7 +184,7 @@ jobs:
         uses: ./.github/actions/runner-image
 
       - name: Install rust nightly
-        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
         with:
           toolchain: nightly
           components: rust-docs
@@ -213,7 +213,7 @@ jobs:
         uses: ./.github/actions/runner-image
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
         with:
           components: clippy
           cache-key: ${{ steps.image.outputs.id }}
@@ -275,7 +275,7 @@ jobs:
         uses: ./.github/actions/runner-image
 
       - name: Install rust ${{ steps.msrv.outputs.version }}
-        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
         with:
           toolchain: ${{ steps.msrv.outputs.version }}
           cache-key: "v1-rust-msrv-${{ steps.image.outputs.id }}"
@@ -315,7 +315,7 @@ jobs:
         uses: ./.github/actions/runner-image
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
         with:
           # Nothing this job caches may contain machine code. `native` bakes
           # whatever the saving runner supported into every host artifact,
@@ -334,7 +334,7 @@ jobs:
           rustflags: ""
           build-warnings: ""
 
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: nextest
 
@@ -380,7 +380,7 @@ jobs:
         uses: ./.github/actions/runner-image
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
         with:
           cache-key: "v1-rust-features-${{ steps.image.outputs.id }}"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
@@ -415,7 +415,7 @@ jobs:
         uses: ./.github/actions/runner-image
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
         with:
           cache-key: "v1-rust-package-${{ steps.image.outputs.id }}"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
@@ -552,12 +552,12 @@ jobs:
         uses: ./.github/actions/runner-image
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
         with:
           cache-key: "v1-rust-semver-${{ steps.image.outputs.id }}"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: cargo-semver-checks
 
@@ -649,12 +649,12 @@ jobs:
         uses: ./.github/actions/runner-image
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
         with:
           cache-key: ${{ steps.image.outputs.id }}
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: nextest
 
@@ -746,12 +746,12 @@ jobs:
         uses: ./.github/actions/runner-image
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
         with:
           cache-key: "v1-rust-jemalloc-${{ steps.image.outputs.id }}"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: nextest
 
@@ -791,12 +791,12 @@ jobs:
         uses: ./.github/actions/runner-image
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
         with:
           cache-key: "v1-rust-release-${{ steps.image.outputs.id }}"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: nextest
 
@@ -818,7 +818,7 @@ jobs:
         uses: ./.github/actions/runner-image
 
       - name: Install rust nightly
-        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
         with:
           toolchain: nightly
           components: rust-src

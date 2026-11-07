@@ -48,7 +48,7 @@ jobs:
         uses: ./.github/actions/runner-image
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
         with:
           cache-key: "v1-rust-ubsan-${{ steps.image.outputs.id }}"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}
@@ -104,7 +104,7 @@ jobs:
         uses: ./.github/actions/runner-image
 
       - name: Install rust nightly
-        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
         with:
           toolchain: nightly
           components: rust-src
@@ -156,7 +156,7 @@ jobs:
         uses: ./.github/actions/runner-image
 
       - name: Install rust
-        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
         with:
           cache-key: "v1-rust-valgrind-${{ steps.image.outputs.id }}"
           cache-save-if: ${{ github.ref == 'refs/heads/master' }}

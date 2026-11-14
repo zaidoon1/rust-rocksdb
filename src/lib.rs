@@ -113,6 +113,7 @@ pub mod metadata;
 pub mod perf;
 mod prop_name;
 pub mod properties;
+mod rate_limiter;
 mod slice_transform;
 mod snapshot;
 pub mod sst_file_manager;
@@ -178,6 +179,7 @@ pub use crate::{
         LiveFilesStorageInfo, LiveFilesStorageInfoOptions, SstFileMetaData, Temperature,
     },
     perf::{PerfContext, PerfMetric, PerfStatsLevel, with_thread_local},
+    rate_limiter::RateLimiter,
     slice_transform::SliceTransform,
     snapshot::{Snapshot, SnapshotReadOptions, SnapshotWithThreadMode},
     sst_file_manager::SstFileManager,
@@ -337,6 +339,7 @@ mod test {
         OptimisticTransactionDB, OptimisticTransactionOptions, Transaction, TransactionDB,
         TransactionDBOptions, TransactionOptions,
         cache::{Cache, CacheWrapper},
+        rate_limiter::{RateLimiter, RateLimiterWrapper},
         write_buffer_manager::{WriteBufferManager, WriteBufferManagerWrapper},
     };
 
@@ -385,6 +388,8 @@ mod test {
         is_send::<TransactionOptions>();
         is_send::<WriteBufferManager>();
         is_send::<WriteBufferManagerWrapper>();
+        is_send::<RateLimiter>();
+        is_send::<RateLimiterWrapper>();
     }
 
     #[test]
@@ -416,6 +421,8 @@ mod test {
         is_sync::<TransactionDBOptions>();
         is_sync::<OptimisticTransactionOptions>();
         is_sync::<TransactionOptions>();
+        is_sync::<RateLimiter>();
+        is_sync::<RateLimiterWrapper>();
         is_sync::<WriteBufferManager>();
         is_sync::<WriteBufferManagerWrapper>();
     }

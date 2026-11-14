@@ -230,6 +230,27 @@ extern ROCKSDB_LIBRARY_API unsigned char
 rust_rocksdb_snapshot_try_get_sequence_number(const rocksdb_snapshot_t*,
                                              uint64_t* seqno);
 
+/* -------------------------------------------------------------------------
+ * Runtime-adjustable RateLimiter
+ *
+ * The upstream C API can create a rate limiter and attach it to options, but
+ * cannot change its rate afterwards or read its counters. RateLimiter is
+ * designed to be shared by many DBs and retuned at runtime
+ * (`RateLimiter::SetBytesPerSecond`), so these accessors expose that surface.
+ *
+ * `rocksdb_ratelimiter_set_bytes_per_second` requires `bytes_per_second > 0`
+ * (RocksDB asserts on it). The counters are summed over every priority
+ * (`Env::IO_TOTAL`).
+ * ------------------------------------------------------------------------- */
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_ratelimiter_set_bytes_per_second(
+    rocksdb_ratelimiter_t*, int64_t bytes_per_second);
+extern ROCKSDB_LIBRARY_API int64_t
+rust_rocksdb_ratelimiter_get_bytes_per_second(rocksdb_ratelimiter_t*);
+extern ROCKSDB_LIBRARY_API int64_t
+rust_rocksdb_ratelimiter_get_total_bytes_through(rocksdb_ratelimiter_t*);
+extern ROCKSDB_LIBRARY_API int64_t
+rust_rocksdb_ratelimiter_get_total_requests(rocksdb_ratelimiter_t*);
+
 #ifdef __cplusplus
 }
 #endif

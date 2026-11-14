@@ -14,6 +14,19 @@
   environment, clear any cached `target/` directories and rotate the secrets.
   ([#313](https://github.com/zaidoon1/rust-rocksdb/pull/313))
 
+### New APIs
+
+- feat: add `RateLimiter`, a rate limiter handle that many DBs can share and
+  whose rate can be changed at runtime. Create it with `RateLimiter::new`,
+  `new_auto_tuned` or `new_with_mode`, attach it with
+  `Options::set_rate_limiter`, and adjust it with `set_bytes_per_second`. It
+  also reports `get_bytes_per_second`, `get_total_bytes_through` and
+  `get_total_requests`. The existing `Options::set_ratelimiter*` methods are
+  unchanged and still create a private limiter per `Options`.
+  `rust-librocksdb-sys` adds the `rust_rocksdb_ratelimiter_*` C API
+  extensions behind it, since RocksDB's C API cannot change a limiter's rate.
+  (Zhixin Wen) ([#317](https://github.com/zaidoon1/rust-rocksdb/pull/317))
+
 ## 0.54.0 (2026-10-26)
 
 This release moves the bundled RocksDB from 11.8.1 to 11.12.0 and adds

@@ -14,6 +14,17 @@
   environment, clear any cached `target/` directories and rotate the secrets.
   ([#313](https://github.com/zaidoon1/rust-rocksdb/pull/313))
 
+### Performance
+
+- fix(librocksdb-sys): pass `-fno-builtin-memcmp` only to GCC, as upstream
+  RocksDB does. 0.52.0 started passing it on every non-MSVC target, and
+  under Clang it tags every RocksDB function with an attribute that LLVM
+  won't inline into Rust code, so the `lto` feature with
+  `-Clinker-plugin-lto` couldn't inline C API functions into their Rust
+  callers. Under Clang, RocksDB's `memcmp` calls now use Clang's builtin,
+  which still calls libc when the length isn't known at compile time.
+  ([#324](https://github.com/zaidoon1/rust-rocksdb/pull/324))
+
 ## 0.54.0 (2026-10-26)
 
 This release moves the bundled RocksDB from 11.8.1 to 11.12.0 and adds

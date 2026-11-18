@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.54.1 (2026-11-18)
+
+This release fixes two problems in how `rust-librocksdb-sys` builds RocksDB.
+It requires `libz-sys` 1.1.31 for RUSTSEC-2026-0418, and it stops passing
+`-fno-builtin-memcmp` to Clang, which kept the `lto` feature from inlining
+C API calls into Rust. There are no API changes.
+
+`rust-librocksdb-sys` moves to 0.49.1+11.12.0.
 
 ### Security
 

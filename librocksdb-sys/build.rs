@@ -712,14 +712,20 @@ mod vendor {
             cfg.flag("-std:c++20");
         } else {
             cfg.flag(cxx_standard());
-            // Upstream passes this on GCC (CMakeLists.txt) and on essentially
-            // every POSIX target (build_tools/build_detect_platform). GCC
-            // inline-expands `memcmp` for unknown lengths, which is slower than
-            // glibc's SIMD `memcmp` at the key sizes RocksDB compares; this
-            // flag keeps the library call. It affects `Slice::compare`, the
-            // `dbformat.cc` comparators and the block binary search, so it is
-            // squarely on the read hot path.
-            cfg.flag_if_supported("-fno-builtin-memcmp");
+            // GCC inline-expands `memcmp` for unknown lengths, which is slower
+            // than glibc's SIMD `memcmp` at the key sizes RocksDB compares;
+            // this flag keeps the library call. It affects `Slice::compare`,
+            // the `dbformat.cc` comparators and the block binary search, so it
+            // is squarely on the read hot path. Upstream's CMakeLists.txt only
+            // passes it to GCC, and build_tools/build_detect_platform skips it
+            // on Linux under USE_CLANG. Under Clang the flag tags every
+            // function with a `no-builtin-memcmp` attribute, and LLVM won't
+            // inline such a function into a caller that lacks it, so with the
+            // `lto` feature and `-Clinker-plugin-lto` no C API function could
+            // be inlined into its Rust caller.
+            if cfg.get_compiler().is_like_gnu() {
+                cfg.flag_if_supported("-fno-builtin-memcmp");
+            }
             // Mirrors RocksDB's CMakeLists.txt warning flags.
             for f in [
                 "-Wsign-compare",
